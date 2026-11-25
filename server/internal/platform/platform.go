@@ -168,6 +168,9 @@ type SessionStart struct {
 	NodeID         string     // '' = scheduled
 	Branch         string     // the work branch's name after session/<id>-; '' = from the title or the repositories
 	Repos          []SessionRepo
+	// Attachments are attachment ids (already moved into the session's project) going with the
+	// first message.
+	Attachments []string
 }
 
 // SessionRepo is a session repository (the project's spelling) with the branch picked for it.

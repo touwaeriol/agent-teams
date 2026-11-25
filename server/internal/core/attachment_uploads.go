@@ -26,9 +26,28 @@ var (
 	ErrAttachmentTooLarge = fmt.Errorf("附件太大：单个附件最多 %d MB", MaxAttachmentBytes>>20)
 )
 
+// AttachmentOwner scopes an attachment: one of a project (ProjectID set), or one a user uploaded
+// before its project existed (ProjectID "", UserID set: POST /api/uploads, #58 D6).
+type AttachmentOwner struct {
+	ProjectID string
+	UserID    string
+}
+
+// OwnerOfProject is the owner scope of a project's attachments.
+func OwnerOfProject(projectID string) AttachmentOwner { return AttachmentOwner{ProjectID: projectID} }
+
+// where is the SQL condition (and its argument) selecting the owner's rows.
+func (o AttachmentOwner) where() (string, string) {
+	if o.ProjectID != "" {
+		return "project_id = ?", o.ProjectID
+	}
+	return "project_id IS NULL AND user_id = ?", o.UserID
+}
+
 // BeginAttachmentUpload records a new attachment (state=uploading, kept for ttl like any other)
 // and opens its multipart upload. Any type is accepted; the type is decided at completion from the
-// bytes and the name (DetectType).
+// bytes and the name (DetectType). With projectID "" the attachment has no project yet (key
+// users/<uid>/attachments/<id>; AdoptAttachments gives it one).
 func BeginAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, ttl time.Duration, projectID, userID, name string, size int64) (Attachment, error) {
 	switch {
 	case size > MaxAttachmentBytes:
@@ -43,6 +62,10 @@ func BeginAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, ttl ti
 	a := Attachment{ID: NewID("img"), ProjectID: projectID, UserID: userID, Name: name,
 		ContentType: DetectType(name, nil, size), Size: int(size), State: "uploading", ExpiresAt: time.Now().Add(ttlOr(ttl))}
 	key := blobstore.AttachmentKey(projectID, a.ID)
+	var pid any = projectID
+	if projectID == "" {
+		key, pid = blobstore.UserAttachmentKey(userID, a.ID), nil
+	}
 	// A rollback after this leaves an upload no row knows: blobgc aborts it after a day.
 	uploadID, err := bs.CreateMultipart(ctx, key, "application/octet-stream")
 	if err != nil {
@@ -51,7 +74,7 @@ func BeginAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, ttl ti
 	a.StorageKey = &key
 	err = q.Gorm(ctx).Raw(`INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, storage_key, state,
 		upload_id, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'uploading', ?, ?) RETURNING created_at`,
-		a.ID, projectID, userID, name, a.ContentType, size, key, uploadID, a.ExpiresAt).Row().Scan(&a.CreatedAt)
+		a.ID, pid, userID, name, a.ContentType, size, key, uploadID, a.ExpiresAt).Row().Scan(&a.CreatedAt)
 	return a, err
 }
 
@@ -61,10 +84,12 @@ type attachmentUpload struct {
 	UploadID *string
 }
 
-// UploadingAttachment loads one of the project's attachments still uploading.
-func UploadingAttachment(ctx context.Context, q DB, projectID, id string) (Attachment, string, error) {
-	rows, err := find[attachmentUpload](q.Gorm(ctx).Table("at_attachments").Omit("data").
-		Where("id = ? AND project_id = ? AND state = 'uploading'", id, projectID))
+// UploadingAttachment loads one of the owner's attachments still uploading.
+func UploadingAttachment(ctx context.Context, q DB, owner AttachmentOwner, id string) (Attachment, string, error) {
+	cond, arg := owner.where()
+	rows, err := find[attachmentUpload](q.Gorm(ctx).Table("at_attachments").Select("id, COALESCE(project_id, '') AS project_id, "+
+		"user_id, name, content_type, size, COALESCE(sha256, '') AS sha256, created_at, storage_key, state, expires_at, upload_id").
+		Where("id = ? AND state = 'uploading'", id).Where(cond, arg))
 	if err != nil {
 		return Attachment{}, "", err
 	}
@@ -79,12 +104,12 @@ func UploadingAttachment(ctx context.Context, q DB, projectID, id string) (Attac
 // bytes for the type and marks the row ready (retention pushed to now()+ttl). If the row went
 // meanwhile (the project or thread was deleted while the browser uploaded) the object is deleted.
 // sha256 stays NULL; blobgc computes it. q is the pool (each step commits on its own).
-func CompleteAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, ttl time.Duration, projectID, id string, parts []blobstore.Part) (Attachment, error) {
+func CompleteAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, ttl time.Duration, owner AttachmentOwner, id string, parts []blobstore.Part) (Attachment, error) {
 	bs = blobstore.Or(bs)
 	if !bs.Configured() {
 		return Attachment{}, blobstore.ErrNotConfigured
 	}
-	a, uploadID, err := UploadingAttachment(ctx, q, projectID, id)
+	a, uploadID, err := UploadingAttachment(ctx, q, owner, id)
 	if err != nil {
 		return a, err
 	}
@@ -122,8 +147,9 @@ func CompleteAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, ttl
 	var done []Attachment
 	err = q.Gorm(ctx).Raw(`UPDATE at_attachments SET state = 'ready', content_type = ?, upload_id = NULL,
 		expires_at = GREATEST(expires_at, now() + make_interval(secs => ?))
-		WHERE id = ? AND project_id = ? AND state = 'uploading' RETURNING id, project_id, user_id, name, content_type, size,
-		sha256, created_at, storage_key, state, expires_at`, a.ContentType, ttlOr(ttl).Seconds(), a.ID, projectID).Scan(&done).Error
+		WHERE id = ? AND user_id = ? AND state = 'uploading' RETURNING id, COALESCE(project_id, '') AS project_id, user_id, name,
+		content_type, size, COALESCE(sha256, '') AS sha256, created_at, storage_key, state, expires_at`,
+		a.ContentType, ttlOr(ttl).Seconds(), a.ID, a.UserID).Scan(&done).Error
 	if err != nil {
 		return a, err
 	}
@@ -140,13 +166,14 @@ func CompleteAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, ttl
 
 // AbortAttachmentUpload cancels an attachment still uploading: the row goes, the object (if a
 // part landed and completed) is queued for deletion, the multipart upload is aborted.
-func AbortAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, projectID, id string) error {
+func AbortAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, owner AttachmentOwner, id string) error {
 	var rows []struct {
 		StorageKey *string
 		UploadID   *string
 	}
-	if err := q.Gorm(ctx).Raw(`DELETE FROM at_attachments WHERE id = ? AND project_id = ? AND state = 'uploading'
-		RETURNING storage_key, upload_id`, id, projectID).Scan(&rows).Error; err != nil {
+	cond, arg := owner.where()
+	if err := q.Gorm(ctx).Raw(`DELETE FROM at_attachments WHERE id = ? AND state = 'uploading' AND `+cond+`
+		RETURNING storage_key, upload_id`, id, arg).Scan(&rows).Error; err != nil {
 		return err
 	}
 	if len(rows) == 0 || rows[0].StorageKey == nil {

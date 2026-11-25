@@ -40,6 +40,7 @@ type SessionInput struct {
 	Effort         string `json:"effort,omitempty" maxLength:"32" doc:"Thinking effort; '' = project / role setting"`
 	NodeID         string `json:"node_id,omitempty" maxLength:"64" doc:"Run on this node; '' = picked automatically (spread over the nodes by load score; nodes whose quota is tight only when all are)"`
 	Branch         string `json:"branch,omitempty" maxLength:"60" doc:"Name of the work branch (after session/<id>-); '' = from the title, or the repositories when the title has no Latin letters"`
+	Attachments    []string `json:"attachments,omitempty" maxItems:"20" doc:"Attachment ids uploaded with POST /api/uploads (ready, not expired, not yet used): they join the session's project and go with the first message"`
 }
 
 // WorkSessionView is the 多仓库会话 just created (SessionView is the login session).
@@ -88,8 +89,14 @@ func (s *Server) createSession(ctx context.Context, in *createSessionInput) (*se
 		return nil, err
 	}
 	start.Message, start.Repos = message, sessionRepos(repos, b.Repos)
-	row, err := s.createSessionProject(ctx, p.User.ID, start.Title, repos)
-	if err != nil {
+	start.Attachments = dedupeIDs(b.Attachments)
+	row, err := s.createSessionProject(ctx, p.User.ID, start.Title, repos, start.Attachments)
+	switch {
+	case errors.Is(err, store.ErrAttachmentExpired):
+		return nil, fail(http.StatusGone, "attachment_expired", err.Error())
+	case errors.Is(err, store.ErrAttachmentUnknown):
+		return nil, invalid([]FieldError{{"attachments", err.Error()}}, err.Error())
+	case err != nil:
 		return nil, err
 	}
 	t, err := s.hooks.SessionCreated(ctx, row, start)
@@ -227,8 +234,9 @@ func titleOf(message string) string {
 }
 
 // createSessionProject stores the session; a name another project or session has gets a number.
-func (s *Server) createSessionProject(ctx context.Context, userID, title string, repos []store.ProjectRepo) (store.Project, error) {
-	np := store.NewProject{Name: title, Repos: repos, WorkMode: "worktree", Kind: store.KindSession, Delivery: []byte(`{}`)}
+func (s *Server) createSessionProject(ctx context.Context, userID, title string, repos []store.ProjectRepo, attachments []string) (store.Project, error) {
+	np := store.NewProject{Name: title, Repos: repos, WorkMode: "worktree", Kind: store.KindSession, Delivery: []byte(`{}`),
+		Attachments: attachments, AttachmentTTL: s.cfg.AttachmentTTL}
 	for i := 2; i <= 50; i++ {
 		row, err := s.store.CreateProject(ctx, userID, np)
 		if !errors.Is(err, store.ErrConflict) {
@@ -237,6 +245,19 @@ func (s *Server) createSessionProject(ctx context.Context, userID, title string,
 		np.Name = fmt.Sprintf("%s (%d)", title, i)
 	}
 	return store.Project{}, fail(http.StatusConflict, "project_exists", "同名的会话太多了，换个标题吧")
+}
+
+// dedupeIDs drops repeated and empty ids, keeping the order.
+func dedupeIDs(ids []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func refsOf(in []SessionRepoRef) []RepoRef {

@@ -119,6 +119,17 @@ func (a *API) registerUploads(api huma.API, r gin.IRoutes) {
 		a.completeUpload)
 	huma.Register(api, op("abort-upload", "DELETE", "/api/projects/{pid}/uploads/{upload_id}", t, status(204),
 		summary("Cancel an upload in flight")), a.abortUpload)
+	// Attachments uploaded before their project exists (a new plain session's first message):
+	// POST /api/sessions moves them into the session's project (SessionInput.attachments).
+	huma.Register(api, op("create-user-upload", "POST", "/api/uploads", t, status(201),
+		summary("Start a presigned upload of an attachment without a project (kind attachment only; for POST /api/sessions attachments; dropped 24 hours after the last use if never sent)")),
+		a.createUserUpload)
+	huma.Register(api, op("user-upload-part-urls", "POST", "/api/uploads/{upload_id}/parts", t,
+		summary("Presigned PUT URLs for parts of an upload without a project (1 hour)")), a.userUploadParts)
+	huma.Register(api, op("complete-user-upload", "POST", "/api/uploads/{upload_id}/complete", t,
+		summary("Finish an upload without a project: the object's size is checked and its type sniffed")), a.completeUserUpload)
+	huma.Register(api, op("abort-user-upload", "DELETE", "/api/uploads/{upload_id}", t, status(204),
+		summary("Cancel an upload without a project")), a.abortUserUpload)
 	if a.e == nil {
 		r.GET("/nodes/attachments/:id/url", offline)
 		r.POST("/nodes/uploads", offline)
@@ -159,12 +170,7 @@ func (a *API) createUpload(ctx context.Context, in *uploadCreateInput) (*uploadC
 	out := UploadSession{Kind: in.Body.Kind, PartSize: blobstore.PartSize, Parts: blobstore.PartCount(in.Body.Size),
 		ExpiresAt: time.Now().Add(uploadKeep)}
 	if in.Body.Kind == "attachment" {
-		att, err := core.BeginAttachmentUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, a.e.Core.AttachmentTTL, p.ID, u.ID, name, in.Body.Size)
-		if err != nil {
-			return nil, uploadFail(err)
-		}
-		out.UploadID, out.ID = att.ID, att.ID
-		return &uploadCreateOutput{Body: out}, nil
+		return a.beginAttachment(ctx, p.ID, u.ID, name, in.Body.Size, out)
 	}
 	target := in.Body.Path
 	if target == "" {
@@ -185,16 +191,29 @@ func (a *API) createUpload(ctx context.Context, in *uploadCreateInput) (*uploadC
 	return &uploadCreateOutput{Body: out}, nil
 }
 
-// inFlight is an upload's object, its S3 upload id and its part count.
-func (a *API) inFlight(ctx context.Context, pid, id string) (key, uploadID string, parts int32, err error) {
+func (a *API) beginAttachment(ctx context.Context, pid, uid, name string, size int64, out UploadSession) (*uploadCreateOutput, error) {
+	att, err := core.BeginAttachmentUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, a.e.Core.AttachmentTTL, pid, uid, name, size)
+	if err != nil {
+		return nil, uploadFail(err)
+	}
+	out.UploadID, out.ID = att.ID, att.ID
+	return &uploadCreateOutput{Body: out}, nil
+}
+
+// inFlight is an upload's object, its S3 upload id and its part count; owner.ProjectID "" = an
+// attachment without a project (no shared-file uploads there).
+func (a *API) inFlight(ctx context.Context, owner core.AttachmentOwner, id string) (key, uploadID string, parts int32, err error) {
 	if core.IsAttachmentUpload(id) {
-		att, upID, err := core.UploadingAttachment(ctx, a.e.Core.Pool, pid, id)
+		att, upID, err := core.UploadingAttachment(ctx, a.e.Core.Pool, owner, id)
 		if err != nil {
 			return "", "", 0, err
 		}
 		return *att.StorageKey, upID, blobstore.PartCount(int64(att.Size)), nil
 	}
-	up, err := sharedfiles.GetUpload(ctx, a.e.Core.Pool, pid, id)
+	if owner.ProjectID == "" {
+		return "", "", 0, core.ErrNotFound
+	}
+	up, err := sharedfiles.GetUpload(ctx, a.e.Core.Pool, owner.ProjectID, id)
 	if err != nil {
 		return "", "", 0, err
 	}
@@ -209,12 +228,16 @@ func (a *API) uploadParts(ctx context.Context, in *uploadPartsInput) (*uploadPar
 	if err != nil {
 		return nil, err
 	}
-	key, uploadID, n, err := a.inFlight(ctx, p.ID, in.UploadID)
+	return a.partURLs(ctx, core.OwnerOfProject(p.ID), in.UploadID, in.Body.Numbers)
+}
+
+func (a *API) partURLs(ctx context.Context, owner core.AttachmentOwner, id string, numbers []int32) (*uploadPartsOutput, error) {
+	key, uploadID, n, err := a.inFlight(ctx, owner, id)
 	if err != nil {
 		return nil, uploadFail(err)
 	}
-	out := UploadParts{URLs: make([]PartURL, 0, len(in.Body.Numbers)), ExpiresAt: time.Now().Add(partURLTTL)}
-	for _, num := range in.Body.Numbers {
+	out := UploadParts{URLs: make([]PartURL, 0, len(numbers)), ExpiresAt: time.Now().Add(partURLTTL)}
+	for _, num := range numbers {
 		if num < 1 || num > n {
 			return nil, httpapi.Invalid("numbers", fmt.Sprintf("分片号要在 1 到 %d 之间（收到 %d）", n, num))
 		}
@@ -233,12 +256,7 @@ func (a *API) completeUpload(ctx context.Context, in *uploadCompleteInput) (*upl
 		return nil, err
 	}
 	if core.IsAttachmentUpload(in.UploadID) {
-		att, err := core.CompleteAttachmentUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, a.e.Core.AttachmentTTL, p.ID, in.UploadID, in.Body.Parts)
-		if err != nil {
-			return nil, uploadFail(err)
-		}
-		return &uploadCompleteOutput{Body: UploadDone{Kind: "attachment",
-			Attachment: &AttachmentView{Attachment: att, URL: core.AttachmentURLPrefix + att.ID}}}, nil
+		return a.completeAttachment(ctx, core.OwnerOfProject(p.ID), in.UploadID, in.Body.Parts)
 	}
 	var done UploadedSharedFile
 	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error {
@@ -260,17 +278,99 @@ func (a *API) completeUpload(ctx context.Context, in *uploadCompleteInput) (*upl
 	return &uploadCompleteOutput{Body: UploadDone{Kind: "shared", SharedFile: &done}}, nil
 }
 
+func (a *API) completeAttachment(ctx context.Context, owner core.AttachmentOwner, id string, parts []blobstore.Part) (*uploadCompleteOutput, error) {
+	att, err := core.CompleteAttachmentUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, a.e.Core.AttachmentTTL, owner, id, parts)
+	if err != nil {
+		return nil, uploadFail(err)
+	}
+	return &uploadCompleteOutput{Body: UploadDone{Kind: "attachment",
+		Attachment: &AttachmentView{Attachment: att, URL: core.AttachmentURLPrefix + att.ID}}}, nil
+}
+
 func (a *API) abortUpload(ctx context.Context, in *uploadAbortInput) (*struct{}, error) {
 	_, p, err := a.project(ctx, in.PID)
 	if err != nil {
 		return nil, err
 	}
 	if core.IsAttachmentUpload(in.UploadID) {
-		err = core.AbortAttachmentUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, p.ID, in.UploadID)
+		err = core.AbortAttachmentUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, core.OwnerOfProject(p.ID), in.UploadID)
 	} else {
 		err = sharedfiles.AbortUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, p.ID, in.UploadID)
 	}
 	return nil, uploadFail(err)
+}
+
+type userUploadCreateInput struct {
+	Body UploadCreate
+}
+
+type userUploadPartsInput struct {
+	UploadID string `path:"upload_id" maxLength:"64"`
+	Body     UploadPartsAsk
+}
+
+type userUploadCompleteInput struct {
+	UploadID string `path:"upload_id" maxLength:"64"`
+	Body     UploadComplete
+}
+
+type userUploadAbortInput struct {
+	UploadID string `path:"upload_id" maxLength:"64"`
+}
+
+func (a *API) createUserUpload(ctx context.Context, in *userUploadCreateInput) (*uploadCreateOutput, error) {
+	u, err := a.user(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if in.Body.Kind != "attachment" {
+		return nil, httpapi.Invalid("kind", "没有项目时只能上传附件（kind=attachment）；共享文件要传到项目里")
+	}
+	name := uploadName(in.Body.Name)
+	if name == "" || name == "." || name == "/" {
+		return nil, httpapi.Invalid("name", "文件名是空的")
+	}
+	out := UploadSession{Kind: in.Body.Kind, PartSize: blobstore.PartSize, Parts: blobstore.PartCount(in.Body.Size),
+		ExpiresAt: time.Now().Add(uploadKeep)}
+	return a.beginAttachment(ctx, "", u.ID, name, in.Body.Size, out)
+}
+
+func (a *API) userOwner(ctx context.Context) (core.AttachmentOwner, error) {
+	u, err := a.user(ctx)
+	if err != nil {
+		return core.AttachmentOwner{}, err
+	}
+	return core.AttachmentOwner{UserID: u.ID}, nil
+}
+
+func (a *API) userUploadParts(ctx context.Context, in *userUploadPartsInput) (*uploadPartsOutput, error) {
+	owner, err := a.userOwner(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return a.partURLs(ctx, owner, in.UploadID, in.Body.Numbers)
+}
+
+func (a *API) completeUserUpload(ctx context.Context, in *userUploadCompleteInput) (*uploadCompleteOutput, error) {
+	owner, err := a.userOwner(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !core.IsAttachmentUpload(in.UploadID) {
+		return nil, uploadFail(core.ErrNotFound)
+	}
+	return a.completeAttachment(ctx, owner, in.UploadID, in.Body.Parts)
+}
+
+func (a *API) abortUserUpload(ctx context.Context, in *userUploadAbortInput) (*struct{}, error) {
+	owner, err := a.userOwner(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !core.IsAttachmentUpload(in.UploadID) {
+		return nil, uploadFail(core.ErrNotFound)
+	}
+	return nil, uploadFail(core.AbortAttachmentUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, owner, in.UploadID))
 }
 
 // contentDisposition is a Content-Disposition for name that every browser reads right, Chinese

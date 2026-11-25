@@ -32,6 +32,7 @@ type SessionRequest struct {
 	NodeID            string      // '' = scheduled like any employee (lowest load score, pickNode)
 	Branch            string      // the work branch's name the user typed ('' = from the title or the repositories)
 	Repos             []RepoFocus // every repository with the branch picked for it ('' = default)
+	Attachments       []string    // attachment ids of the project going with the first message
 }
 
 // SessionRole turns a member role template into a session employee's role: a writing lead
@@ -96,15 +97,53 @@ func (o *Orchestrator) OpenSession(ctx context.Context, req SessionRequest) (cor
 	role := SessionRole(req.Role, req.Runtime, req.Model, req.NodeID)
 	role.Local = len(req.Repos) == 0 // a local folder on the node it starts on
 	return o.OpenThread(ctx, ThreadRequest{UserID: req.UserID, ProjectID: req.ProjectID, Title: req.Title,
-		Brief: req.Message, OpenedBy: "user", Repos: req.Repos, Solo: &role, SoloMode: req.PermissionMode, SoloEffort: req.Effort, Branch: SessionBranch(req.ProjectID, req.Branch, req.Title, req.Repos)})
+		Brief: req.Message, OpenedBy: "user", Repos: req.Repos, Solo: &role, SoloMode: req.PermissionMode, SoloEffort: req.Effort, Branch: SessionBranch(req.ProjectID, req.Branch, req.Title, req.Repos),
+		Attachments: req.Attachments})
 }
 
 // startSolo delivers a session's first message: the brief is the user's own words, shown in the
-// conversation as their message (the repositories are in the employee's prompt).
+// conversation as their message (the repositories are in the employee's prompt), with the
+// attachments the user gave it (text files inlined like in any message; the rest go as files,
+// fitted to the daemon by Deliver). Attachments that expired while the thread waited to start are
+// shown but not sent; the employee is told.
 func (o *Orchestrator) startSolo(ctx context.Context, tx *core.Tx, t core.Thread, lead core.Employee) error {
 	rec := &core.NewMessage{ConversationID: t.ID, Role: "user", Author: "user", Kind: "chat", Content: t.Brief}
-	_, err := o.Deliver(ctx, tx, lead, Delivery{Text: t.Brief, Kind: "user", Priority: "next", Record: rec})
+	text, files := t.Brief, []core.AttachmentRef(nil)
+	if len(t.BriefAttachments) > 0 {
+		rec.Meta = withImages(nil, t.BriefAttachments)
+		live, gone, err := o.liveRefs(ctx, tx, t.ProjectID, t.BriefAttachments)
+		if err != nil {
+			return err
+		}
+		c := core.Conversation{ID: t.ID, ProjectID: &t.ProjectID}
+		if text, files, err = o.inlineTexts(ctx, tx, c, text, live); err != nil {
+			return err
+		}
+		if len(gone) > 0 {
+			text += fmt.Sprintf("\n\n（用户还附了 %s，但会话排队期间已过期删除，没能带上；需要的话请用户重新上传。）", strings.Join(gone, "、"))
+		}
+	}
+	_, err := o.Deliver(ctx, tx, lead, Delivery{Text: text, Kind: "user", Priority: "next", Record: rec, Attachments: files})
 	return err
+}
+
+// liveRefs splits refs into the ones still usable (their retention restarts) and the names of
+// the expired or deleted ones.
+func (o *Orchestrator) liveRefs(ctx context.Context, tx *core.Tx, projectID string, refs []core.AttachmentRef) ([]core.AttachmentRef, []string, error) {
+	var live []core.AttachmentRef
+	var gone []string
+	for _, r := range refs {
+		list, err := core.ProjectAttachments(ctx, tx, projectID, []string{r.ID})
+		switch {
+		case errors.Is(err, core.ErrNotFound) || (err == nil && list[0].State != "ready"):
+			gone = append(gone, r.Name)
+		case err != nil:
+			return nil, nil, err
+		default:
+			live = append(live, r)
+		}
+	}
+	return live, gone, core.TouchAttachments(ctx, tx, projectID, refIDs(live), o.core.AttachmentTTL)
 }
 
 // SessionThread is a session's thread (its first and only one).
