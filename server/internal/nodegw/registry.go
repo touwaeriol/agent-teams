@@ -88,9 +88,16 @@ func toMap(v any) map[string]any {
 }
 
 // Disconnect implements platform.NodeRegistry (token rotated, node or owner removed).
-func (g *Gateway) Disconnect(_ context.Context, nodeID, reason string) {
+//
+// Every caller revokes the node's access (token rotated, node deleted, owner cut off), so it also
+// tells every replica's SSH gateway to re-check its connections now (#55 L13): they re-read the
+// node token they were opened with instead of waiting for the periodic check.
+func (g *Gateway) Disconnect(ctx context.Context, nodeID, reason string) {
 	if l := g.link(nodeID); l != nil {
 		l.close(CloseUnauthorized, truncate(reason, 100))
+	}
+	if g.hub != nil {
+		g.hub.Publish(ctx, core.SSHRevokeChannel, `{"node_id":"`+nodeID+`"}`)
 	}
 }
 
