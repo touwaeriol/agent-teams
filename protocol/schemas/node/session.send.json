@@ -48,11 +48,19 @@
       "default": false
     },
     "images": {
-      "description": "Images to deliver with the text (at most 8).",
+      "description": "Images to deliver with the text (at most 8): image/png, jpeg, gif, webp or a PDF, at most 5 MB each. Kept for daemons without attachments_v2; see attachments.",
       "type": "array",
       "maxItems": 8,
       "items": {
         "$ref": "common.json#/$defs/ImageRef"
+      }
+    },
+    "attachments": {
+      "description": "Attachments to deliver with the text (at most 20), any type up to 200 MB each. Only sent to daemons with the attachments_v2 feature; a message carries either attachments or images, not both.",
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "common.json#/$defs/AttachmentRef"
       }
     },
     "anchor": {

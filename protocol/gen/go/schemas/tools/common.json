@@ -304,6 +304,21 @@
         "data/sample.csv",
         "notes.md"
       ]
+    },
+    "AttachmentId": {
+      "title": "AttachmentId",
+      "description": "Attachment id (img_…), as listed in a message's [附件]/[Attachments] block.",
+      "type": "string",
+      "pattern": "^img_[0-9A-Za-z]{1,60}$"
+    },
+    "AttachmentIds": {
+      "title": "AttachmentIds",
+      "description": "Attachments to hand over with this message or task (ids from a message's attachment block, at most 20; duplicates are dropped). They must belong to this project. The recipient's daemon downloads them into its .attachments/ folder.",
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/AttachmentId"
+      }
     }
   }
 }

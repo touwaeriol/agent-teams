@@ -40,7 +40,7 @@
       "type": "string"
     },
     "upload": {
-      "description": "Files the daemon read for publish_file or write_shared_file; their bytes arrived before as file.chunk frames.",
+      "description": "Files the daemon read for publish_file or write_shared_file; their bytes arrived before as file.chunk frames, or (storage s3, write_shared_file on attachments_v2) were already PUT to the URL from POST /nodes/uploads, whose upload_id this is.",
       "$ref": "#/$defs/ToolUpload"
     }
   },
@@ -56,6 +56,15 @@
       "properties": {
         "upload_id": {
           "$ref": "common.json#/$defs/UploadId"
+        },
+        "storage": {
+          "description": "chunks (default): bytes came as file.chunk frames. s3: the daemon PUT the one file to the presigned URL from POST /nodes/uploads (upload_id is the one it returned), chunks is 0 and files has exactly that file.",
+          "type": "string",
+          "enum": [
+            "chunks",
+            "s3"
+          ],
+          "default": "chunks"
         },
         "chunks": {
           "description": "Number of file.chunk frames (0 when every file is empty).",

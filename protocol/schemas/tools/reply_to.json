@@ -22,6 +22,9 @@
     "answer": {
       "type": "string",
       "minLength": 1
+    },
+    "attachments": {
+      "$ref": "common.json#/$defs/AttachmentIds"
     }
   }
 }

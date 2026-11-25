@@ -157,6 +157,7 @@ const (
 	ToolPublishDeliverable = "publish_deliverable"
 	ToolPublishFile        = "publish_file"
 	ToolPushBranch         = "push_branch"
+	ToolReadAttachment     = "read_attachment"
 	ToolReadDeliverable    = "read_deliverable"
 	ToolReadMessages       = "read_messages"
 	ToolReadSharedFile     = "read_shared_file"
@@ -165,6 +166,7 @@ const (
 	ToolReportProgress     = "report_progress"
 	ToolRequestReview      = "request_review"
 	ToolReviewPermission   = "review_permission"
+	ToolSaveAttachment     = "save_attachment"
 	ToolScheduleCancel     = "schedule_cancel"
 	ToolScheduleCreate     = "schedule_create"
 	ToolScheduleList       = "schedule_list"
@@ -304,6 +306,10 @@ var Tools = map[string]ToolMeta{
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(PushBranchInput) }, NewResult: func() any { return new(PushBranchResult) },
 	},
+	ToolReadAttachment: {
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(ReadAttachmentInput) }, NewResult: func() any { return new(ReadAttachmentResult) },
+	},
 	ToolReadDeliverable: {
 		Tiers: []Tier{TierLead, TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ReadDeliverableInput) }, NewResult: func() any { return new(ReadDeliverableResult) },
@@ -335,6 +341,10 @@ var Tools = map[string]ToolMeta{
 	ToolReviewPermission: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ReviewPermissionInput) }, NewResult: nil,
+	},
+	ToolSaveAttachment: {
+		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(SaveAttachmentInput) }, NewResult: func() any { return new(SaveAttachmentResult) },
 	},
 	ToolScheduleCancel: {
 		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",

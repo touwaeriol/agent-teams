@@ -641,11 +641,19 @@
           "type": "string"
         },
         "images": {
-          "description": "Images to deliver with the text (at most 8).",
+          "description": "Images to deliver with the text (at most 8), as session.send images (daemons without attachments_v2).",
           "type": "array",
           "maxItems": 8,
           "items": {
             "$ref": "common.json#/$defs/ImageRef"
+          }
+        },
+        "attachments": {
+          "description": "Attachments to deliver with the text, as session.send attachments (daemons with attachments_v2).",
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "common.json#/$defs/AttachmentRef"
           }
         },
         "anchor": {

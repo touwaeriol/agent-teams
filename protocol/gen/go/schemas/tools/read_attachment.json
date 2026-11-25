@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/read_attachment.json",
+  "title": "ReadAttachmentInput",
+  "description": "Download an attachment (img_… id from a message's attachment block, including ones forwarded to you) to .attachments/<id>-<name> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools or command-line tools. Use it when the local copy is missing (the session reopened elsewhere, old copies are cleaned after 7 days) or for an id someone passed you. The attachment must belong to this project. An existing complete copy is reused.",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead",
+      "member"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "$ref": "common.json#/$defs/AttachmentId"
+    }
+  },
+  "$defs": {
+    "ReadAttachmentResult": {
+      "title": "ReadAttachmentResult",
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "content_type",
+        "size",
+        "local_path"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.json#/$defs/AttachmentId"
+        },
+        "name": {
+          "type": "string"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "local_path": {
+          "description": "Where the file was written, relative to your working directory: .attachments/<id>-<name> (the daemon adds the absolute path).",
+          "type": "string"
+        }
+      }
+    }
+  }
+}
