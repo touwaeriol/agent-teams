@@ -77,13 +77,6 @@ func sameIDs(got []string, want ...string) bool {
 	return true
 }
 
-func (tm *team) exec(t *testing.T, sql string, args ...any) {
-	t.Helper()
-	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, sql, args...); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func (tm *team) expiresIn(t *testing.T, id string) time.Duration {
 	t.Helper()
 	var at time.Time
@@ -101,7 +94,7 @@ func TestAssignTaskAttachmentsV2(t *testing.T) {
 	png := uploadPNG(t, tm)
 	small := putAttachment(t, tm, tm.projectID, "notes.md", core.TextType, []byte("# 需求\n按钮改成蓝色"))
 	zip := putAttachment(t, tm, tm.projectID, "data.zip", "application/zip", []byte("PK\x03\x04 not really"))
-	tm.exec(t, `UPDATE at_attachments SET expires_at = now() + interval '1 hour' WHERE id = $1`, zip.ID)
+	tm.sql(t, `UPDATE at_attachments SET expires_at = now() + interval '1 hour' WHERE id = $1`, zip.ID)
 
 	res := tm.lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "按附件改", "main": "做",
 		"attachments": []string{png, small.ID, zip.ID, png}})
@@ -150,6 +143,16 @@ func TestAssignTaskAttachmentsV2(t *testing.T) {
 	if !strings.Contains(mail, zip.ID) || !strings.Contains(mail, "read_attachment") {
 		t.Fatalf("stored mail %q", mail)
 	}
+
+	// Rework: the task goes back to the queue reserved for dev-1 (as a rejected review does);
+	// its new brief brings the attachments again.
+	tm.sql(t, `UPDATE at_tasks SET status = 'pending', claimed_by = '', claimed_at = NULL, reserved_for = 'dev-1',
+		reserved_until = now() + interval '1 hour' WHERE conversation_id = $1 AND id = 't1'`, tm.thread.ID)
+	tm.kick()
+	again := dev.expectSend("[Task t1")
+	if !sameIDs(refIDs(again.Attachments), png, small.ID, zip.ID) || !strings.Contains(again.Text, "按钮改成蓝色") {
+		t.Fatalf("rework brief attachments %+v", again.Attachments)
+	}
 }
 
 // TestAssignTaskAttachmentsLegacy: a daemon without attachments_v2 only gets images and PDFs up
@@ -189,7 +192,7 @@ func TestAttachmentToolRefusals(t *testing.T) {
 		t.Fatalf("foreign attachment: ok=%v %q", r.Ok, text(r))
 	}
 	mine := putAttachment(t, tm, tm.projectID, "y.zip", "application/zip", []byte("PK"))
-	tm.exec(t, `UPDATE at_attachments SET state = 'expired' WHERE id = $1`, mine.ID)
+	tm.sql(t, `UPDATE at_attachments SET state = 'expired' WHERE id = $1`, mine.ID)
 	r = tm.lead.call("assign_task", map[string]any{"assignee": "dev", "instruction": "y", "main": "做", "attachments": []string{mine.ID}})
 	if r.Ok || !strings.Contains(text(r), "附件已过期") {
 		t.Fatalf("expired attachment: ok=%v %q", r.Ok, text(r))
@@ -286,7 +289,7 @@ func TestReadAndSaveAttachment(t *testing.T) {
 		t.Fatalf("overwrite %+v", saved)
 	}
 
-	tm.exec(t, `INSERT INTO at_shared_files (project_id, path, content_type, size, uploaded_by, storage_key, object_id, state)
+	tm.sql(t, `INSERT INTO at_shared_files (project_id, path, content_type, size, uploaded_by, storage_key, object_id, state)
 		VALUES ($1, 'big.bin', 'application/octet-stream', $2, 'user', 'projects/x/shared/sf_big', 'sf_big', 'ready')`,
 		tm.projectID, sharedfiles.MaxProjectBytes-8)
 	r = tm.lead.call("save_attachment", map[string]any{"id": zip.ID, "path": "inputs/again.zip"})
@@ -319,7 +322,7 @@ func TestReadSharedFilePresigned(t *testing.T) {
 		t.Fatalf("shared download %+v", sd)
 	}
 	expectNone(t, tm.n, protocol.TypeFileDownload, 200*time.Millisecond, func(nodetest.Frame) bool { return true })
-	tm.exec(t, `UPDATE at_shared_files SET sha256 = NULL WHERE project_id = $1 AND path = 'docs/a.md'`, tm.projectID)
+	tm.sql(t, `UPDATE at_shared_files SET sha256 = NULL WHERE project_id = $1 AND path = 'docs/a.md'`, tm.projectID)
 	r = tm.lead.call("read_shared_file", map[string]any{"path": "docs/a.md"})
 	if r.Ok || !strings.Contains(text(r), "请稍后再试") {
 		t.Fatalf("unhashed: ok=%v %q", r.Ok, text(r))
@@ -332,7 +335,7 @@ func TestForwardRestartsRetention(t *testing.T) {
 	conv := tm.coordinatorConv(t)
 	img := uploadPNG(t, tm)
 	msgs, _ := projectChat(t, tm, conv, map[string]any{"content": "看截图", "attachments": []string{img}})
-	tm.exec(t, `UPDATE at_attachments SET expires_at = now() + interval '1 hour' WHERE id = $1`, img)
+	tm.sql(t, `UPDATE at_attachments SET expires_at = now() + interval '1 hour' WHERE id = $1`, img)
 	tm.b.must(200, "POST", "/api/conversations/"+conv+"/forward", map[string]any{"message_ids": []int64{msgs[0].ID}, "thread_no": tm.thread.No}, nil)
 	send := tm.lead.expectSend("原样转发")
 	if !sameIDs(refIDs(send.Attachments), img) || len(send.Images) != 0 {
@@ -340,5 +343,23 @@ func TestForwardRestartsRetention(t *testing.T) {
 	}
 	if d := tm.expiresIn(t, img); d < 23*time.Hour {
 		t.Fatalf("forward did not restart retention: %v", d)
+	}
+}
+
+// TestReplyToAttachments: an answer to a waiting ask_lead cannot carry files, so it names them
+// for read_attachment.
+func TestReplyToAttachments(t *testing.T) {
+	tm := attTeam(t, true)
+	tm.lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "做", "main": "做"})
+	dev, open := expectOpen(t, tm.w, tm.n, "dev-1")
+	dev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: open.SessionID, MsgID: open.FirstMessage.MsgID})
+	pdf := putAttachment(t, tm, tm.projectID, "spec.pdf", core.PDFType, []byte("%PDF-1.4"))
+	call := dev.startCall("ask_lead", `{"question":"规格书在哪？"}`)
+	q := tm.lead.expectSend("规格书在哪")
+	qid := strings.Fields(q.Text)[1] // "[Question q1 from dev-1 …]"
+	tm.lead.mustCall("reply_to", map[string]any{"question_id": qid, "answer": "看附件", "attachments": []string{pdf.ID}})
+	res := dev.result(call)
+	if !res.Ok || !strings.Contains(text(res), pdf.ID) || !strings.Contains(text(res), "read_attachment") {
+		t.Fatalf("ask_lead answer %q", text(res))
 	}
 }
