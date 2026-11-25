@@ -214,6 +214,7 @@
 ```
 
 - `images`（可选，最多 8 张；`first_message` 也可以带）：用户附的图片。帧里只有引用（帧上限 4 MiB，图片单张可到 5 MB）；守护进程投递前用自己的节点令牌 `GET <控制台>/nodes/attachments/<id>`（`Authorization: Bearer <节点令牌>`，只能取同一用户项目的图片）下载到 `<state>/attachments/<session_id>/`，会话关闭时删掉。Claude：用户消息的 `content` 变成 `[{type:"image", source:{type:"base64", media_type, data}}…, {type:"text", text}]`（Agent SDK 0.3.325 的 `SDKUserMessage.message` 就是 Messages API 的 `MessageParam`，支持图片块）。Codex：在 `turn/start` / `turn/steer` 的 `input` 里追加一项 `localImage`（带本机 `path`）。`media_type` 为 `application/pdf` 时 Claude 收到一个 `document` 内容块（`source` 是 base64 的 `application/pdf`），Codex 没有文档输入，文字末尾写明 PDF 存在本机哪个路径。下载失败时照样投递文字，末尾加一行说明图片没取到。
+- `attachments`（可选，最多 20 个；`first_message` 也可以带；#58）：任意类型的附件引用 `AttachmentRef {id, name, content_type, size, sha256?}`，单个 ≤ 200 MB，`content_type` 是开放字符串。只发给 `hello.features` 含 `attachments_v2` 的守护进程，发了 `attachments` 就不再发 `images`；老守护进程照旧只收 `images`（枚举和 5 MB 上限不变，老 ajv 遇到非枚举值会拒掉整帧）。守护进程真正投递时才调 `GET <控制台>/nodes/attachments/<id>/url`（节点令牌）取 15 分钟有效的下载地址（老数据返回空的 url，退回字节接口），流式落盘到 `<cwd>/.attachments/<id>-<名字>`（目录自带 `.gitignore`），正文末尾列出每个附件的 id、名字、类型、大小和本地路径；满足 runtime 门槛的图片和 PDF 同时作为内容块给。下载地址不进 AI 能看到的内容。
 
 - 会话处于 `parked`：守护进程先用 `resume` 重开进程（不需要控制台再发 open），再投递。
 - 会话还没收到本 `open_gen` 的 `session.release`：消息在守护进程排队，release 后按顺序投递（park 后自动 resume 的同一 gen 不需要再 release，但 init 工具若与上次不同则当作违规上报 `session.event{kind:error, code:'protocol'}`）。
@@ -407,6 +408,8 @@ Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工
 守护进程只为仍在等待、且属于同一会话的 `read_deliverable` 调用保存分段（内存里，合计不超过 5 MB 的 base64），其他分段丢弃。收到 `tool.result` 后写到会话 cwd 下的 `.agent-deliverables/<deliverable_id>/v<version>/`，写之前重新校验 id 和版本、每个路径（相对、各段不以点开头、扩展名在白名单内、不重复）、分段是否到齐、合计 ≤ 5 MB、每个文件的大小和 sha256；`.agent-deliverables` 和其下目录必须是真目录，版本目录先整体删掉再写，文件以 `O_CREAT | O_EXCL | O_NOFOLLOW` 创建，顶层写 `.gitignore`（`*`）。成功时在结果文字前加一行本地绝对路径（`structured.abs_dir` 同样），失败（分段不全、校验不符、路径不合法）时把结果改成 `ok:false` 的工具失败。守护进程重启后未完成的调用按 §6.2 取消，分段随之作废；控制台对重复的 `tool.call` 只重发结果、不重发分段，这时结果按“内容不完整”失败，员工重新调用即可。只有 hello 带 `file_download` 特性的守护进程才会收到 `file.download`，否则工具直接失败并提示升级。
 
 `read_shared_file` 也用 `file.download` 下发，只是 `tool.result` 带的是 `shared_download = {download_id, chunks, files: [{path, size, sha256}]}`（恰好一个文件，`path` 是共享区路径，≤ 20 MB 所以最多 20 段），不带 `download`。守护进程为这次调用收分段（上限按 20 MB 计），校验同上，写到会话 cwd 下的 `.shared/<path>`：`.shared` 和其下目录必须是真目录，顶层写 `.gitignore`（`*`），目标文件已存在时整体替换（不跟随符号链接）。成功时把 `structured.local_path`（`.shared/<path>`）补成绝对路径写进结果文字。只有 `hello.features` 含 `shared_files` 的守护进程才会收到这种下发，否则控制台不发分段、工具直接失败并提示升级；老守护进程调用 `write_shared_file` 时不带 `upload`，同样按“需要升级”失败。
+
+有 `attachments_v2` 的守护进程（#58）：`read_shared_file` 的 `shared_download.files[0]` 带 `url` 和 `expires_at`、`chunks` 为 0、不发分段，守护进程直接 GET 并校验大小和 sha256；`write_shared_file` 先调 `POST <控制台>/nodes/uploads` 拿预签名 PUT 地址上传，`tool.call` 的 `upload` 带 `storage: "s3"`、`chunks: 0` 和那一个文件；`read_attachment` 的 `tool.result` 带 `attachment_download = {attachment, url?, expires_at?}`，守护进程下载到 `.attachments/` 后只把 `local_path` 给 AI。`url` 一律不出现在给 AI 的结果里。
 
 ### 6.5 共享文件工具
 

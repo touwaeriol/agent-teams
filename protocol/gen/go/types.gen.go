@@ -733,6 +733,9 @@ type AssignSubtaskInput struct {
 	// Assignee corresponds to the JSON schema field "assignee".
 	Assignee string `json:"assignee"`
 
+	// Attachments corresponds to the JSON schema field "attachments".
+	Attachments AttachmentIds `json:"attachments,omitempty,omitzero"`
+
 	// Instruction corresponds to the JSON schema field "instruction".
 	Instruction string `json:"instruction"`
 }
@@ -795,6 +798,9 @@ func (j *AssignSubtaskResult) UnmarshalJSON(value []byte) error {
 type AssignTaskInput struct {
 	// Assignee corresponds to the JSON schema field "assignee".
 	Assignee string `json:"assignee"`
+
+	// Attachments corresponds to the JSON schema field "attachments".
+	Attachments AttachmentIds `json:"attachments,omitempty,omitzero"`
 
 	// Base branch the thread uses in repo (only before the thread branch exists
 	// there; read the project context for stated bases).
@@ -894,6 +900,105 @@ func (j *AssignTaskResult) UnmarshalJSON(value []byte) error {
 		return err
 	}
 	*j = AssignTaskResult(plain)
+	return nil
+}
+
+// Attachment id (img_…), as listed in a message's [附件]/[Attachments] block.
+type AttachmentID string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AttachmentID) UnmarshalJSON(value []byte) error {
+	type Plain AttachmentID
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^img_[0-9A-Za-z]{1,60}$`, string(plain)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "", `^img_[0-9A-Za-z]{1,60}$`)
+	}
+	*j = AttachmentID(plain)
+	return nil
+}
+
+// Attachments to hand over with this message or task (ids from a message's
+// attachment block, at most 20; duplicates are dropped). They must belong to this
+// project. The recipient's daemon downloads them into its .attachments/ folder.
+type AttachmentIds []AttachmentID
+
+// A file attached to a message (at_attachments), any type, up to 200 MB. Sent in
+// session.send/first_message attachments only to daemons with the attachments_v2
+// feature. When it delivers the message the daemon asks GET
+// <console>/nodes/attachments/<id>/url (node token) for a short-lived download URL
+// ({url: null} for legacy rows: fall back to GET /nodes/attachments/<id>), streams
+// the file to <cwd>/.attachments/<id>-<name> and lists every attachment's path in
+// the text; images and PDFs under the runtime's limits also go in as content
+// blocks. The download URL never reaches the AI.
+type AttachmentRef struct {
+	// MIME type as stored (open string; not an enum, unlike ImageRef.media_type).
+	ContentType string `json:"content_type"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Filled by the daemon: path of the downloaded copy relative to the session's
+	// working directory (.attachments/<id>-<name>); only in structured tool results.
+	LocalPath *string `json:"local_path,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Hex SHA-256 when the console has computed it; the daemon checks the download
+	// against it.
+	SHA256 *string `json:"sha256,omitempty,omitzero"`
+
+	// Size corresponds to the JSON schema field "size".
+	Size int `json:"size"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *AttachmentRef) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["content_type"]; raw != nil && !ok {
+		return fmt.Errorf("field content_type in AttachmentRef: required")
+	}
+	if _, ok := raw["id"]; raw != nil && !ok {
+		return fmt.Errorf("field id in AttachmentRef: required")
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in AttachmentRef: required")
+	}
+	if _, ok := raw["size"]; raw != nil && !ok {
+		return fmt.Errorf("field size in AttachmentRef: required")
+	}
+	type Plain AttachmentRef
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.ContentType)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "content_type", 200)
+	}
+	if matched, _ := regexp.MatchString(`^img_`, string(plain.ID)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "ID", `^img_`)
+	}
+	if utf8.RuneCountInString(string(plain.Name)) > 300 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 300)
+	}
+	if plain.SHA256 != nil {
+		if matched, _ := regexp.MatchString(`^[0-9a-f]{64}$`, string(*plain.SHA256)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "SHA256", `^[0-9a-f]{64}$`)
+		}
+	}
+	if 209715200 < plain.Size {
+		return fmt.Errorf("field %s: must be <= %v", "size", 209715200)
+	}
+	if 0 > plain.Size {
+		return fmt.Errorf("field %s: must be >= %v", "size", 0)
+	}
+	*j = AttachmentRef(plain)
 	return nil
 }
 
@@ -2310,8 +2415,8 @@ func (j *DaemonInfo) UnmarshalJSON(value []byte) error {
 // session (coordinator, leads, members of all threads) and every user of the
 // project can see, overwrite and delete them; they are stored by the platform,
 // never in git. Do not put secrets (keys, passwords, tokens, credentials) in
-// shared files. A file with the same path is overwritten. Limits: 20 MB per file,
-// 500 MB per project.
+// shared files. A file with the same path is overwritten. Limits: 200 MB per file,
+// 5 GB per project.
 type DeleteSharedFileInput struct {
 	// Path corresponds to the JSON schema field "path".
 	Path SharedPath `json:"path"`
@@ -2553,6 +2658,9 @@ func (j *DeliverableVersionInfo) UnmarshalJSON(value []byte) error {
 }
 
 type DownloadFile struct {
+	// When url stops working.
+	ExpiresAt *time.Time `json:"expires_at,omitempty,omitzero"`
+
 	// Path inside the deliverable version (index.html, assets/logo.svg …), or the
 	// shared-files path for shared_download.
 	Path string `json:"path"`
@@ -2562,6 +2670,11 @@ type DownloadFile struct {
 
 	// Size corresponds to the JSON schema field "size".
 	Size int `json:"size"`
+
+	// attachments_v2 shared_download: presigned GET URL of the file (the daemon
+	// downloads it directly and checks size and sha256; chunks is 0). Never shown to
+	// the AI.
+	URL *string `json:"url,omitempty,omitzero"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -2595,6 +2708,12 @@ func (j *DownloadFile) UnmarshalJSON(value []byte) error {
 	}
 	if 0 > plain.Size {
 		return fmt.Errorf("field %s: must be >= %v", "size", 0)
+	}
+	if plain.URL != nil && utf8.RuneCountInString(string(*plain.URL)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "url", 1)
+	}
+	if plain.URL != nil && utf8.RuneCountInString(string(*plain.URL)) > 8192 {
+		return fmt.Errorf("field %s length: must be <= %d", "url", 8192)
 	}
 	*j = DownloadFile(plain)
 	return nil
@@ -3046,7 +3165,12 @@ type FirstMessage struct {
 	// The task anchor, as session.send anchor.
 	Anchor *string `json:"anchor,omitempty,omitzero"`
 
-	// Images to deliver with the text (at most 8).
+	// Attachments to deliver with the text, as session.send attachments (daemons with
+	// attachments_v2).
+	Attachments []AttachmentRef `json:"attachments,omitempty,omitzero"`
+
+	// Images to deliver with the text (at most 8), as session.send images (daemons
+	// without attachments_v2).
 	Images []ImageRef `json:"images,omitempty,omitzero"`
 
 	// MsgID corresponds to the JSON schema field "msg_id".
@@ -3075,6 +3199,9 @@ func (j *FirstMessage) UnmarshalJSON(value []byte) error {
 	}
 	if plain.Anchor != nil && utf8.RuneCountInString(string(*plain.Anchor)) > 8000 {
 		return fmt.Errorf("field %s length: must be <= %d", "anchor", 8000)
+	}
+	if len(plain.Attachments) > 20 {
+		return fmt.Errorf("field %s length: must be <= %d", "attachments", 20)
 	}
 	if len(plain.Images) > 8 {
 		return fmt.Errorf("field %s length: must be <= %d", "images", 8)
@@ -4009,7 +4136,11 @@ type Hello struct {
 	// node.runtimes_refresh), ssh_gateway (session.open ssh_servers,
 	// ssh.cert_request, ssh.servers_update, /nodes/ssh), session_move
 	// (session.export, session.open.import, /nodes/moves), self_update (runs under
-	// the update launcher: node.upgrade with mode, drain, rollback).
+	// the update launcher: node.upgrade with mode, drain, rollback), attachments_v2
+	// (session.send/first_message attachments with /nodes/attachments/<id>/url
+	// downloads into .attachments/, read_attachment attachment_download,
+	// read_shared_file shared_download by url, write_shared_file upload storage s3
+	// via POST /nodes/uploads).
 	Features []string `json:"features,omitempty,omitzero"`
 
 	// Host corresponds to the JSON schema field "host".
@@ -4308,7 +4439,7 @@ func (j *ListDeliverablesResult) UnmarshalJSON(value []byte) error {
 // threads) and every user of the project can see, overwrite and delete them; they
 // are stored by the platform, never in git. Do not put secrets (keys, passwords,
 // tokens, credentials) in shared files. A file with the same path is overwritten.
-// Limits: 20 MB per file, 500 MB per project. Fetch one with read_shared_file, add
+// Limits: 200 MB per file, 5 GB per project. Fetch one with read_shared_file, add
 // or replace one with write_shared_file.
 type ListSharedFilesInput struct {
 	// Only paths starting with this text (for example data/ or data/2026-).
@@ -4898,6 +5029,9 @@ func (j *MergeEntryRef) UnmarshalJSON(value []byte) error {
 // your thread already reach it automatically: do not send those, and do not reply
 // just to acknowledge. At most 20 messages an hour.
 type MessageCoordinatorInput struct {
+	// Attachments corresponds to the JSON schema field "attachments".
+	Attachments AttachmentIds `json:"attachments,omitempty,omitzero"`
+
 	// Text corresponds to the JSON schema field "text".
 	Text string `json:"text"`
 }
@@ -4933,6 +5067,9 @@ func (j *MessageCoordinatorInput) UnmarshalJSON(value []byte) error {
 // other lead needs; do not reply just to acknowledge. At most 20 messages an hour
 // between two threads.
 type MessageThreadInput struct {
+	// Attachments corresponds to the JSON schema field "attachments".
+	Attachments AttachmentIds `json:"attachments,omitempty,omitzero"`
+
 	// No corresponds to the JSON schema field "no".
 	No ThreadNo `json:"no"`
 
@@ -5640,6 +5777,9 @@ func (j *OpenPRResult) UnmarshalJSON(value []byte) error {
 // Your thread cannot finish while a subthread is unfinished (close_subthread ends
 // one).
 type OpenSubthreadInput struct {
+	// Attachments corresponds to the JSON schema field "attachments".
+	Attachments AttachmentIds `json:"attachments,omitempty,omitzero"`
+
 	// Instructions for the subthread's lead: the goal, what to report back and when
 	// it is done.
 	Brief string `json:"brief"`
@@ -6564,6 +6704,96 @@ func (j *QuestionID) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Download an attachment (img_… id from a message's attachment block, including
+// ones forwarded to you) to .attachments/<id>-<name> in your working directory
+// (the folder is git-ignored) and return that local path; the result never
+// contains the file's content, so read it with your file tools or command-line
+// tools. Use it when the local copy is missing (the session reopened elsewhere, or
+// the local copy was cleaned up) or for an id someone passed you. The attachment
+// must belong to this project; attachments are kept only for a limited time, after
+// which it is refused as expired. An existing complete copy is reused.
+type ReadAttachmentInput struct {
+	// ID corresponds to the JSON schema field "id".
+	ID AttachmentID `json:"id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ReadAttachmentInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["id"]; raw != nil && !ok {
+		return fmt.Errorf("field id in ReadAttachmentInput: required")
+	}
+	type Plain ReadAttachmentInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = ReadAttachmentInput(plain)
+	return nil
+}
+
+type ReadAttachmentResult struct {
+	// ContentType corresponds to the JSON schema field "content_type".
+	ContentType string `json:"content_type"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID AttachmentID `json:"id"`
+
+	// Where the file was written, relative to your working directory:
+	// .attachments/<id>-<name> (the daemon adds the absolute path).
+	LocalPath string `json:"local_path"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// SHA256 corresponds to the JSON schema field "sha256".
+	SHA256 *string `json:"sha256,omitempty,omitzero"`
+
+	// Size corresponds to the JSON schema field "size".
+	Size int `json:"size"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ReadAttachmentResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["content_type"]; raw != nil && !ok {
+		return fmt.Errorf("field content_type in ReadAttachmentResult: required")
+	}
+	if _, ok := raw["id"]; raw != nil && !ok {
+		return fmt.Errorf("field id in ReadAttachmentResult: required")
+	}
+	if _, ok := raw["local_path"]; raw != nil && !ok {
+		return fmt.Errorf("field local_path in ReadAttachmentResult: required")
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in ReadAttachmentResult: required")
+	}
+	if _, ok := raw["size"]; raw != nil && !ok {
+		return fmt.Errorf("field size in ReadAttachmentResult: required")
+	}
+	type Plain ReadAttachmentResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.SHA256 != nil {
+		if matched, _ := regexp.MatchString(`^[0-9a-f]{64}$`, string(*plain.SHA256)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "SHA256", `^[0-9a-f]{64}$`)
+		}
+	}
+	if 0 > plain.Size {
+		return fmt.Errorf("field %s: must be >= %v", "size", 0)
+	}
+	*j = ReadAttachmentResult(plain)
+	return nil
+}
+
 // Fetch the files of a deliverable published with publish_file (any thread of this
 // project) into your working directory under .agent-deliverables/<id>/v<version>/
 // (git-ignored; a multi-file site keeps its folders). Returns the local folder,
@@ -6709,7 +6939,7 @@ func (j *ReadMessagesResult) UnmarshalJSON(value []byte) error {
 // threads) and every user of the project can see, overwrite and delete them; they
 // are stored by the platform, never in git. Do not put secrets (keys, passwords,
 // tokens, credentials) in shared files. An existing local copy at the same path is
-// overwritten. Limits: 20 MB per file, 500 MB per project. To change the shared
+// overwritten. Limits: 200 MB per file, 5 GB per project. To change the shared
 // file, edit the local copy and call write_shared_file(file=.shared/<path>).
 type ReadSharedFileInput struct {
 	// Path in the shared files, for example data/sample.csv (see list_shared_files).
@@ -6835,6 +7065,9 @@ func (j *RememberInput) UnmarshalJSON(value []byte) error {
 type ReplyToInput struct {
 	// Answer corresponds to the JSON schema field "answer".
 	Answer string `json:"answer"`
+
+	// Attachments corresponds to the JSON schema field "attachments".
+	Attachments AttachmentIds `json:"attachments,omitempty,omitzero"`
 
 	// QuestionID corresponds to the JSON schema field "question_id".
 	QuestionID QuestionID `json:"question_id"`
@@ -7476,6 +7709,99 @@ func (j *SandboxPolicy) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Save an attachment (img_… id from a message's attachment block) as one of the
+// project's shared files at path, so every session and user of the project can
+// find it later with list_shared_files/read_shared_file. The platform copies it
+// without it passing through your working directory. Refused when a shared file
+// already has this path unless overwrite is true. Same rules as write_shared_file:
+// no secrets; limits 200 MB per file, 5 GB per project.
+type SaveAttachmentInput struct {
+	// ID corresponds to the JSON schema field "id".
+	ID AttachmentID `json:"id"`
+
+	// Replace an existing shared file with this path.
+	Overwrite bool `json:"overwrite,omitempty,omitzero"`
+
+	// Target path in the shared files, for example inputs/spec.pdf.
+	Path SharedPath `json:"path"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SaveAttachmentInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["id"]; raw != nil && !ok {
+		return fmt.Errorf("field id in SaveAttachmentInput: required")
+	}
+	if _, ok := raw["path"]; raw != nil && !ok {
+		return fmt.Errorf("field path in SaveAttachmentInput: required")
+	}
+	type Plain SaveAttachmentInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if v, ok := raw["overwrite"]; !ok || v == nil {
+		plain.Overwrite = false
+	}
+	*j = SaveAttachmentInput(plain)
+	return nil
+}
+
+type SaveAttachmentResult struct {
+	// ID corresponds to the JSON schema field "id".
+	ID AttachmentID `json:"id"`
+
+	// True when a file with this path existed and was replaced.
+	Overwritten bool `json:"overwritten"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path SharedPath `json:"path"`
+
+	// Absent while the platform is still computing it.
+	SHA256 *string `json:"sha256,omitempty,omitzero"`
+
+	// Size corresponds to the JSON schema field "size".
+	Size int `json:"size"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SaveAttachmentResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["id"]; raw != nil && !ok {
+		return fmt.Errorf("field id in SaveAttachmentResult: required")
+	}
+	if _, ok := raw["overwritten"]; raw != nil && !ok {
+		return fmt.Errorf("field overwritten in SaveAttachmentResult: required")
+	}
+	if _, ok := raw["path"]; raw != nil && !ok {
+		return fmt.Errorf("field path in SaveAttachmentResult: required")
+	}
+	if _, ok := raw["size"]; raw != nil && !ok {
+		return fmt.Errorf("field size in SaveAttachmentResult: required")
+	}
+	type Plain SaveAttachmentResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.SHA256 != nil {
+		if matched, _ := regexp.MatchString(`^[0-9a-f]{64}$`, string(*plain.SHA256)); !matched {
+			return fmt.Errorf("field %s pattern match: must match %s", "SHA256", `^[0-9a-f]{64}$`)
+		}
+	}
+	if 0 > plain.Size {
+		return fmt.Errorf("field %s: must be >= %v", "size", 0)
+	}
+	*j = SaveAttachmentResult(plain)
+	return nil
+}
+
 // Cancel one of the schedules you set (it no longer fires; the user still sees it
 // as cancelled for a while).
 type ScheduleCancelInput struct {
@@ -7734,6 +8060,9 @@ func (j *ScheduleUpdateInput) UnmarshalJSON(value []byte) error {
 // Leave a message for a teammate (instance name) or for the lead ("lead"). Busy
 // recipients get it after their current turn.
 type SendMessageInput struct {
+	// Attachments corresponds to the JSON schema field "attachments".
+	Attachments AttachmentIds `json:"attachments,omitempty,omitzero"`
+
 	// Text corresponds to the JSON schema field "text".
 	Text string `json:"text"`
 
@@ -9337,7 +9666,14 @@ type SessionSend struct {
 	// session during a task; an empty string clears it.
 	Anchor *string `json:"anchor,omitempty,omitzero"`
 
-	// Images to deliver with the text (at most 8).
+	// Attachments to deliver with the text (at most 20), any type up to 200 MB each.
+	// Only sent to daemons with the attachments_v2 feature; a message carries either
+	// attachments or images, not both.
+	Attachments []AttachmentRef `json:"attachments,omitempty,omitzero"`
+
+	// Images to deliver with the text (at most 8): image/png, jpeg, gif, webp or a
+	// PDF, at most 5 MB each. Kept for daemons without attachments_v2; see
+	// attachments.
 	Images []ImageRef `json:"images,omitempty,omitzero"`
 
 	// InterruptFirst corresponds to the JSON schema field "interrupt_first".
@@ -9449,6 +9785,9 @@ func (j *SessionSend) UnmarshalJSON(value []byte) error {
 	}
 	if plain.Anchor != nil && utf8.RuneCountInString(string(*plain.Anchor)) > 8000 {
 		return fmt.Errorf("field %s length: must be <= %d", "anchor", 8000)
+	}
+	if len(plain.Attachments) > 20 {
+		return fmt.Errorf("field %s length: must be <= %d", "attachments", 20)
 	}
 	if len(plain.Images) > 8 {
 		return fmt.Errorf("field %s length: must be <= %d", "images", 8)
@@ -10748,6 +11087,39 @@ func (j *TodoItem) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+type ToolAttachmentDownload struct {
+	// Attachment corresponds to the JSON schema field "attachment".
+	Attachment AttachmentRef `json:"attachment"`
+
+	// ExpiresAt corresponds to the JSON schema field "expires_at".
+	ExpiresAt *time.Time `json:"expires_at,omitempty,omitzero"`
+
+	// Presigned GET URL, valid until expires_at. Null or absent for legacy rows: the
+	// daemon fetches GET /nodes/attachments/<id> with its node token instead.
+	URL *string `json:"url,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ToolAttachmentDownload) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["attachment"]; raw != nil && !ok {
+		return fmt.Errorf("field attachment in ToolAttachmentDownload: required")
+	}
+	type Plain ToolAttachmentDownload
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.URL != nil && utf8.RuneCountInString(string(*plain.URL)) > 8192 {
+		return fmt.Errorf("field %s length: must be <= %d", "url", 8192)
+	}
+	*j = ToolAttachmentDownload(plain)
+	return nil
+}
+
 // An employee called a platform tool.
 type ToolCall struct {
 	// Tool input; validated by the console against
@@ -10770,7 +11142,9 @@ type ToolCall struct {
 	ToolUseID *string `json:"tool_use_id,omitempty,omitzero"`
 
 	// Files the daemon read for publish_file or write_shared_file; their bytes
-	// arrived before as file.chunk frames.
+	// arrived before as file.chunk frames, or (storage s3, write_shared_file on
+	// attachments_v2) were already PUT to the URL from POST /nodes/uploads, whose
+	// upload_id this is.
 	Upload *ToolUpload `json:"upload,omitempty,omitzero"`
 }
 
@@ -10940,6 +11314,12 @@ type ToolResult struct {
 	// "" to clear the stored one (as session.send anchor).
 	Anchor *string `json:"anchor,omitempty,omitzero"`
 
+	// read_attachment: the attachment the daemon downloads to
+	// .attachments/<id>-<name> in the session's working directory (the folder holds
+	// its own .gitignore); the daemon replaces this with local_path in what the AI
+	// sees and never shows it the url.
+	AttachmentDownload *ToolAttachmentDownload `json:"attachment_download,omitempty,omitzero"`
+
 	// CallID corresponds to the JSON schema field "call_id".
 	CallID CallID `json:"call_id"`
 
@@ -10957,9 +11337,10 @@ type ToolResult struct {
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID SessionID `json:"session_id"`
 
-	// read_shared_file: the one file whose bytes arrived before as file.download
-	// frames; the daemon writes it as .shared/<path> in the session's working
-	// directory (the folder holds its own .gitignore).
+	// read_shared_file: the one file the daemon writes as .shared/<path> in the
+	// session's working directory (the folder holds its own .gitignore). Its bytes
+	// arrived before as file.download frames, or (daemons with attachments_v2) the
+	// file entry carries a url to GET, chunks is 0 and no frames are sent.
 	SharedDownload *ToolSharedDownload `json:"shared_download,omitempty,omitzero"`
 
 	// Optional structured result matching the tool result schema; null when the tool
@@ -10998,8 +11379,8 @@ func (j *ToolResult) UnmarshalJSON(value []byte) error {
 }
 
 type ToolSharedDownload struct {
-	// Number of file.download frames (0 when the file is empty; at most 20 for the 20
-	// MB limit).
+	// Number of file.download frames (0 when the file is empty or files[0].url is
+	// set; at most 20 for the 20 MB chunked limit).
 	Chunks int `json:"chunks"`
 
 	// DownloadID corresponds to the JSON schema field "download_id".
@@ -11053,8 +11434,43 @@ type ToolUpload struct {
 	// Files corresponds to the JSON schema field "files".
 	Files []UploadFile `json:"files"`
 
+	// chunks (default): bytes came as file.chunk frames. s3: the daemon PUT the one
+	// file to the presigned URL from POST /nodes/uploads (upload_id is the one it
+	// returned), chunks is 0 and files has exactly that file.
+	Storage ToolUploadStorage `json:"storage,omitempty,omitzero"`
+
 	// UploadID corresponds to the JSON schema field "upload_id".
 	UploadID UploadID `json:"upload_id"`
+}
+
+type ToolUploadStorage string
+
+const ToolUploadStorageChunks ToolUploadStorage = "chunks"
+const ToolUploadStorageS3 ToolUploadStorage = "s3"
+
+var enumValues_ToolUploadStorage = []interface{}{
+	"chunks",
+	"s3",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *ToolUploadStorage) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_ToolUploadStorage {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_ToolUploadStorage, v)
+	}
+	*j = ToolUploadStorage(v)
+	return nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -11088,6 +11504,9 @@ func (j *ToolUpload) UnmarshalJSON(value []byte) error {
 	}
 	if len(plain.Files) > 64 {
 		return fmt.Errorf("field %s length: must be <= %d", "files", 64)
+	}
+	if v, ok := raw["storage"]; !ok || v == nil {
+		plain.Storage = "chunks"
 	}
 	*j = ToolUpload(plain)
 	return nil
@@ -11418,7 +11837,7 @@ func (j *Welcome) UnmarshalJSON(value []byte) error {
 // (coordinator, leads, members of all threads) and every user of the project can
 // see, overwrite and delete them; they are stored by the platform, never in git.
 // Do not put secrets (keys, passwords, tokens, credentials) in shared files. A
-// file with the same path is overwritten. Limits: 20 MB per file, 500 MB per
+// file with the same path is overwritten. Limits: 200 MB per file, 5 GB per
 // project.
 type WriteSharedFileInput struct {
 	// A single file inside your working directory, relative to it (directories are
