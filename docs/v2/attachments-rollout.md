@@ -92,7 +92,14 @@ cd /root/agent-teams
 cp -p .env backups/env.pre-<sha>          # 已在 §2 做过就跳过
 python3 -I - <<'PY'
 import re
-src = dict(l.split("=", 1) for l in open("rustfs-credentials").read().split("\n") if "=" in l)
+def val(v):
+    v = v.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":   # 去掉成对的引号：KEY="..." 或 KEY='...'
+        v = v[1:-1]
+    return v
+src = {k.strip().removeprefix("export "): val(v) for k, v in
+       (l.split("=", 1) for l in open("rustfs-credentials").read().split("\n")
+        if "=" in l and not l.lstrip().startswith("#"))}
 add = {"AGENT_TEAMS_S3_ENDPOINT": src["S3_ENDPOINT"], "AGENT_TEAMS_S3_BUCKET": src["S3_BUCKET"],
        "AGENT_TEAMS_S3_ACCESS_KEY": src["S3_ACCESS_KEY"], "AGENT_TEAMS_S3_SECRET_KEY": src["S3_SECRET_KEY"],
        "AGENT_TEAMS_S3_REGION": src.get("S3_REGION", "us-east-1"), "AGENT_TEAMS_S3_PATH_STYLE": "true",
@@ -104,7 +111,14 @@ open(".env", "w").write("\n".join(lines + [f"{k}={v}" for k, v in add.items()]) 
 PY
 chmod 600 .env
 grep -c '^AGENT_TEAMS_S3_' .env           # 期望 6
+grep -E '^AGENT_TEAMS_S3_[A-Z_]+=["'\'']' .env | cut -d= -f1   # 期望无输出：值不能以引号开头
+grep -E '^AGENT_TEAMS_S3_(ENDPOINT|BUCKET|REGION)=' .env       # 这三项不是秘密，可以看一眼：无引号、无空格
 ```
+
+脚本会去掉 `rustfs-credentials` 里值两端成对的单引号或双引号（docker compose 的 `--env-file` 对引号的处理
+和 shell 不完全一样，带着引号写进 `.env` 会让 key 或 endpoint 多出引号字符，签名全部失败）。
+部署时仍要按上面两条 grep 检查一遍；**不要 `cat .env` 或打印 ACCESS_KEY / SECRET_KEY 的值**，只看键名。
+如果值里本身就含有引号、`$` 或空格，停下来先问用户，不要手工改写。
 
 四个必填项（endpoint、bucket、access key、secret key）要么全配、要么全不配。全不配时控制面照常启动，
 但所有新上传返回 503 `storage_unavailable`。部署前在 dmit 上确认能连到 RustFS：
@@ -195,6 +209,37 @@ $C run --rm migrate storage verify --table all              # 逐行核对对象
 | 有了新上传，或跑过 `purge-data` | 先 `$C run --rm migrate storage restore --table all`：把只在对象存储里的字节写回 `data`（只处理 ≤ 20 MB 的行）。再按上一行降迁移、换镜像 |
 | 有 > 20 MB 的附件或共享文件 | 旧版本存不下它们（`restore` 不处理，00460 的 Down 会拒绝执行）。要么经用户同意删掉这些行，要么用部署前的 dump 恢复（部署之后的新数据全部丢失） |
 
+**`restore` 只处理 `state = 'ready'` 的行**（附件和共享文件都是）。`state = 'failed'` 的行
+（blobgc 补算 sha256 时对象读不到、大小不对，或共享文件的哈希和上传方声明的不一致）字节只在对象存储里、
+而且已知不可信，`restore` 会跳过；00460 Down 只自动删 `expired` 的附件和没传完的上传，
+所以这些 `failed` 行还在时 Down 仍会报 `rows without data` 退出。降迁移前先手工处理：
+
+1. `restore` 之后，查还剩哪些行没有字节（只读，先给用户看）：
+   ```sql
+   SELECT id, project_id, name, size, state, created_at FROM at_attachments
+    WHERE data IS NULL AND state <> 'expired' AND NOT (state = 'uploading')
+    ORDER BY created_at;
+   SELECT project_id, path, size, state, updated_at FROM at_shared_files
+    WHERE data IS NULL ORDER BY updated_at;
+   ```
+   正常情况下这里只剩 `failed` 的行和 > 20 MB 的 `ready` 行（后者 `restore` 会逐行报出，`failed` 行它不看，只能靠这条查询）。
+2. **经用户同意**后，在一个事务里删掉 `failed` 的行，核对删除行数和第 1 步一致再提交：
+   ```sql
+   BEGIN;
+   DELETE FROM at_attachments  WHERE data IS NULL AND state = 'failed' RETURNING id, name;
+   DELETE FROM at_shared_files WHERE data IS NULL AND state = 'failed' RETURNING project_id, path;
+   -- 行数不对就 ROLLBACK;
+   COMMIT;
+   ```
+   这些行本来就不能用（下载会失败或内容不对），删掉后：消息里的附件显示“找不到”，共享文件从列表消失，
+   需要的话让用户或 AI 重新上传。没有外键指向这两张表，不会连带删别的数据。
+   对象留在 bucket 里（删除队列 `at_blob_deletions` 会被 Down 一起删掉），按本节最后一条手工清理。
+3. > 20 MB 的 `ready` 行按上表第三行处理（删行或用 dump 恢复）。删行同第 2 步，把条件换成
+   `data IS NULL AND state = 'ready' AND size > 20 * 1024 * 1024`。
+4. 再跑一次第 1 步，两条查询都为空后再降迁移。
+
+如果不想删行，就只能用部署前的 dump 恢复整个库（部署之后的新数据全部丢失）。
+
 `atctl` 没有 down 子命令。降迁移用 goose 命令行（在能连到库的地方，迁移目录用新版本的 `server/migrations`）：
 `goose -dir server/migrations postgres "$DATABASE_URL" down-to 450`；或者在 psql 里按 470、460 的顺序手工执行两个文件的
 `-- +goose Down` 段，再删掉 `goose_db_version` 里这两个版本的行。
@@ -235,3 +280,10 @@ $C run --rm migrate storage verify --table all              # 逐行核对对象
    改为调用事务提交后在后台完成（ebecce9），并加了回归测试。
 2. 附件过期时节点只提示“下载失败：HTTP 410”并建议重试，改为直接提示“附件已过期…请让用户重新上传”，
    不再回退旧接口（4b673d0）。
+
+## 9. 已知限制
+
+- **后台收尾期间控制面重启**：节点用预签名上传写共享文件时，`write_shared_file` 的收尾（复制对象、流式算
+  sha256 并比对）在调用事务提交后在后台完成（toolsvc 的 `Later`）。如果这期间控制面重启（部署、崩溃），
+  这次调用会一直停在 `waiting`，AI 拿不到结果，文件也没有写入；需要 AI 重新调用一次 `write_shared_file`
+  （停住的那次上传记录和临时对象由 blobgc 在预留期过后清理）。以后可以在控制面启动时清理这类停住的调用，直接给 AI 返回失败。
