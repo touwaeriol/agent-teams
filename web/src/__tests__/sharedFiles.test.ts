@@ -22,7 +22,7 @@ import {
   UploadBatchError,
   uploadErrorText,
   uploaderLabel,
-  uploadSharedFiles,
+  legacyUploadSharedFiles,
   SHARED_BATCH_BYTES,
   collectFiles,
   droppedFiles,
@@ -115,23 +115,25 @@ describe("planUpload", () => {
     expect(plan.overwrites).toEqual(["data/a.csv"]);
     expect(plan.totalAfter).toBe(2 * MB + 1 + 5);
   });
-  it("refuses a file over 20 MB, bad paths and duplicates", () => {
+  it("refuses a file over 200 MB, bad paths and duplicates", () => {
     const plan = planUpload(
       [
-        { file: fake("big.bin", 20 * MB + 1), path: "big.bin" },
+        { file: fake("big.bin", 200 * MB + 1), path: "big.bin" },
+        { file: fake("ok.bin", 200 * MB), path: "ok.bin" },
         { file: fake("x", 1), path: "../x" },
         { file: fake("y", 1), path: "d/y" },
         { file: fake("y", 1), path: "d/y" },
       ],
       listOf([]),
     );
-    expect(plan.problems.join("\n")).toContain("超过单个文件 20 MB 的上限");
+    expect(plan.problems.join("\n")).toContain("big.bin：200 MB，超过单个文件 200 MB 的上限");
+    expect(plan.problems.join("\n")).not.toContain("ok.bin");
     expect(plan.problems.join("\n")).toContain("../x：不能有 . 或 .. 目录");
     expect(plan.problems.join("\n")).toContain("d/y：这次上传里有两个同名文件");
   });
-  it("refuses an upload past the project's 500 MB or 1000 files, but allows an overwrite that fits", () => {
-    const full = listOf([file("old.bin", 10 * MB)], { total_bytes: 495 * MB });
-    expect(planUpload([{ file: fake("n.bin", 6 * MB), path: "n.bin" }], full).problems[0]).toContain("超过 500 MB 的上限");
+  it("refuses an upload past the project's 5 GB or 1000 files, but allows an overwrite that fits", () => {
+    const full = listOf([file("old.bin", 10 * MB)], { total_bytes: 5 * 1024 * MB - 5 * MB });
+    expect(planUpload([{ file: fake("n.bin", 6 * MB), path: "n.bin" }], full).problems[0]).toContain("超过 5 GB 的上限");
     expect(planUpload([{ file: fake("old.bin", 15 * MB), path: "old.bin" }], full).problems).toEqual([]);
     const many = listOf([], { file_count: 1000 });
     expect(planUpload([{ file: fake("n.txt", 1), path: "n.txt" }], many).problems[0]).toContain("1000 个的上限");
@@ -185,7 +187,7 @@ describe("batched upload", () => {
     const sent = fakeXhr((_n, paths) => ({ status: 201, body: { files: paths.map(up), total_bytes: 7 } }));
     const files = [18, 18, 18, 18, 18, 18].map((m, i) => ({ file: fake(`f${i}`, m * MB), path: `dir/f${i}` }));
     const progress: number[] = [];
-    const res = await uploadSharedFiles("p1", files, (f) => progress.push(f));
+    const res = await legacyUploadSharedFiles("p1", files, (f) => progress.push(f));
     expect(sent).toEqual([["dir/f0", "dir/f1", "dir/f2", "dir/f3"], ["dir/f4", "dir/f5"]]);
     expect(res.files?.map((f) => f.path)).toEqual(files.map((f) => f.path));
     expect(progress.every((p, i) => i === 0 || p >= progress[i - 1])).toBe(true);
@@ -197,7 +199,7 @@ describe("batched upload", () => {
       n === 1 ? { status: 201, body: { files: paths.map(up), total_bytes: 1 } } : { status: 409, body: { detail: "项目共享文件合计不能超过 500 MB", code: "quota_exceeded" } },
     );
     const files = [18, 18, 18, 18, 18].map((m, i) => ({ file: fake(`f${i}`, m * MB), path: `f${i}` }));
-    const err = await uploadSharedFiles("p1", files).catch((e) => e);
+    const err = await legacyUploadSharedFiles("p1", files).catch((e) => e);
     expect(err).toBeInstanceOf(UploadBatchError);
     expect(uploadErrorText(err)).toBe("已上传 4 个文件，其余 1 个没有上传：项目共享文件合计不能超过 500 MB");
   });
@@ -299,6 +301,8 @@ describe("SharedFiles page", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const req = input as Request;
       calls.push({ method: req.method, url: req.url });
+      // No object storage here: the direct upload answers 503 and the page falls back to the form upload.
+      if (req.method === "POST" && req.url.endsWith("/uploads")) return new Response(JSON.stringify({ detail: "no storage", code: "storage_unavailable" }), { status: 503, headers: { "Content-Type": "application/json" } });
       const body = req.url.includes("/shared-files") && req.method === "GET" ? list : req.method === "DELETE" ? null : { id: "p1", name: "agent team" };
       return body === null ? new Response(null, { status: 204 }) : new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
     });
@@ -321,7 +325,7 @@ describe("SharedFiles page", () => {
     expect(rows[0].text()).toContain("dev-1 #31");
     expect(rows[1].text()).toContain("你");
     expect(rows[0].get("a[download]").attributes("href")).toBe("/api/projects/p1/shared-files/download?path=data%2Fa.csv");
-    expect(w.get("[data-testid=shared-usage]").text()).toContain("已用 1.5 KB / 500 MB");
+    expect(w.get("[data-testid=shared-usage]").text()).toContain("已用 1.5 KB / 5 GB");
     await w.get("input[aria-label=搜索共享文件]").setValue("notes");
     expect(w.findAll("[role=row][data-path]").map((r) => r.attributes("data-path"))).toEqual(["notes.md"]);
   });
@@ -344,10 +348,10 @@ describe("SharedFiles page", () => {
     expect(dialog?.textContent).toContain("data/a.csv");
     expect(send).not.toHaveBeenCalled();
 
-    Object.defineProperty(input.element, "files", { value: [fake("big.bin", 21 * MB)], configurable: true });
+    Object.defineProperty(input.element, "files", { value: [fake("big.bin", 201 * MB)], configurable: true });
     await input.trigger("change");
     await flushPromises();
-    expect(w.get("[data-testid=shared-problems]").text()).toContain("超过单个文件 20 MB 的上限");
+    expect(w.get("[data-testid=shared-problems]").text()).toContain("超过单个文件 200 MB 的上限");
     expect(send).not.toHaveBeenCalled();
   });
 

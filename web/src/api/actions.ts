@@ -1,6 +1,7 @@
 // Every write the web app makes, as plain async functions over the client.
 // Pages wrap them with `useAction` (mutations.ts) for toasts and cache refresh.
 import { client, unwrap } from "./client";
+import { attachmentsField } from "@/lib/images";
 import type { components } from "./schema";
 import type { AskChoice, GitCredentialView, GitRepoView, GitTestResult, MainTaskStatus, NodeRecheck, ProjectServersView, ServerView, UsageRefresh } from "./views";
 
@@ -51,8 +52,9 @@ export const sessions = {
 export const deliverables = {
   rename: (id: string, title: string) => unwrap(client.PATCH("/api/deliverables/{id}", { params: { path: { id } }, body: { title } })),
   remove: (id: string) => unwrap(client.DELETE("/api/deliverables/{id}", { params: { path: { id } } })),
-  comment: (id: string, text: string, version?: number) =>
-    unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version } })),
+  /** attachments: NewCommentInputBody.attachments (ids uploaded to the project; agreed with the server, q10). */
+  comment: (id: string, text: string, version?: number, attachments: string[] = []) =>
+    unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version, ...(attachmentsField(attachments) as object) } })),
 };
 
 export const sharedFiles = {

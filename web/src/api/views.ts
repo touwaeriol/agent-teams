@@ -375,6 +375,8 @@ export interface AttachmentRef {
   name: string;
   content_type: string;
   size: number;
+  /** Set when the attachment's retention ran out (its bytes are gone; the API answers 410). */
+  expired?: boolean;
 }
 
 export type AttachmentView = S["AttachmentView"];

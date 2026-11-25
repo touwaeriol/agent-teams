@@ -184,6 +184,13 @@ export const messages = {
     msg("a2", "leader", "lead-12", "收到。拆成 4 个主要任务、13 个小任务：\n\n1. **后端通信**：信箱、提问、计划（dev-1）\n2. **审批走 permission-prompt-tool**（dev-1）\n3. **网页卡片**：提问 / 审批卡片、侧栏小圆点（dev-2）\n4. **联调测试**：PG 往返、超时不中断（qa-1）\n\n实现约定写在 `docs/agent-comms.md`，有结论我会在这里汇报。", 62),
     msg("a3", "employee", "dev-1 → 组长", "审批工具的返回格式按 permission-prompt-tool 要求做好了，请审查。", 24),
     msg("a4", "user", "liu", "卡片的按钮太挤了，照这个改，红框那块不要", 20, { attachments: [{ id: "img_seed", name: "截图.png", content_type: "image/svg+xml", size: 0 }] }),
+    msg("a42", "user", "liu", "需求和日志都在附件里，上周那份导出也附上了", 20, {
+      attachments: [
+        { id: "img_spec", name: "需求说明.pdf", content_type: "application/pdf", size: 18_874_368 },
+        { id: "img_data", name: "日志与数据.zip", content_type: "application/zip", size: 157_286_400 },
+        { id: "img_old", name: "上周的导出.csv", content_type: "text/csv", size: 2_411_724 },
+      ],
+    }),
     { ...msg("a45", "system", "lead-12", "[x] 后端通信\n[~] 网页卡片\n[ ] 联调测试", 19, { employee: "lead-12", todos: [
       { content: "后端通信：信箱、提问、计划", status: "completed", active_form: "做后端通信" },
       { content: "审批走 permission-prompt-tool", status: "completed", active_form: "改审批" },
