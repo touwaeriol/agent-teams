@@ -31,24 +31,12 @@ separate S3 user).
 - Table `at_user_fs` (migration 00480) holds the names, sealed secrets (credvault, AAD
   `UserFsAAD`), `generation` (grows when credentials change: nodes remount) and state
   provisioning | ready | error | deleting.
+- Storage is always the platform's (no user-supplied S3 or JuiceFS).
 
-## Storage choices
+## Quota
 
-The user picks one when switching the folder on (default: the platform's). Switching storage later
-means deleting the folder first; files are not migrated.
-
-| Backend | Data | Metadata | On delete |
-| --- | --- | --- | --- |
-| `platform` | `<AGENT_TEAMS_FS_BUCKET>/at-<id>/`, sub-account limited to the prefix | `jfs_<id>` schema here | volume destroyed, account and role dropped |
-| `s3` | the user's bucket, under `at-<id>/`, with the user's keys | `jfs_<id>` schema here | volume destroyed (the prefix in their bucket), role dropped |
-| `juicefs` | the user's own formatted JuiceFS | the user's engine (URL + password sealed here) | only forgotten; nodes unmount |
-
-Only `platform` volumes get a quota (`AGENT_TEAMS_FS_CAPACITY_GB`, default 20, 0 = none); a volume
-on the user's own S3 has no limit.
-
-The console formats an `s3` volume itself, so the endpoint must resolve to a public address
-(`PublicEndpoint`: no loopback, private, link-local or CGNAT). A `juicefs` URL is never contacted by
-the console; nodes report a bad one through `fs.status`.
+Each volume has a quota (`AGENT_TEAMS_FS_CAPACITY_GB`, default 20 GiB, 0 = none), set by
+`juicefs format --capacity`.
 
 ## Mounting
 
@@ -76,7 +64,5 @@ committed data.
 
 ## Not in v1
 
-- Migration between storages (stop writes, copy the volume prefix, `juicefs config --bucket`, bump
-  `generation`).
 - Per-project quotas (`juicefs quota`), a web file browser for the volume, tool fallback for nodes
   without a mount, and moving the old shared files into the volume.

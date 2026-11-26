@@ -60,7 +60,7 @@ type FS struct {
 	Bucket         string // AGENT_TEAMS_FS_BUCKET: bucket all volumes share (one prefix each)
 	AdminAccessKey string // AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY: object store admin (users and policies)
 	AdminSecretKey string // AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY
-	CapacityGB     int    // AGENT_TEAMS_FS_CAPACITY_GB, default 20; 0 = no limit (platform volumes only)
+	CapacityGB     int    // AGENT_TEAMS_FS_CAPACITY_GB, default 20; 0 = no limit
 	JuiceFS        string // AGENT_TEAMS_FS_JUICEFS: the juicefs binary, default juicefs
 	ClientVersion  string // AGENT_TEAMS_FS_CLIENT_VERSION: client nodes run, default the built-in one
 	ClientBase     string // AGENT_TEAMS_FS_CLIENT_BASE: download base, default the GitHub releases

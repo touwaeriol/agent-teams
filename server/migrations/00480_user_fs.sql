@@ -5,18 +5,12 @@
 -- object-storage account limited to that prefix (s3_access_key). The role's password and the
 -- account's secret key are sealed together in secrets (credvault, AAD = user, volume, generation).
 -- generation grows whenever the credentials change; nodes remount when it differs.
--- backend: platform (the platform's bucket and database, the default), s3 (the user's own bucket,
--- formatted by the console, metadata still in a jfs_ schema here) or juicefs (the user's own
--- formatted JuiceFS: only its metadata URL and password, sealed in secrets). summary is what the
--- settings page shows of it (endpoint, bucket, metadata host; never a secret).
 CREATE TABLE at_user_fs (
   user_id       TEXT PRIMARY KEY REFERENCES at_users(id) ON DELETE CASCADE,
   volume        TEXT NOT NULL UNIQUE,
   meta_role     TEXT NOT NULL UNIQUE,
   s3_access_key TEXT NOT NULL UNIQUE,
   secrets       JSONB NOT NULL,
-  backend       TEXT NOT NULL DEFAULT 'platform' CHECK (backend IN ('platform', 's3', 'juicefs')),
-  summary       JSONB NOT NULL DEFAULT '{}',
   generation    INT  NOT NULL DEFAULT 1,
   state         TEXT NOT NULL DEFAULT 'provisioning' CHECK (state IN ('provisioning', 'ready', 'error', 'deleting')),
   error         TEXT NOT NULL DEFAULT '',

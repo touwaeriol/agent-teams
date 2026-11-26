@@ -2399,48 +2399,6 @@
         ],
         "type": "object"
       },
-      "FsEnableInputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "access_key": {
-            "maxLength": 256,
-            "type": "string"
-          },
-          "bucket": {
-            "maxLength": 63,
-            "type": "string"
-          },
-          "kind": {
-            "description": "Default platform",
-            "enum": [
-              "platform",
-              "s3",
-              "juicefs"
-            ],
-            "type": "string"
-          },
-          "meta_password": {
-            "description": "juicefs: its password when not in the URL",
-            "maxLength": 256,
-            "type": "string"
-          },
-          "meta_url": {
-            "description": "juicefs: the metadata engine URL of the user's formatted volume",
-            "maxLength": 1000,
-            "type": "string"
-          },
-          "s3_endpoint": {
-            "description": "s3: https://host[:port]",
-            "maxLength": 300,
-            "type": "string"
-          },
-          "secret_key": {
-            "maxLength": 256,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "FsView": {
         "additionalProperties": false,
         "properties": {
@@ -2471,15 +2429,6 @@
       "FsVolumeView": {
         "additionalProperties": false,
         "properties": {
-          "backend": {
-            "description": "platform: the platform's storage; s3: the user's bucket; juicefs: the user's own JuiceFS",
-            "enum": [
-              "platform",
-              "s3",
-              "juicefs"
-            ],
-            "type": "string"
-          },
           "capacity_gb": {
             "format": "int64",
             "type": "integer"
@@ -2500,10 +2449,6 @@
             ],
             "type": "string"
           },
-          "summary": {
-            "$ref": "#/components/schemas/StorageSummary",
-            "description": "Where the user's own storage is (no secret)"
-          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -2514,8 +2459,6 @@
         },
         "required": [
           "volume",
-          "backend",
-          "summary",
           "state",
           "error",
           "capacity_gb",
@@ -7612,21 +7555,6 @@
           "updated_at",
           "valid"
         ],
-        "type": "object"
-      },
-      "StorageSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "bucket": {
-            "type": "string"
-          },
-          "endpoint": {
-            "type": "string"
-          },
-          "meta": {
-            "type": "string"
-          }
-        },
         "type": "object"
       },
       "Summary": {
@@ -16956,15 +16884,6 @@
       },
       "post": {
         "operationId": "enable-shared-folder",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FsEnableInputBody"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "content": {

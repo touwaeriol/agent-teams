@@ -1884,8 +1884,6 @@
       "generation": 1,
       "meta_url": "postgres://jfs_01jd3v0000@db.example.net:15432/agent_teams?sslmode=verify-full&search_path=jfs_01jd3v0000",
       "meta_password": "secret",
-      "access_key": "jfs-01jd3v0000",
-      "secret_key": "secret",
       "client": {
         "version": "1.4.2",
         "assets": [

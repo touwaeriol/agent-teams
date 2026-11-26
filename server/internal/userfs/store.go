@@ -13,25 +13,23 @@ import (
 
 // Volume is an at_user_fs row without its secrets.
 type Volume struct {
-	UserID     string         `json:"-"`
-	Volume     string         `json:"volume"`
-	MetaRole   string         `json:"-"`
-	AccessKey  string         `json:"-"`
-	Backend    string         `json:"backend"`
-	Summary    StorageSummary `json:"summary"`
-	Generation int            `json:"generation"`
-	State      string         `json:"state"`
-	Error      string         `json:"error"`
-	CapacityGB int            `json:"capacity_gb"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	UserID     string    `json:"-"`
+	Volume     string    `json:"volume"`
+	MetaRole   string    `json:"-"`
+	AccessKey  string    `json:"-"`
+	Generation int       `json:"generation"`
+	State      string    `json:"state"`
+	Error      string    `json:"error"`
+	CapacityGB int       `json:"capacity_gb"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-const volumeCols = `user_id, volume, meta_role, s3_access_key, backend, summary, generation, state, error, capacity_gb, created_at, updated_at`
+const volumeCols = `user_id, volume, meta_role, s3_access_key, generation, state, error, capacity_gb, created_at, updated_at`
 
 func scanVolume(row store.Scanner) (Volume, error) {
 	var v Volume
-	err := row.Scan(&v.UserID, &v.Volume, &v.MetaRole, &v.AccessKey, &v.Backend, &v.Summary, &v.Generation, &v.State, &v.Error, &v.CapacityGB, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.UserID, &v.Volume, &v.MetaRole, &v.AccessKey, &v.Generation, &v.State, &v.Error, &v.CapacityGB, &v.CreatedAt, &v.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, ErrNotFound
 	}
@@ -44,17 +42,16 @@ func Get(ctx context.Context, q store.DB, userID string) (Volume, error) {
 }
 
 // insert creates the user's row (provisioning) unless one exists; it returns the row either way.
-func insert(ctx context.Context, q store.DB, v *credvault.Vault, userID string, capacityGB int, b Backend) (Volume, error) {
+func insert(ctx context.Context, q store.DB, v *credvault.Vault, userID string, capacityGB int) (Volume, error) {
 	n := NamesFor(userID)
-	raw, _ := json.Marshal(secretsFor(b))
+	raw, _ := json.Marshal(NewSecrets())
 	sealed, err := v.Seal(credvault.UserFsAAD(userID, n.Volume, 1), raw)
 	if err != nil {
 		return Volume{}, err
 	}
 	sj, _ := json.Marshal(sealed)
-	summary, _ := json.Marshal(b.Summary())
-	if _, err := store.Exec(ctx, q, `INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb, backend, summary)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (user_id) DO NOTHING`, userID, n.Volume, n.Role, n.AccessKey, sj, capacityGB, b.Kind, summary); err != nil {
+	if _, err := store.Exec(ctx, q, `INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb)
+		VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (user_id) DO NOTHING`, userID, n.Volume, n.Role, n.AccessKey, sj, capacityGB); err != nil {
 		return Volume{}, err
 	}
 	return Get(ctx, q, userID)

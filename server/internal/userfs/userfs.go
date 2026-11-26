@@ -149,23 +149,6 @@ func NamesFor(userID string) Names {
 type Secrets struct {
 	MetaPassword string `json:"meta_password"`
 	SecretKey    string `json:"secret_key"`
-	// The user's own storage: S3 access key and bucket URL (s3), or metadata URL without
-	// password (juicefs).
-	AccessKey string `json:"access_key,omitempty"`
-	Bucket    string `json:"bucket,omitempty"`
-	MetaURL   string `json:"meta_url,omitempty"`
-}
-
-// secretsFor are the sealed secrets of a new volume on backend b.
-func secretsFor(b Backend) Secrets {
-	switch b.Kind {
-	case BackendS3:
-		return Secrets{MetaPassword: randomSecret(24), AccessKey: b.AccessKey, SecretKey: b.SecretKey,
-			Bucket: strings.TrimSuffix(b.S3Endpoint, "/") + "/" + b.Bucket}
-	case BackendJuiceFS:
-		return Secrets{MetaURL: b.MetaURL, MetaPassword: b.MetaPassword}
-	}
-	return NewSecrets()
 }
 
 func randomSecret(n int) string {

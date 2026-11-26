@@ -3294,22 +3294,6 @@ export interface components {
             /** @description Host command installing the volume plugin (once per host) */
             plugin: string;
         };
-        FsEnableInputBody: {
-            access_key?: string;
-            bucket?: string;
-            /**
-             * @description Default platform
-             * @enum {string}
-             */
-            kind?: "platform" | "s3" | "juicefs";
-            /** @description juicefs: its password when not in the URL */
-            meta_password?: string;
-            /** @description juicefs: the metadata engine URL of the user's formatted volume */
-            meta_url?: string;
-            /** @description s3: https://host[:port] */
-            s3_endpoint?: string;
-            secret_key?: string;
-        };
         FsView: {
             /** @description The console has AGENT_TEAMS_FS_* (otherwise the folder cannot be switched on) */
             configured: boolean;
@@ -3321,11 +3305,6 @@ export interface components {
             volume?: components["schemas"]["FsVolumeView"];
         };
         FsVolumeView: {
-            /**
-             * @description platform: the platform's storage; s3: the user's bucket; juicefs: the user's own JuiceFS
-             * @enum {string}
-             */
-            backend: "platform" | "s3" | "juicefs";
             /** Format: int64 */
             capacity_gb: number;
             /** Format: date-time */
@@ -3333,8 +3312,6 @@ export interface components {
             error: string;
             /** @enum {string} */
             state: "provisioning" | "ready" | "error" | "deleting";
-            /** @description Where the user's own storage is (no secret) */
-            summary: components["schemas"]["StorageSummary"];
             /** Format: date-time */
             updated_at: string;
             volume: string;
@@ -4859,11 +4836,6 @@ export interface components {
             updated_at: string | null;
             valid: boolean;
             version: string;
-        };
-        StorageSummary: {
-            bucket?: string;
-            endpoint?: string;
-            meta?: string;
         };
         Summary: {
             agents: string[] | null;
@@ -10651,11 +10623,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["FsEnableInputBody"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {

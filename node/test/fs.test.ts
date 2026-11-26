@@ -29,7 +29,7 @@ function tarball(): { data: Buffer; sha: string } {
 function spec(sha: string, generation = 1): FsMount {
   return {
     volume: "at-0123456789abcdef", generation, meta_url: "postgres://jfs_x@db:5432/at?search_path=jfs_x", meta_password: "pw",
-    access_key: "a", secret_key: "s", client: { version: "1.4.2", assets: [{ platform: "linux-amd64", url: "https://dl/juicefs.tgz", sha256: sha }] },
+    client: { version: "1.4.2", assets: [{ platform: "linux-amd64", url: "https://dl/juicefs.tgz", sha256: sha }] },
   };
 }
 

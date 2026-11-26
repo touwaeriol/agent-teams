@@ -143,7 +143,7 @@ export const servers = {
 
 /** The user's JuiceFS shared folder (one volume per user). */
 export const sharedFolder = {
-  enable: (body?: S["FsEnableInputBody"]) => unwrap(client.POST("/api/storage/fs", body ? { body } : {})),
+  enable: () => unwrap(client.POST("/api/storage/fs")),
   remove: (confirm: string) => unwrap(client.DELETE("/api/storage/fs", { body: { confirm } })),
   dockerVolume: () => unwrap(client.POST("/api/storage/fs/docker-volume")),
 };

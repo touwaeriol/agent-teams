@@ -776,18 +776,13 @@ export interface FsMount {
    */
   generation: number;
   /**
-   * Metadata engine URL without the password (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x for platform and own-S3 volumes; the user's own engine URL for an own JuiceFS, where a password that could not be split out stays inline).
+   * Metadata engine URL without the password: postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x. The volume's object storage keys live in its metadata (juicefs format).
    */
   meta_url: string;
   /**
-   * Goes in META_PASSWORD; empty when the URL carries it (or needs none).
+   * Goes in META_PASSWORD.
    */
   meta_password: string;
-  /**
-   * Object storage key of the volume (limited to its prefix on the platform's bucket); empty for the user's own JuiceFS, whose keys live in its metadata.
-   */
-  access_key: string;
-  secret_key: string;
   /**
    * The juicefs client to run: the daemon picks the asset of its platform (linux-amd64, linux-arm64, darwin-arm64…), downloads it and checks sha256, unless that exact version is already present. A tar.gz holding the juicefs binary.
    */
