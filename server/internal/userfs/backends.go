@@ -148,7 +148,17 @@ func notFound(err error) bool {
 type CLI struct {
 	Bin     string
 	Timeout time.Duration
+	// Gateways serve Files (juicefs gateway children).
+	Gateways *Gateways
 }
+
+// Files implements Volumes.
+func (c CLI) Files(ctx context.Context, volume, metaURL, metaPassword string) (Files, error) {
+	return c.Gateways.Files(ctx, volume, metaURL, metaPassword)
+}
+
+// Close implements Volumes.
+func (c CLI) Close(volume string) { c.Gateways.Stop(volume) }
 
 func (c CLI) run(ctx context.Context, env []string, args ...string) ([]byte, error) {
 	t := c.Timeout

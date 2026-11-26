@@ -84,7 +84,7 @@ func sharedFolders(c config.FS, st *store.Store, vault *credvault.Vault, log *sl
 	}
 	return userfs.New(cfg, st.Pool, vault, &userfs.PGMeta{URL: c.AdminURL},
 		userfs.MinioIAM{Endpoint: c.S3Endpoint, AccessKey: c.AdminAccessKey, SecretKey: c.AdminSecretKey},
-		userfs.CLI{Bin: c.JuiceFS}, log)
+		userfs.CLI{Bin: c.JuiceFS, Gateways: &userfs.Gateways{Bin: c.JuiceFS, Log: log}}, log)
 }
 
 // objectStore builds the attachments and shared-files store from AGENT_TEAMS_S3_* (#58): None when

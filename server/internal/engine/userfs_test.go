@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,7 +16,10 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
 
-type fsFakes struct{ formatted, destroyed int }
+type fsFakes struct {
+	formatted, destroyed int
+	root                 string
+}
 
 func (f *fsFakes) Ensure(context.Context, string, string) error { return nil }
 func (f *fsFakes) Drop(context.Context, string) error           { return nil }
@@ -26,13 +31,17 @@ func (fsIAM) Remove(context.Context, userfs.Names) error                 { retur
 
 func (f *fsFakes) Format(context.Context, userfs.FormatSpec) error { f.formatted++; return nil }
 func (f *fsFakes) Destroy(context.Context, string, string) error   { f.destroyed++; return nil }
+func (f *fsFakes) Files(_ context.Context, volume, _, _ string) (userfs.Files, error) {
+	return userfs.DirFiles{Root: filepath.Join(f.root, volume)}, os.MkdirAll(filepath.Join(f.root, volume), 0o755)
+}
+func (f *fsFakes) Close(string) {}
 
 // TestSharedFolderReachesNodesAndSessions: switching the folder on sends the user's mounting node
 // fs.mount on the live link only (never the outbox), the node's fs.status shows on the node page,
 // sessions opened there carry the folders, and deleting the folder sends fs.unmount.
 func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
 	w := newWorldWith(t, nil, nil)
-	fakes := &fsFakes{}
+	fakes := &fsFakes{root: t.TempDir()}
 	cfg := userfs.Config{AdminURL: "postgres://admin@db/at", MetaHost: "db.example:5432", MetaSSLMode: "verify-full", S3Endpoint: "https://s3.example",
 		Bucket: "jfs", AdminAccessKey: "ak", AdminSecretKey: "sk", CapacityGB: 20, ClientVersion: userfs.DefaultClientVersion,
 		ClientBase: userfs.DefaultClientBase, Assets: userfs.DefaultAssets}

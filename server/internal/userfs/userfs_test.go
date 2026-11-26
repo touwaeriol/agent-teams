@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -46,7 +48,16 @@ func (f *fakeIAM) Remove(_ context.Context, n Names) error { delete(f.users, n.A
 type fakeVolumes struct {
 	formatted map[string]FormatSpec
 	destroyed int
+	root      string
+	closed    []string
+	opened    []string // metaURL of each Files
 }
+
+func (f *fakeVolumes) Files(_ context.Context, volume, metaURL, _ string) (Files, error) {
+	f.opened = append(f.opened, metaURL)
+	return DirFiles{Root: filepath.Join(f.root, volume)}, os.MkdirAll(filepath.Join(f.root, volume), 0o755)
+}
+func (f *fakeVolumes) Close(volume string) { f.closed = append(f.closed, volume) }
 
 func (f *fakeVolumes) Format(_ context.Context, s FormatSpec) error {
 	f.formatted[s.Volume] = s
@@ -74,7 +85,7 @@ func newTest(t *testing.T) (*Service, *fakeMeta, *fakeIAM, *fakeVolumes, *store.
 		t.Fatal(err)
 	}
 	v, _ := credvault.New("k1")
-	m, i, vols := &fakeMeta{roles: map[string]string{}}, &fakeIAM{users: map[string]string{}}, &fakeVolumes{formatted: map[string]FormatSpec{}}
+	m, i, vols := &fakeMeta{roles: map[string]string{}}, &fakeIAM{users: map[string]string{}}, &fakeVolumes{formatted: map[string]FormatSpec{}, root: t.TempDir()}
 	s := New(testConfig(), st.Pool, v, m, i, vols, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return s, m, i, vols, st
 }

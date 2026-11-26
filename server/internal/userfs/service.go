@@ -34,6 +34,10 @@ type Volumes interface {
 	Format(ctx context.Context, f FormatSpec) error
 	// Destroy deletes the volume's objects and metadata. A volume that was never formatted is not an error.
 	Destroy(ctx context.Context, metaURL, metaPassword string) error
+	// Files opens the volume's tree for the console (no mount).
+	Files(ctx context.Context, volume, metaURL, metaPassword string) (Files, error)
+	// Close releases what Files holds for the volume (before it is destroyed).
+	Close(volume string)
 }
 
 // FormatSpec is one juicefs format.
@@ -139,6 +143,7 @@ func (s *Service) Disable(ctx context.Context, userID string) error {
 		return err
 	}
 	s.changed(ctx, userID) // nodes unmount before the data goes
+	s.volumes.Close(vol.Volume)
 	if err := s.teardown(ctx, vol); err != nil {
 		_ = setState(context.WithoutCancel(ctx), s.db, userID, StateError, "删除失败："+err.Error())
 		return err
@@ -199,6 +204,30 @@ func (s *Service) MountSpec(ctx context.Context, userID string) (protocol.FsMoun
 	}
 	return protocol.FsMount{Volume: n.Volume, Generation: vol.Generation, MetaURL: MetaURL(n.Role, s.cfg.MetaHost, db, s.cfg.MetaSSLMode),
 		MetaPassword: sec.MetaPassword, Client: protocol.FsMountClient{Version: s.cfg.ClientVersion, Assets: assets}}, nil
+}
+
+// Files is the tree of the user's ready volume (ErrNotFound unless ready), for the console's
+// own reads and writes.
+func (s *Service) Files(ctx context.Context, userID string) (Files, error) {
+	if !s.Enabled() {
+		return nil, ErrDisabled
+	}
+	vol, err := Get(ctx, s.db, userID)
+	if err != nil {
+		return nil, err
+	}
+	if vol.State != StateReady {
+		return nil, ErrNotFound
+	}
+	sec, err := secrets(ctx, s.db, s.vault, vol)
+	if err != nil {
+		return nil, err
+	}
+	db, err := s.cfg.database()
+	if err != nil {
+		return nil, err
+	}
+	return s.volumes.Files(ctx, vol.Volume, MetaURL(vol.MetaRole, s.cfg.adminHost(), db, "disable"), sec.MetaPassword)
 }
 
 // Ready tells whether the user has a ready volume (session.open sends a shared folder only then).
