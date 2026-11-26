@@ -2,19 +2,17 @@
 // Only packaged builds check; unsigned Mac builds cannot install updates (Squirrel.Mac
 // requires a signature), so a failure is logged and the app keeps running.
 import { app, dialog } from "electron";
-import electronUpdater from "electron-updater";
+import { autoUpdater } from "electron-updater";
 
 export const updatesEnabled = (env: Record<string, string | undefined>) => app.isPackaged && env.AGENT_TEAMS_NO_UPDATE !== "1";
 
 export function startAutoUpdate() {
-  const { autoUpdater } = electronUpdater;
   autoUpdater.on("error", (err) => console.warn("[updater]", err?.message ?? err));
   void autoUpdater.checkForUpdatesAndNotify().catch((err: unknown) => console.warn("[updater]", err));
 }
 
 /** 检查更新… from the menu: checks now and says what it found. */
 export async function checkForUpdatesNow() {
-  const { autoUpdater } = electronUpdater;
   try {
     const result = await autoUpdater.checkForUpdates();
     const latest = result?.updateInfo.version;

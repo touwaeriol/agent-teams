@@ -51,8 +51,8 @@ function guardContents(contents: WebContents) {
   });
   contents.on("will-attach-webview", (event) => event.preventDefault());
   contents.on("did-fail-load", (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
-    if (!showsOfflinePage(errorCode, isMainFrame)) return;
-    void contents.loadFile(join(__dirname, OFFLINE_PAGE), { query: { url: validatedURL || appUrl.toString(), error: `${errorDescription} (${errorCode})` } });
+    if (!showsOfflinePage(errorCode, isMainFrame, validatedURL)) return;
+    void contents.loadFile(join(__dirname, OFFLINE_PAGE), { query: { url: validatedURL, error: `${errorDescription} (${errorCode})` } });
   });
   contents.on("before-input-event", (event, input) => {
     if (!isDevToolsShortcut(input, process.platform)) return;

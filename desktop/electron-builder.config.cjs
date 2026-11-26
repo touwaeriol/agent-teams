@@ -20,8 +20,21 @@ module.exports = {
   files: ["dist/**/*", "package.json", "!**/*.map"],
   asar: true,
   protocols: [{ name: "Agent Teams", schemes: ["agentteams"] }],
-  publish: [{ provider: "github", owner: "touwaeriol", repo: "agent-teams", releaseType: "release" }],
+  // Releases are tagged desktop-v<version> (the repo's other tags stay out of the way). The CI
+  // workflow builds with --publish never and uploads the files itself (ci/desktop-release.yml);
+  // this entry still goes into app-update.yml, which electron-updater reads.
+  publish: [{ provider: "github", owner: "touwaeriol", repo: "agent-teams", releaseType: "release", tagNamePrefix: "desktop-v" }],
   artifactName: "${productName}-${version}-${os}-${arch}.${ext}",
+
+  // Flipped in the Electron binary at package time: the shipped app cannot be turned into a
+  // plain Node runtime (ELECTRON_RUN_AS_NODE, NODE_OPTIONS, --inspect) or load code outside app.asar.
+  electronFuses: {
+    runAsNode: false,
+    enableNodeOptionsEnvironmentVariable: false,
+    enableNodeCliInspectArguments: false,
+    onlyLoadAppFromAsar: true,
+    enableCookieEncryption: true,
+  },
 
   mac: {
     category: "public.app-category.productivity",
@@ -44,7 +57,8 @@ module.exports = {
   dmg: { artifactName: "${productName}-${version}-mac-${arch}.${ext}" },
 
   win: {
-    target: [{ target: "nsis", arch: ["x64", "arm64"] }],
+    // x64 only; add "arm64" for Windows on ARM (one installer then carries both and is twice the size).
+    target: [{ target: "nsis", arch: ["x64"] }],
     ...(azure
       ? {
           azureSignOptions: {

@@ -1,0 +1,139 @@
+# Desktop client (desktop/): builds the Mac and Windows installers.
+#
+# Copy this file to .github/workflows/desktop-release.yml (the platform token cannot write
+# .github/workflows, so it lives here).
+#
+#   - Every push that touches desktop/: typecheck, tests, then unsigned-or-signed builds
+#     uploaded as workflow artifacts (Actions → the run → Artifacts).
+#   - A tag desktop-v<version> (equal to desktop/package.json "version"): the same builds,
+#     then a GitHub Release with the installers and the latest*.yml files electron-updater
+#     reads. Release: bump desktop/package.json, commit, `git tag desktop-v0.2.0 && git push --tags`.
+#
+# Secrets (Settings → Secrets and variables → Actions). All optional: without them the
+# installers are unsigned (desktop/README.md says what users then see).
+#   Mac signing        MAC_CSC_LINK                 Developer ID Application certificate, .p12 as base64
+#                      MAC_CSC_KEY_PASSWORD         its password
+#   Mac notarization   APPLE_ID                     Apple ID e-mail of the developer account
+#                      APPLE_APP_SPECIFIC_PASSWORD  app-specific password (appleid.apple.com)
+#                      APPLE_TEAM_ID                10-character team ID
+#   Windows, .pfx      WIN_CSC_LINK                 code signing certificate, .pfx as base64
+#                      WIN_CSC_KEY_PASSWORD         its password
+#   Windows, Azure     AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET   service principal
+#   Artifact Signing   AZURE_SIGN_ENDPOINT          e.g. https://eus.codesigning.azure.net
+#                      AZURE_SIGN_ACCOUNT           Artifact Signing account name
+#                      AZURE_SIGN_PROFILE           certificate profile name
+# GITHUB_TOKEN (built in) creates the release; nothing to add for it.
+
+name: Desktop
+
+on:
+  push:
+    paths: ['desktop/**', '.github/workflows/desktop-release.yml']
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: desktop
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        run: test "desktop-v$(node -p 'require("./package.json").version')" = "${GITHUB_REF_NAME}"
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: mac
+            args: --mac
+          - os: windows-latest
+            name: windows
+            args: --win
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Package
+        shell: bash
+        env:
+          # Empty secrets are unset for electron-builder, which then builds unsigned.
+          CSC_LINK: ${{ matrix.name == 'mac' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.name == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGN_ENDPOINT: ${{ secrets.AZURE_SIGN_ENDPOINT }}
+          AZURE_SIGN_ACCOUNT: ${{ secrets.AZURE_SIGN_ACCOUNT }}
+          AZURE_SIGN_PROFILE: ${{ secrets.AZURE_SIGN_PROFILE }}
+        run: |
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID WIN_CSC_LINK WIN_CSC_KEY_PASSWORD \
+                   AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_SIGN_ENDPOINT AZURE_SIGN_ACCOUNT AZURE_SIGN_PROFILE; do
+            [ -z "${!v}" ] && unset "$v"
+          done
+          npx electron-builder --config electron-builder.config.cjs ${{ matrix.args }} --publish never
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.blockmap
+            desktop/release/latest*.yml
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: GitHub Release
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Agent Teams 桌面端 ${GITHUB_REF_NAME#desktop-v}" --generate-notes --latest
