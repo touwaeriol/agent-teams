@@ -10,6 +10,7 @@ server/scripts/test.sh -run TestRoles        # extra go test args
 cd node && npm test && npm run typecheck     # daemon: vitest + tsc
 cd web && npm test && npm run typecheck && npm run lint && npm run build
 cd protocol && npm test && npm run check:examples && npm run typecheck
+cd desktop && npm ci && npm run typecheck && npm test && npm run build   # desktop shell; npm run dist:dir to package
 make gen-protocol                            # schemas → message.json, bundle, TS types, Go types (Go in docker)
 docker run --rm -e GOFLAGS=-mod=mod -v "$PWD:/src" -v agent-teams-gomod:/go/pkg/mod -w /src/server golang:1.26 \
   go run ./cmd/atctl openapi > web/src/api/openapi.json   # after any API change (TestOpenAPIUpToDate)
@@ -28,6 +29,7 @@ Real-Claude end-to-end runs: `deploy/e2e/README.md` (`up.sh <scratch>` then `run
 - `/node` (TypeScript daemon, Node ≥ 22, Claude Agent SDK + `codex app-server`): long-lived employee sessions, canUseTool approvals, platform MCP tools forwarded as `tool.call`, local git (clone / worktree / cleanup), short-lived GitHub credentials on demand. Dials `/nodes/connect` with its token; protocol 2 only. Installed by `/install-node.sh` (tarball served by the control plane).
 - `/protocol`: JSON Schemas are the single source for node messages, tool args and the office layout; Go and TS types are generated (`make gen-protocol`).
 - `/web`: Vue 3 + Vite + TypeScript + Element Plus + vue-query + Pinia + vue-router, Tailwind with the shared design tokens (light by default, `.dark` opt-in via `lib/theme.ts`; shells in `components/shell`: `ProjectShell` and `SettingsShell`). Pages compose `src/components/common` (`Page`, `Panel`, `Field`, `FormDialog`, `ConfirmAction`, `DataTable`…) and Element Plus (themed in `styles/element.css`); API types come from `src/api/openapi.json`, writes go through `useAction` (api/mutations.ts). `server/Dockerfile` builds it into the image.
+- `/desktop`: Mac / Windows client, an Electron shell (TypeScript, electron-builder, electron-updater) that loads https://agent.prophey.ai (`AGENT_TEAMS_URL` overrides) so the site stays same-origin; no web/ or server/ changes. Pure logic (navigation, deep links `agentteams://`, permissions, menu) has vitest tests; the release workflow is `desktop/ci/desktop-release.yml`, copied into `.github/workflows` by hand (`desktop/README.md`).
 - `/deploy`: production compose (`docker-compose.yml` via `compose.sh`, project dir = repo root), `env.example`, `node/` (node container image + compose example, runs as uid 1000), `e2e/` (local stack + GitHub emulator `localgh.mjs` + real-Claude runs).
 - Design docs: `docs/v2/architecture.md`, `data-model.md`, `api.md`, `protocol.md`, `office-layout.md`.
 

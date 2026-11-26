@@ -1,0 +1,30 @@
+{
+  "name": "agent-teams-desktop",
+  "productName": "Agent Teams",
+  "version": "0.1.0",
+  "description": "Agent Teams desktop client (Mac / Windows): an Electron shell around https://agent.prophey.ai",
+  "author": "touwaeriol",
+  "license": "SEE LICENSE IN ../LICENSE",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-static.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "npm run build && electron .",
+    "icon": "node scripts/make-icon.mjs",
+    "dist": "npm run build && electron-builder --config electron-builder.config.cjs",
+    "dist:dir": "npm run build && electron-builder --config electron-builder.config.cjs --dir"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.11"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "@types/node": "24.19.4",
+    "electron": "45.5.0",
+    "electron-builder": "26.18.0",
+    "typescript": "7.0.2",
+    "vitest": "5.1.2"
+  }
+}
