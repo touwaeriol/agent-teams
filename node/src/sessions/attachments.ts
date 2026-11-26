@@ -23,7 +23,7 @@ const ID = /^img_[0-9A-Za-z]{1,60}$/;
 const MAX_NAME_BYTES = 120;
 
 export interface AttachmentOptions {
-  /** Total time for one attachment: the /url requests, presigned retries and the legacy fallback together (also one write_shared_file upload). */
+  /** Total time for one attachment: the /url requests, presigned retries and the legacy fallback together. */
   timeoutMs: number;
   /** Free space that must remain on the disk after the download. */
   minFreeBytes: number;

@@ -30,7 +30,7 @@ export interface NodeConfig {
   /**
    * .attachments/ downloads (#58): AGENT_TEAMS_ATTACHMENT_RETENTION_H (hours a local copy is kept, default 24, 0 = forever),
    * AGENT_TEAMS_ATTACHMENT_RETENTION_FROM (last_use | download, default last_use), AGENT_TEAMS_ATTACHMENT_TIMEOUT_S
-   * (total time for one attachment, all retries and fallbacks included, and for one write_shared_file upload; default 600), AGENT_TEAMS_ATTACHMENT_MIN_FREE_MB (disk space left after a download, default 512).
+   * (total time for one attachment, all retries and fallbacks included; default 600), AGENT_TEAMS_ATTACHMENT_MIN_FREE_MB (disk space left after a download, default 512).
    */
   attachments?: Partial<AttachmentOptions>;
   /** AGENT_TEAMS_FS_DIR: the shared folder mounted by something else (Docker volume plugin); the daemon then never mounts it itself. */

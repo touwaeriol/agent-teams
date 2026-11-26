@@ -109,7 +109,7 @@ export interface DaemonOptions {
   liveDigestDelayMs?: number;
   /** .attachments/ download budget, disk reserve and retention (AGENT_TEAMS_ATTACHMENT_*; config.ts). */
   attachments?: Partial<AttachmentOptions>;
-  /** Tests: fetch used for attachment and shared-file transfers (default global fetch). */
+  /** Tests: fetch used for attachment downloads (default global fetch). */
   transferFetch?: typeof fetch;
   /** Updater overrides (tests): poll and confirm delays, fetch, npm. */
   updater?: Partial<Pick<UpdaterOptions, "pollMs" | "confirmAfterMs" | "fetchFn" | "npm" | "now">>;
@@ -119,7 +119,7 @@ export interface DaemonOptions {
   sharedFs?: Partial<Pick<SharedFsOptions, "run" | "fetchFn" | "fuse" | "platform" | "checkMs" | "mountWaitMs">>;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "context_detail", "session_controls", "attachments_v2"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "context_detail", "session_controls", "attachments_v2"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {

@@ -15,7 +15,7 @@ import (
 )
 
 // v2Features are the hello features of a daemon with attachments_v2 (#58).
-var v2Features = []string{"sessions", "git_worktree", "cred_helper", "file_download", "shared_files", "attachments_v2"}
+var v2Features = []string{"sessions", "git_worktree", "cred_helper", "file_download", "attachments_v2"}
 
 // attTeam is a project with a thread whose lead is up; the node has attachments_v2 when v2.
 func attTeam(t *testing.T, v2 bool) *team {

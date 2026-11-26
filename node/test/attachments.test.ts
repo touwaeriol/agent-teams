@@ -15,7 +15,6 @@ import {
 import { claudeContent, codexImages } from "../src/sessions/images.js";
 import { promptBlocks } from "../src/sessions/antigravity/driver.js";
 import { ToolBroker } from "../src/toolhost/broker.js";
-import { putFile } from "../src/toolhost/transfer.js";
 
 const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 const MB = 1024 * 1024;
@@ -26,7 +25,7 @@ function workdir(): string {
   return mkdtempSync(join(tmpdir(), "at-att-"));
 }
 
-/** A console + storage stand-in: /nodes/attachments/{id}/url, /nodes/attachments/{id}, /s3/{id} (presigned), /nodes/uploads, PUT /s3-put/{id}. */
+/** A console + storage stand-in: /nodes/attachments/{id}/url, /nodes/attachments/{id}, /s3/{id} (presigned). */
 class FakeStore {
   server!: Server;
   base = "";
@@ -39,9 +38,6 @@ class FakeStore {
   urlCalls: string[] = [];
   legacyCalls: { id: string; auth: string | undefined }[] = [];
   presignedCalls: { id: string; auth: string | undefined }[] = [];
-  uploads: Record<string, unknown>[] = [];
-  uploadMode: "ok" | 404 | 403 = "ok";
-  put = new Map<string, { body: Buffer; headers: IncomingMessage["headers"] }>();
 
   async start(): Promise<ConsoleHttp> {
     this.server = createServer((req, res) => void this.handle(req, res));
@@ -84,25 +80,8 @@ class FakeStore {
       const b = this.files.get(id);
       return void (b ? res.writeHead(200).end(b) : res.writeHead(404).end());
     }
-    if (url === "/nodes/uploads" && req.method === "POST") {
-      const body = JSON.parse(Buffer.concat(await chunks(req)).toString()) as Record<string, unknown>;
-      this.uploads.push({ ...body, auth });
-      if (this.uploadMode !== "ok") return void res.writeHead(this.uploadMode, { "Content-Type": "application/json" }).end(JSON.stringify({ detail: "quota exceeded" }));
-      res.writeHead(200, { "Content-Type": "application/json" });
-      return void res.end(JSON.stringify({ upload_id: "up_0123456789abcdef", url: `${this.base}/s3-put/up_0123456789abcdef?sig=1`, headers: { "Content-Type": String(body.content_type) }, expires_at: "2026-11-25T13:00:00Z" }));
-    }
-    if ((m = /^\/s3-put\/([^/?]+)/.exec(url)) && req.method === "PUT") {
-      this.put.set(m[1]!, { body: Buffer.concat(await chunks(req)), headers: req.headers });
-      return void res.writeHead(200, { ETag: '"x"' }).end();
-    }
     res.writeHead(404).end();
   }
-}
-
-async function chunks(req: IncomingMessage): Promise<Buffer[]> {
-  const out: Buffer[] = [];
-  for await (const c of req) out.push(c as Buffer);
-  return out;
 }
 
 function ref(id: string, body: Buffer, extra: Partial<AttachmentRef> = {}): AttachmentRef {
@@ -453,76 +432,5 @@ describe("toolhost transfers", () => {
     const r3 = await p3;
     expect(r3.isError).toBe(true);
     expect(JSON.stringify(r3.content)).toContain("read_attachment");
-  });
-
-  it("read_shared_file with a URL streams into .shared/<path>; an empty sha256 checks only the size", async () => {
-    await setup();
-    const body = Buffer.from("a,b\n1,2\n");
-    store.files.set("sf1", body);
-    const cwd = workdir();
-    const { b, sent } = broker();
-    const pending = b.call({ sessionId: "s_1", tool: "read_shared_file", args: { path: "data/x.csv" }, cwd });
-    const call = await waitCall(sent);
-    b.resolve({
-      session_id: "s_1", call_id: String(call.call_id), ok: true, content: [], structured: { path: "data/x.csv", size: body.length, sha256: "", local_path: "" },
-      shared_download: { download_id: "dn_0123456789abcdef", chunks: 0, files: [{ path: "data/x.csv", size: body.length, sha256: "", url: `${store.base}/s3/sf1?sig=1`, expires_at: "2026-11-25T13:00:00Z" }] },
-    });
-    const r = await pending;
-    expect(r.isError).toBeUndefined();
-    expect(readFileSync(join(cwd, ".shared", "data", "x.csv"))).toEqual(body);
-    expect(r.structuredContent).toMatchObject({ path: "data/x.csv", sha256: sha(body), local_path: join(cwd, ".shared", "data", "x.csv") });
-    expect(JSON.stringify(r)).not.toContain("sig=1");
-    expect(readFileSync(join(cwd, ".shared", ".gitignore"), "utf8")).toBe("*\n");
-  });
-
-  it("write_shared_file uploads through POST /nodes/uploads and a presigned PUT (storage s3)", async () => {
-    await setup();
-    const cwd = workdir();
-    const body = Buffer.from("x".repeat(3 * MB + 7));
-    writeFileSync(join(cwd, "big.bin"), body);
-    const { b, sent } = broker();
-    const pending = b.call({ sessionId: "s_1", openGen: 1, tool: "write_shared_file", args: { file: "big.bin", path: "out/big.bin" }, cwd });
-    const call = await waitCall(sent);
-    expect(sent.map((s) => s.type)).toEqual(["tool.call"]);
-    expect(call.upload).toEqual({ upload_id: "up_0123456789abcdef", storage: "s3", chunks: 0, files: [{ path: "out/big.bin", size: body.length, sha256: sha(body), content_type: "application/octet-stream" }] });
-    expect(store.uploads).toEqual([{ session_id: "s_1", call_id: call.call_id, size: body.length, sha256: sha(body), name: "out/big.bin", content_type: "application/octet-stream", auth: `Bearer ${TOKEN}` }]);
-    const put = store.put.get("up_0123456789abcdef")!;
-    expect(put.body.equals(body)).toBe(true);
-    expect(put.headers["content-length"]).toBe(String(body.length));
-    expect(put.headers.authorization).toBeUndefined();
-    b.resolve({ session_id: "s_1", call_id: String(call.call_id), ok: true, content: [{ type: "text", text: "saved" }] });
-    expect((await pending).isError).toBeUndefined();
-  });
-
-  it("putFile gives up by its deadline when the server never answers", async () => {
-    const silent = createServer((req) => req.resume());
-    await new Promise<void>((r) => silent.listen(0, "127.0.0.1", r));
-    const dir = workdir();
-    writeFileSync(join(dir, "f.bin"), "hello");
-    const t0 = Date.now();
-    await expect(putFile(`http://127.0.0.1:${(silent.address() as AddressInfo).port}/x`, join(dir, "f.bin"), 5, {}, 300)).rejects.toThrow(/timed out/);
-    expect(Date.now() - t0).toBeLessThan(2_000);
-    silent.closeAllConnections();
-    await new Promise<void>((r) => silent.close(() => r()));
-  });
-
-  it("write_shared_file falls back to file.chunk frames on an older console (≤ 20 MB) and reports refusals", async () => {
-    await setup();
-    const cwd = workdir();
-    writeFileSync(join(cwd, "a.txt"), "hello");
-    store.uploadMode = 404;
-    const { b, sent } = broker();
-    void b.call({ sessionId: "s_1", tool: "write_shared_file", args: { file: "a.txt" }, cwd });
-    const call = await waitCall(sent);
-    expect(sent.map((s) => s.type)).toEqual(["file.chunk", "tool.call"]);
-    expect((call.upload as { storage?: string }).storage).toBeUndefined();
-    execFileSync("truncate", ["-s", String(21 * MB), join(cwd, "big.bin")]);
-    const big = await b.call({ sessionId: "s_1", tool: "write_shared_file", args: { file: "big.bin" }, cwd });
-    expect(big.isError).toBe(true);
-    expect(JSON.stringify(big.content)).toMatch(/at most 20 MB/);
-    store.uploadMode = 403;
-    const refused = await b.call({ sessionId: "s_1", tool: "write_shared_file", args: { file: "a.txt" }, cwd });
-    expect(refused.isError).toBe(true);
-    expect(JSON.stringify(refused.content)).toMatch(/HTTP 403.*quota exceeded/);
   });
 });
