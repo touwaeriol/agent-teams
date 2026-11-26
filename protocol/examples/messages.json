@@ -1873,5 +1873,46 @@
       "ref_id": "c_01JD3V000000000000000000Q",
       "code": "bad_schema"
     }
+  },
+  {
+    "v": 2,
+    "type": "fs.mount",
+    "id": "c_01JD3V0000000000000000F01",
+    "ts": "2026-11-26T12:00:00.000Z",
+    "body": {
+      "volume": "at-01jd3v0000",
+      "generation": 1,
+      "meta_url": "postgres://jfs_01jd3v0000@db.example.net:15432/agent_teams?sslmode=verify-full&search_path=jfs_01jd3v0000",
+      "meta_password": "secret",
+      "access_key": "jfs-01jd3v0000",
+      "secret_key": "secret",
+      "client": {
+        "version": "1.4.2",
+        "url": "https://agent.example.net/node-dist/juicefs-1.4.2-linux-amd64.tar.gz",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "cache_size_mb": 10240
+    }
+  },
+  {
+    "v": 2,
+    "type": "fs.unmount",
+    "id": "c_01JD3V0000000000000000F02",
+    "ts": "2026-11-26T12:00:00.000Z",
+    "body": {
+      "volume": "at-01jd3v0000"
+    }
+  },
+  {
+    "v": 2,
+    "type": "fs.status",
+    "id": "n_01JD3V0000000000000000F03",
+    "ts": "2026-11-26T12:00:01.000Z",
+    "body": {
+      "state": "mounted",
+      "mode": "daemon",
+      "volume": "at-01jd3v0000",
+      "generation": 1
+    }
   }
 ]

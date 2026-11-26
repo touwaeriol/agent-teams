@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/fs.unmount.json",
+  "title": "FsUnmount",
+  "description": "Unmount the owner's volume and forget its credentials (the volume was disabled or deleted). Sent to daemons with fs_mount; an unknown volume is not an error.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "volume"
+  ],
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "volume"
+  ],
+  "properties": {
+    "volume": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

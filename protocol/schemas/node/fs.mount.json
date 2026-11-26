@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/fs.mount.json",
+  "title": "FsMount",
+  "description": "Mount the owner's JuiceFS volume (the user's shared folder, juicefs-shared-storage design). Sent on the live link only to a daemon whose hello has fs_mount: after the welcome when the owner has a ready volume, and again when the volume or its credentials change (generation grows). Unreliable and never logged or stored: it carries the volume's credentials. The daemon mounts at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.",
+  "x-direction": "console_to_node",
+  "x-key": [
+    "volume",
+    "generation"
+  ],
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "volume",
+    "generation",
+    "meta_url",
+    "meta_password",
+    "access_key",
+    "secret_key",
+    "client"
+  ],
+  "properties": {
+    "volume": {
+      "description": "Volume name (at-<id>), also the mount directory name.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"
+    },
+    "generation": {
+      "description": "Grows when the volume's credentials change; a remount is due when it differs from the mounted one.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "meta_url": {
+      "description": "Metadata engine URL without the password (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x); the password goes in META_PASSWORD.",
+      "type": "string",
+      "minLength": 1
+    },
+    "meta_password": {
+      "type": "string",
+      "minLength": 1
+    },
+    "access_key": {
+      "description": "Object storage key limited to the volume's prefix.",
+      "type": "string",
+      "minLength": 1
+    },
+    "secret_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "client": {
+      "description": "The juicefs client to run: downloaded from url and checked against sha256 unless that exact version is already present.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "url",
+        "sha256"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "cache_size_mb": {
+      "description": "Local cache size; default 10240.",
+      "type": "integer",
+      "minimum": 100
+    }
+  }
+}

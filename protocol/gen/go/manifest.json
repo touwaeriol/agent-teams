@@ -89,6 +89,32 @@
       ]
     },
     {
+      "type": "fs.mount",
+      "name": "FsMount",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": [
+        "volume",
+        "generation"
+      ]
+    },
+    {
+      "type": "fs.status",
+      "name": "FsStatus",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "fs.unmount",
+      "name": "FsUnmount",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": [
+        "volume"
+      ]
+    },
+    {
       "type": "git.cleanup",
       "name": "GitCleanup",
       "direction": "console_to_node",

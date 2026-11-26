@@ -13,6 +13,9 @@ export interface MessageBodies {
   "error": T.ProtocolError;
   "file.chunk": T.FileChunk;
   "file.download": T.FileDownload;
+  "fs.mount": T.FsMount;
+  "fs.status": T.FsStatus;
+  "fs.unmount": T.FsUnmount;
   "git.cleanup": T.GitCleanup;
   "git.prepare": T.GitPrepare;
   "git.purge": T.GitPurge;
@@ -83,6 +86,9 @@ export const MESSAGE_META: { readonly [K in MessageType]: MessageMeta } = {
   "error": { direction: "both", reliable: false, key: [] },
   "file.chunk": { direction: "node_to_console", reliable: true, key: ["upload_id","index"] },
   "file.download": { direction: "console_to_node", reliable: true, key: ["download_id","index"] },
+  "fs.mount": { direction: "console_to_node", reliable: false, key: ["volume","generation"] },
+  "fs.status": { direction: "node_to_console", reliable: false, key: [] },
+  "fs.unmount": { direction: "console_to_node", reliable: false, key: ["volume"] },
   "git.cleanup": { direction: "console_to_node", reliable: true, key: ["job_id"] },
   "git.prepare": { direction: "console_to_node", reliable: true, key: ["job_id"] },
   "git.purge": { direction: "console_to_node", reliable: true, key: ["job_id"] },

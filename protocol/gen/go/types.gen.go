@@ -3325,6 +3325,287 @@ func (j *ForwardToThreadResult) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
+// Mount the owner's JuiceFS volume (the user's shared folder,
+// juicefs-shared-storage design). Sent on the live link only to a daemon whose
+// hello has fs_mount: after the welcome when the owner has a ready volume, and
+// again when the volume or its credentials change (generation grows). Unreliable
+// and never logged or stored: it carries the volume's credentials. The daemon
+// mounts at its own data directory and answers with fs.status; a generation older
+// than the one mounted is ignored.
+type FsMount struct {
+	// Object storage key limited to the volume's prefix.
+	AccessKey string `json:"access_key"`
+
+	// Local cache size; default 10240.
+	CacheSizeMB *int `json:"cache_size_mb,omitempty,omitzero"`
+
+	// The juicefs client to run: downloaded from url and checked against sha256
+	// unless that exact version is already present.
+	Client FsMountClient `json:"client"`
+
+	// Grows when the volume's credentials change; a remount is due when it differs
+	// from the mounted one.
+	Generation int `json:"generation"`
+
+	// MetaPassword corresponds to the JSON schema field "meta_password".
+	MetaPassword string `json:"meta_password"`
+
+	// Metadata engine URL without the password
+	// (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x); the password
+	// goes in META_PASSWORD.
+	MetaURL string `json:"meta_url"`
+
+	// SecretKey corresponds to the JSON schema field "secret_key".
+	SecretKey string `json:"secret_key"`
+
+	// Volume name (at-<id>), also the mount directory name.
+	Volume string `json:"volume"`
+}
+
+// The juicefs client to run: downloaded from url and checked against sha256 unless
+// that exact version is already present.
+type FsMountClient struct {
+	// SHA256 corresponds to the JSON schema field "sha256".
+	SHA256 string `json:"sha256"`
+
+	// URL corresponds to the JSON schema field "url".
+	URL string `json:"url"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version string `json:"version"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *FsMountClient) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["sha256"]; raw != nil && !ok {
+		return fmt.Errorf("field sha256 in FsMountClient: required")
+	}
+	if _, ok := raw["url"]; raw != nil && !ok {
+		return fmt.Errorf("field url in FsMountClient: required")
+	}
+	if _, ok := raw["version"]; raw != nil && !ok {
+		return fmt.Errorf("field version in FsMountClient: required")
+	}
+	type Plain FsMountClient
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^[0-9a-f]{64}$`, string(plain.SHA256)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "SHA256", `^[0-9a-f]{64}$`)
+	}
+	if utf8.RuneCountInString(string(plain.URL)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "url", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Version)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "version", 1)
+	}
+	*j = FsMountClient(plain)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *FsMount) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["access_key"]; raw != nil && !ok {
+		return fmt.Errorf("field access_key in FsMount: required")
+	}
+	if _, ok := raw["client"]; raw != nil && !ok {
+		return fmt.Errorf("field client in FsMount: required")
+	}
+	if _, ok := raw["generation"]; raw != nil && !ok {
+		return fmt.Errorf("field generation in FsMount: required")
+	}
+	if _, ok := raw["meta_password"]; raw != nil && !ok {
+		return fmt.Errorf("field meta_password in FsMount: required")
+	}
+	if _, ok := raw["meta_url"]; raw != nil && !ok {
+		return fmt.Errorf("field meta_url in FsMount: required")
+	}
+	if _, ok := raw["secret_key"]; raw != nil && !ok {
+		return fmt.Errorf("field secret_key in FsMount: required")
+	}
+	if _, ok := raw["volume"]; raw != nil && !ok {
+		return fmt.Errorf("field volume in FsMount: required")
+	}
+	type Plain FsMount
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.AccessKey)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "access_key", 1)
+	}
+	if plain.CacheSizeMB != nil && 100 > *plain.CacheSizeMB {
+		return fmt.Errorf("field %s: must be >= %v", "cache_size_mb", 100)
+	}
+	if 1 > plain.Generation {
+		return fmt.Errorf("field %s: must be >= %v", "generation", 1)
+	}
+	if utf8.RuneCountInString(string(plain.MetaPassword)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "meta_password", 1)
+	}
+	if utf8.RuneCountInString(string(plain.MetaURL)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "meta_url", 1)
+	}
+	if utf8.RuneCountInString(string(plain.SecretKey)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "secret_key", 1)
+	}
+	if matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9-]{2,62}$`, string(plain.Volume)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Volume", `^[a-z0-9][a-z0-9-]{2,62}$`)
+	}
+	*j = FsMount(plain)
+	return nil
+}
+
+// State of the shared folder on this node: after the welcome (external mounts),
+// after each fs.mount or fs.unmount, and whenever a health check finds the mount
+// gone or back. mode daemon = the daemon runs juicefs itself; external = mounted
+// outside the daemon (Docker volume plugin, host service) at AGENT_TEAMS_FS_DIR.
+// Unreliable (the latest state is what matters).
+type FsStatus struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation *int `json:"generation,omitempty,omitzero"`
+
+	// Mode corresponds to the JSON schema field "mode".
+	Mode FsStatusMode `json:"mode"`
+
+	// State corresponds to the JSON schema field "state".
+	State FsStatusState `json:"state"`
+
+	// Volume corresponds to the JSON schema field "volume".
+	Volume *string `json:"volume,omitempty,omitzero"`
+}
+
+type FsStatusMode string
+
+const FsStatusModeDaemon FsStatusMode = "daemon"
+const FsStatusModeExternal FsStatusMode = "external"
+
+var enumValues_FsStatusMode = []interface{}{
+	"daemon",
+	"external",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *FsStatusMode) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_FsStatusMode {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_FsStatusMode, v)
+	}
+	*j = FsStatusMode(v)
+	return nil
+}
+
+type FsStatusState string
+
+const FsStatusStateError FsStatusState = "error"
+const FsStatusStateMounted FsStatusState = "mounted"
+const FsStatusStateMounting FsStatusState = "mounting"
+const FsStatusStateUnmounted FsStatusState = "unmounted"
+
+var enumValues_FsStatusState = []interface{}{
+	"mounting",
+	"mounted",
+	"unmounted",
+	"error",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *FsStatusState) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_FsStatusState {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_FsStatusState, v)
+	}
+	*j = FsStatusState(v)
+	return nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *FsStatus) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["mode"]; raw != nil && !ok {
+		return fmt.Errorf("field mode in FsStatus: required")
+	}
+	if _, ok := raw["state"]; raw != nil && !ok {
+		return fmt.Errorf("field state in FsStatus: required")
+	}
+	type Plain FsStatus
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if plain.Error != nil && utf8.RuneCountInString(string(*plain.Error)) > 2000 {
+		return fmt.Errorf("field %s length: must be <= %d", "error", 2000)
+	}
+	if plain.Generation != nil && 1 > *plain.Generation {
+		return fmt.Errorf("field %s: must be >= %v", "generation", 1)
+	}
+	*j = FsStatus(plain)
+	return nil
+}
+
+// Unmount the owner's volume and forget its credentials (the volume was disabled
+// or deleted). Sent to daemons with fs_mount; an unknown volume is not an error.
+type FsUnmount struct {
+	// Volume corresponds to the JSON schema field "volume".
+	Volume string `json:"volume"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *FsUnmount) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["volume"]; raw != nil && !ok {
+		return fmt.Errorf("field volume in FsUnmount: required")
+	}
+	type Plain FsUnmount
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Volume)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "volume", 1)
+	}
+	*j = FsUnmount(plain)
+	return nil
+}
+
 // Show a task: instruction, status, dependencies and result.
 type GetTaskInput struct {
 	// TaskID corresponds to the JSON schema field "task_id".
@@ -9281,6 +9562,14 @@ type SessionOpen struct {
 	// Held back until session.release.
 	FirstMessage *FirstMessage `json:"first_message,omitempty,omitzero"`
 
+	// The shared folder (juicefs-shared-storage design), sent only when the node has
+	// the owner's volume mounted or an external mount (fs_mount / fs_external) and
+	// the owner has a ready volume: paths relative to the volume root. The daemon
+	// creates both directories when missing, adds them to the session's writable
+	// directories and exports AGENT_TEAMS_PROJECT_DIR / AGENT_TEAMS_SHARED_DIR.
+	// Omitted = no shared folder.
+	Fs *SessionOpenFs `json:"fs,omitempty,omitzero"`
+
 	// Install the credential helper and gh wrapper.
 	GitCredentials *bool `json:"git_credentials,omitempty,omitzero"`
 
@@ -9387,6 +9676,41 @@ func (j *SessionOpenContext) UnmarshalJSON(value []byte) error {
 // Extra non-secret environment; the daemon adds PATH/HOME/MCP_TOOL_TIMEOUT/git
 // credential variables itself.
 type SessionOpenEnv map[string]string
+
+// The shared folder (juicefs-shared-storage design), sent only when the node has
+// the owner's volume mounted or an external mount (fs_mount / fs_external) and the
+// owner has a ready volume: paths relative to the volume root. The daemon creates
+// both directories when missing, adds them to the session's writable directories
+// and exports AGENT_TEAMS_PROJECT_DIR / AGENT_TEAMS_SHARED_DIR. Omitted = no
+// shared folder.
+type SessionOpenFs struct {
+	// Project corresponds to the JSON schema field "project".
+	Project RelPath `json:"project"`
+
+	// Shared corresponds to the JSON schema field "shared".
+	Shared RelPath `json:"shared"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *SessionOpenFs) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["project"]; raw != nil && !ok {
+		return fmt.Errorf("field project in SessionOpenFs: required")
+	}
+	if _, ok := raw["shared"]; raw != nil && !ok {
+		return fmt.Errorf("field shared in SessionOpenFs: required")
+	}
+	type Plain SessionOpenFs
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = SessionOpenFs(plain)
+	return nil
+}
 
 type SessionOpenGitHostsElem struct {
 	// host[:port], the port only when not the default.

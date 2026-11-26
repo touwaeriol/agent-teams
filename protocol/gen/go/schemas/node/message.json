@@ -213,6 +213,75 @@
     {
       "properties": {
         "type": {
+          "const": "fs.mount"
+        },
+        "body": {
+          "$ref": "fs.mount.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^c_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "fs.status"
+        },
+        "body": {
+          "$ref": "fs.status.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^n_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
+          "const": "fs.unmount"
+        },
+        "body": {
+          "$ref": "fs.unmount.json"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^c_"
+        }
+      },
+      "required": [
+        "type",
+        "body"
+      ],
+      "not": {
+        "required": [
+          "seq"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "type": {
           "const": "git.cleanup"
         },
         "body": {

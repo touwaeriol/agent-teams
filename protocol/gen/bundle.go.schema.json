@@ -726,6 +726,131 @@
         }
       }
     },
+    "FsMount": {
+      "title": "FsMount",
+      "description": "Mount the owner's JuiceFS volume (the user's shared folder, juicefs-shared-storage design). Sent on the live link only to a daemon whose hello has fs_mount: after the welcome when the owner has a ready volume, and again when the volume or its credentials change (generation grows). Unreliable and never logged or stored: it carries the volume's credentials. The daemon mounts at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.",
+      "type": "object",
+      "required": [
+        "volume",
+        "generation",
+        "meta_url",
+        "meta_password",
+        "access_key",
+        "secret_key",
+        "client"
+      ],
+      "properties": {
+        "volume": {
+          "description": "Volume name (at-<id>), also the mount directory name.",
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"
+        },
+        "generation": {
+          "description": "Grows when the volume's credentials change; a remount is due when it differs from the mounted one.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "meta_url": {
+          "description": "Metadata engine URL without the password (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x); the password goes in META_PASSWORD.",
+          "type": "string",
+          "minLength": 1
+        },
+        "meta_password": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access_key": {
+          "description": "Object storage key limited to the volume's prefix.",
+          "type": "string",
+          "minLength": 1
+        },
+        "secret_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "client": {
+          "description": "The juicefs client to run: downloaded from url and checked against sha256 unless that exact version is already present.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "url",
+            "sha256"
+          ],
+          "properties": {
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "url": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "cache_size_mb": {
+          "description": "Local cache size; default 10240.",
+          "type": "integer",
+          "minimum": 100
+        }
+      }
+    },
+    "FsStatus": {
+      "title": "FsStatus",
+      "description": "State of the shared folder on this node: after the welcome (external mounts), after each fs.mount or fs.unmount, and whenever a health check finds the mount gone or back. mode daemon = the daemon runs juicefs itself; external = mounted outside the daemon (Docker volume plugin, host service) at AGENT_TEAMS_FS_DIR. Unreliable (the latest state is what matters).",
+      "type": "object",
+      "required": [
+        "state",
+        "mode"
+      ],
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "mounting",
+            "mounted",
+            "unmounted",
+            "error"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "daemon",
+            "external"
+          ]
+        },
+        "volume": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "FsUnmount": {
+      "title": "FsUnmount",
+      "description": "Unmount the owner's volume and forget its credentials (the volume was disabled or deleted). Sent to daemons with fs_mount; an unknown volume is not an error.",
+      "type": "object",
+      "required": [
+        "volume"
+      ],
+      "properties": {
+        "volume": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "GitCleanup": {
       "title": "GitCleanup",
       "description": "Remove worktrees (keeping unpushed work when asked) and prune.",
@@ -3215,6 +3340,23 @@
         },
         "ssh_servers": {
           "$ref": "#/$defs/SshServers"
+        },
+        "fs": {
+          "description": "The shared folder (juicefs-shared-storage design), sent only when the node has the owner's volume mounted or an external mount (fs_mount / fs_external) and the owner has a ready volume: paths relative to the volume root. The daemon creates both directories when missing, adds them to the session's writable directories and exports AGENT_TEAMS_PROJECT_DIR / AGENT_TEAMS_SHARED_DIR. Omitted = no shared folder.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "project",
+            "shared"
+          ],
+          "properties": {
+            "project": {
+              "$ref": "#/$defs/RelPath"
+            },
+            "shared": {
+              "$ref": "#/$defs/RelPath"
+            }
+          }
         },
         "first_message": {
           "description": "Held back until session.release.",

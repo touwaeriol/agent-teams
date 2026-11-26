@@ -14,6 +14,9 @@ const (
 	TypeError                 = "error"
 	TypeFileChunk             = "file.chunk"
 	TypeFileDownload          = "file.download"
+	TypeFsMount               = "fs.mount"
+	TypeFsStatus              = "fs.status"
+	TypeFsUnmount             = "fs.unmount"
 	TypeGitCleanup            = "git.cleanup"
 	TypeGitPrepare            = "git.prepare"
 	TypeGitPurge              = "git.purge"
@@ -75,6 +78,9 @@ var Messages = map[string]MessageMeta{
 	TypeError:                 {Direction: Both, Reliable: false, Key: nil, New: func() any { return new(ProtocolError) }},
 	TypeFileChunk:             {Direction: NodeToConsole, Reliable: true, Key: []string{"upload_id", "index"}, New: func() any { return new(FileChunk) }},
 	TypeFileDownload:          {Direction: ConsoleToNode, Reliable: true, Key: []string{"download_id", "index"}, New: func() any { return new(FileDownload) }},
+	TypeFsMount:               {Direction: ConsoleToNode, Reliable: false, Key: []string{"volume", "generation"}, New: func() any { return new(FsMount) }},
+	TypeFsStatus:              {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(FsStatus) }},
+	TypeFsUnmount:             {Direction: ConsoleToNode, Reliable: false, Key: []string{"volume"}, New: func() any { return new(FsUnmount) }},
 	TypeGitCleanup:            {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitCleanup) }},
 	TypeGitPrepare:            {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPrepare) }},
 	TypeGitPurge:              {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPurge) }},

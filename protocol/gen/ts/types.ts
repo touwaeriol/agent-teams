@@ -761,6 +761,66 @@ export interface FileDownload {
   data: string;
 }
 /**
+ * Mount the owner's JuiceFS volume (the user's shared folder, juicefs-shared-storage design). Sent on the live link only to a daemon whose hello has fs_mount: after the welcome when the owner has a ready volume, and again when the volume or its credentials change (generation grows). Unreliable and never logged or stored: it carries the volume's credentials. The daemon mounts at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "FsMount".
+ */
+export interface FsMount {
+  /**
+   * Volume name (at-<id>), also the mount directory name.
+   */
+  volume: string;
+  /**
+   * Grows when the volume's credentials change; a remount is due when it differs from the mounted one.
+   */
+  generation: number;
+  /**
+   * Metadata engine URL without the password (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x); the password goes in META_PASSWORD.
+   */
+  meta_url: string;
+  meta_password: string;
+  /**
+   * Object storage key limited to the volume's prefix.
+   */
+  access_key: string;
+  secret_key: string;
+  /**
+   * The juicefs client to run: downloaded from url and checked against sha256 unless that exact version is already present.
+   */
+  client: {
+    version: string;
+    url: string;
+    sha256: string;
+  };
+  /**
+   * Local cache size; default 10240.
+   */
+  cache_size_mb?: number;
+}
+/**
+ * State of the shared folder on this node: after the welcome (external mounts), after each fs.mount or fs.unmount, and whenever a health check finds the mount gone or back. mode daemon = the daemon runs juicefs itself; external = mounted outside the daemon (Docker volume plugin, host service) at AGENT_TEAMS_FS_DIR. Unreliable (the latest state is what matters).
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "FsStatus".
+ */
+export interface FsStatus {
+  state: "mounting" | "mounted" | "unmounted" | "error";
+  mode: "daemon" | "external";
+  volume?: string;
+  generation?: number;
+  error?: string;
+}
+/**
+ * Unmount the owner's volume and forget its credentials (the volume was disabled or deleted). Sent to daemons with fs_mount; an unknown volume is not an error.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "FsUnmount".
+ */
+export interface FsUnmount {
+  volume: string;
+}
+/**
  * Remove worktrees (keeping unpushed work when asked) and prune.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -2383,6 +2443,13 @@ export interface SessionOpen {
     host: string;
   }[];
   ssh_servers?: SshServers;
+  /**
+   * The shared folder (juicefs-shared-storage design), sent only when the node has the owner's volume mounted or an external mount (fs_mount / fs_external) and the owner has a ready volume: paths relative to the volume root. The daemon creates both directories when missing, adds them to the session's writable directories and exports AGENT_TEAMS_PROJECT_DIR / AGENT_TEAMS_SHARED_DIR. Omitted = no shared folder.
+   */
+  fs?: {
+    project: RelPath;
+    shared: RelPath;
+  };
   /**
    * Held back until session.release.
    */
