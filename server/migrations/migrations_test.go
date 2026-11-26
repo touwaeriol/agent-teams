@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 470 {
+	if migrations.Latest() != 480 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1959,6 +1959,50 @@ INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, s
 		t.Fatal("project_id still nullable after down")
 	}
 	if _, err := p.UpTo(ctx, 470); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUserFsMigration: 00480 adds at_user_fs (one volume per user, deleted with the user) and
+// at_nodes.fs_status ({} by default); down drops both.
+func TestUserFsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 480); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb)
+	VALUES ('u1', 'at-u1', 'jfs_u1', 'jfs-u1', '{}', 20);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb, state)
+		VALUES ('u1', 'at-u2', 'jfs_u2', 'jfs-u2', '{}', 20, 'bogus')`); err == nil {
+		t.Fatal("bad state accepted")
+	}
+	var state string
+	if err := db.QueryRow(`SELECT state FROM at_user_fs WHERE user_id = 'u1'`).Scan(&state); err != nil || state != "provisioning" {
+		t.Fatalf("state %q %v", state, err)
+	}
+	if _, err := db.Exec(`DELETE FROM at_users WHERE id = 'u1'`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM at_user_fs`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("volume row not deleted with the user: %d %v", n, err)
+	}
+	if _, err := p.DownTo(ctx, 470); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT fs_status FROM at_nodes`); err == nil {
+		t.Fatal("fs_status still there after down")
+	}
+	if _, err := p.UpTo(ctx, 480); err != nil {
 		t.Fatal(err)
 	}
 }
