@@ -1672,7 +1672,7 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 470 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 480 {
 		t.Fatalf("version %d %v", v, err)
 	}
 	var got string
