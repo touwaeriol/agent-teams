@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Attachments end to end (#58): the browser's multipart upload straight to the object store, the
-// files passed coordinator → lead → member with the bytes checked on the node, a node's shared
-// file over 20 MB through a presigned PUT and back, an old daemon (no attachments_v2) getting the
-// downgraded message, an expired attachment, and timings of 200 MB.
+// files passed coordinator → lead → member with the bytes checked on the node, an old daemon (no
+// attachments_v2) getting the downgraded message and an expired attachment.
 //
 // Real: control plane, PostgreSQL, the object store (RustFS when AGENT_TEAMS_S3_* point at it),
 // the node daemons (this repository's node/ and an older checkout's), every HTTP and WebSocket
@@ -10,12 +9,12 @@
 // test stand-in for the Agent SDK, driven by "@@use <tool> <json>" / "@@sh <cmd>" lines in the
 // messages, so the tool calls an AI would make are made on cue.
 //
-//   node deploy/e2e/run_attachments.mjs <scratch> [--base URL] [--sql CMD] [--old-src DIR] [--phase main,legacy,expire,big]
+//   node deploy/e2e/run_attachments.mjs <scratch> [--base URL] [--sql CMD] [--old-src DIR] [--phase main,legacy,expire]
 //     --base     the control plane (default: AGENT_TEAMS_PUBLIC_URL of the e2e env file)
 //     --sql      a command that runs one SQL query given as its argument (default: psql in the compose stack)
 //     --old-src  node/ of an older checkout with its node_modules (the old daemon; legacy is skipped without it)
 //     --keep     leave the projects (and their objects) in place for a look afterwards
-//     --phase    which parts to run (default main,legacy,big); expire needs the control plane started with
+//     --phase    which parts to run (default main,legacy); expire needs the control plane started with
 //                AGENT_TEAMS_ATTACHMENT_TTL=1m and takes about 3 minutes
 import { spawn, execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -31,7 +30,7 @@ const arg = (name, d) => (process.argv.includes(name) ? process.argv[process.arg
 const base = arg("--base", null) ?? readEnv().AGENT_TEAMS_PUBLIC_URL;
 const sqlCmd = arg("--sql", null);
 const oldSrc = arg("--old-src", null);
-const phases = new Set(arg("--phase", "main,legacy,big").split(","));
+const phases = new Set(arg("--phase", "main,legacy").split(","));
 const MB = 1 << 20;
 const timings = {};
 
@@ -226,59 +225,7 @@ async function mainPhase(c, ctx) {
   check(task.includes(aPdf.id) && task.includes(aZip.id), "the task keeps its attachments (get_task, rework)");
   console.log(`     assign_task → member has both files on disk: ${secs(timings.memberDelivery)}`);
 
-  // 3. a shared file over 20 MB written by the node (presigned PUT) and read back by another session.
-  const big = 25 * MB;
-  const b0 = Number((await messages(c, t.id)).at(-1)?.id ?? 0);
-  await c.post(`/api/conversations/${t.id}/messages`, {
-    content: `@@sh head -c ${big} /dev/urandom > big25.bin && sha256sum big25.bin\n@@use write_shared_file {"file":"big25.bin","path":"e2e/big25.bin"}\n写共享文件。` });
-  const wrote = await reply(c, t.id, b0, /tool (ok|error)/, "write_shared_file answered", 600_000);
-  check(/tool ok/.test(wrote.content), `write_shared_file of 25 MB: ${wrote.content.slice(0, 120)}`);
-  const leadSh = prompts(dir).find((p) => p.sh?.some((s) => s.cmd.includes("big25.bin")));
-  const want = leadSh.sh[0].out.split(" ")[0];
-  const row = sql(`SELECT sha256, storage_key IS NOT NULL, data IS NULL, size FROM at_shared_files WHERE project_id = '${pid}' AND path = 'e2e/big25.bin'`).split("\t");
-  check(row[1] === "true" && row[2] === "true" && Number(row[3]) === big, "stored in the object store (storage_key set, no bytes in the database)", row);
-  check(row[0] === want || row[0] === "" || row[0] === "<nil>", `sha256 recorded (or pending): ${row[0].slice(0, 12)}`);
-  await waitFor("the shared file's sha256", async () => sql(`SELECT sha256 FROM at_shared_files WHERE project_id = '${pid}' AND path = 'e2e/big25.bin'`) === want, { timeoutMs: 180_000, everyMs: 3000 });
-  const r0 = Number((await messages(c, coord)).at(-1)?.id ?? 0);
-  await c.post(`/api/conversations/${coord}/messages`, { content: `@@use read_shared_file {"path":"e2e/big25.bin"}\n读共享文件。` });
-  const read = await reply(c, coord, r0, /tool (ok|error)/, "read_shared_file answered", 600_000);
-  check(/tool ok/.test(read.content), `read_shared_file: ${read.content.slice(0, 100)}`);
-  const coordCwd = prompts(dir).find((p) => p.text.includes("read_shared_file"))?.cwd;
-  const local = join(coordCwd, ".shared/e2e/big25.bin");
-  check(existsSync(local) && (await shaFile(local)) === want, "the coordinator's .shared/e2e/big25.bin has the same sha256");
-  const dl = sql(`SELECT result::text FROM at_tool_calls WHERE tool = 'read_shared_file' ORDER BY created_at DESC LIMIT 1`);
-  check(/"shared_download": ?\{"files": ?\[\{"url": ?"https?:/.test(dl) && !/"chunks": ?[1-9]/.test(dl), "read_shared_file used a presigned download (no chunk frames)");
   return { t, aPdf, aZip };
-}
-
-// ── big: 200 MB through the node (write_shared_file → finalize copy + hash) and back ─────────
-async function bigPhase(c, ctx) {
-  const { pid, coord, newDir: dir } = ctx;
-  const t = (await c.get(`/api/projects/${pid}/threads`)).items?.[0] ?? (await c.get(`/api/projects/${pid}/threads`))[0];
-  const size = 200 * MB;
-  const b0 = Number((await messages(c, t.id)).at(-1)?.id ?? 0);
-  const t0 = Date.now();
-  await c.post(`/api/conversations/${t.id}/messages`, {
-    content: `@@sh head -c ${size} /dev/urandom > big200.bin && sha256sum big200.bin\n@@use write_shared_file {"file":"big200.bin","path":"e2e/big200.bin"}\n写 200 MB。` });
-  const wrote = await reply(c, t.id, b0, /tool (ok|error)/, "200 MB write_shared_file answered", 1_800_000);
-  const total = Date.now() - t0;
-  check(/tool ok/.test(wrote.content), `write_shared_file 200 MB: ${wrote.content.slice(0, 100)}`);
-  const want = prompts(dir).find((p) => p.sh?.some((s) => s.cmd.includes("big200.bin")))?.sh[0].out.split(" ")[0];
-  // The tool call opens after the daemon's PUT: created_at → finished_at is the console's finalize
-  // (size check, copy to a key no URL was signed for, sha256 streamed and compared).
-  const [fin] = sql(`SELECT (extract(epoch from finished_at - created_at) * 1000)::float8 FROM at_tool_calls WHERE tool = 'write_shared_file' ORDER BY created_at DESC LIMIT 1`).split("\t");
-  timings.write200 = total;
-  timings.finalize200 = Number(fin);
-  console.log(`     200 MB: message → tool ok ${secs(total)} (dd + sha256 + PUT + finalize); finalize alone ${secs(Number(fin))}`);
-  await waitFor("200 MB sha256", async () => sql(`SELECT sha256 FROM at_shared_files WHERE project_id = '${pid}' AND path = 'e2e/big200.bin'`) === want, { timeoutMs: 600_000, everyMs: 3000 });
-  const r0 = Number((await messages(c, coord)).at(-1)?.id ?? 0);
-  const d0 = Date.now();
-  await c.post(`/api/conversations/${coord}/messages`, { content: `@@use read_shared_file {"path":"e2e/big200.bin"}\n读 200 MB。` });
-  const read = await reply(c, coord, r0, /tool (ok|error)/, "200 MB read_shared_file answered", 1_800_000);
-  timings.download200 = Date.now() - d0;
-  check(/tool ok/.test(read.content), `read_shared_file 200 MB in ${secs(timings.download200)} (${rate(size, timings.download200)})`);
-  const cwd = prompts(dir).find((p) => p.text.includes("big200.bin") && p.text.includes("read_shared_file"))?.cwd;
-  check((await shaFile(join(cwd, ".shared/e2e/big200.bin"))) === want, "the 200 MB copy on the node matches");
 }
 
 // ── legacy: an old daemon (no attachments_v2) gets the downgraded message ──────────────────────
@@ -363,8 +310,7 @@ async function main() {
   const c = await login(base);
   const ctx = { stop: [], projects: [] };
   try {
-    if (phases.has("main") || phases.has("big")) await mainPhase(c, ctx);
-    if (phases.has("big")) await bigPhase(c, ctx);
+    if (phases.has("main")) await mainPhase(c, ctx);
     if (phases.has("legacy")) await legacyPhase(c, ctx);
     if (phases.has("expire")) await expirePhase(c, ctx);
   } finally {

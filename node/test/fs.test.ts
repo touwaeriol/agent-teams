@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SharedFs, platformKey, type SharedFsOptions } from "../src/fs/shared.js";
-import { linkSharedDirs, withSharedDirs } from "../src/fs/session.js";
+import { linkSharedDirs, sharedFolderPrompt, withSharedDirs } from "../src/fs/session.js";
 import type { FsMount, FsStatus, SessionOpen } from "../src/protocol.js";
 import { claudeOpen, startHarness, type Harness } from "./helpers/daemon.js";
 import { silentLogger } from "../src/util/log.js";
@@ -157,6 +157,13 @@ describe("linkSharedDirs", () => {
     expect(existsSync(join(dirs.project, "attachments"))).toBe(true);
     expect(lstatSync(join(cwd, ".user-files")).isFile()).toBe(true);
     expect(linkSharedDirs(cwd, dirs)).toHaveLength(1);
+  });
+});
+
+describe("sharedFolderPrompt", () => {
+  it("names the three links and keeps employees out of the deliverables' folder", () => {
+    const p = sharedFolderPrompt({ project: "/mnt/fs/projects/p1", shared: "/mnt/fs/shared" });
+    for (const s of [".project-files/ → /mnt/fs/projects/p1", ".user-files/ → /mnt/fs/shared", ".attachments/ → /mnt/fs/projects/p1/attachments", ".deliverables", "never write"]) expect(p).toContain(s);
   });
 });
 

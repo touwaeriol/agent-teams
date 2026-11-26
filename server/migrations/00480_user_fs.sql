@@ -23,6 +23,17 @@ CREATE TABLE at_user_fs (
 -- shared folder only to a node whose state is mounted.
 ALTER TABLE at_nodes ADD COLUMN fs_status JSONB NOT NULL DEFAULT '{}';
 
+-- Deliverable versions published while the owner's shared folder is on live there
+-- (projects/<pid>/.deliverables/<id>/v<n>/<path>): their rows keep the metadata, without data.
+ALTER TABLE at_deliverable_files ADD COLUMN in_volume BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE at_deliverable_files ALTER COLUMN data DROP NOT NULL;
+ALTER TABLE at_deliverable_files ADD CONSTRAINT at_deliverable_files_data CHECK (in_volume OR data IS NOT NULL);
+
 -- +goose Down
+-- Files kept only in a volume cannot come back into the database: their rows go.
+DELETE FROM at_deliverable_files WHERE in_volume;
+ALTER TABLE at_deliverable_files DROP CONSTRAINT at_deliverable_files_data;
+ALTER TABLE at_deliverable_files ALTER COLUMN data SET NOT NULL;
+ALTER TABLE at_deliverable_files DROP COLUMN in_volume;
 ALTER TABLE at_nodes DROP COLUMN fs_status;
 DROP TABLE at_user_fs;

@@ -5,7 +5,7 @@
 ## 1. 连接
 
 - URL：`wss://<console>/nodes/connect`；`/nodes/v2/connect` 是同一入口的别名（两者都只接受协议 2）。
-- 认证：`Authorization: Bearer <node token>`。控制台 `sha256(token)` 查 `at_nodes.token_hash`，所有者必须存在且 `active`。令牌在 WebSocket 升级**之前**校验：不通过直接回 HTTP **401**（响应体不说明原因，不会拿到 101；守护进程视为“令牌无效”，每 10 分钟重试一次并在日志里提示），数据库故障回 503。被拒的令牌按来源地址计数（地址取法同登录限速：只有来自本机/内网反代的请求才采信 `X-Forwarded-For` 的最后一项），5 分钟内超过 20 次后，该地址在窗口结束前访问所有守护进程接口（`/nodes/connect`、`/nodes/v2/connect`、`/nodes/ssh`、`/nodes/moves/*`、`/nodes/attachments/*`（含 #58 的 `/nodes/attachments/<id>/url`）、`/nodes/uploads`）都回 **429** + `Retry-After`，且不再查令牌。这些 HTTP 接口令牌校验失败的状态码一致（`nodegw.AuthStatus`：429 / 401 / 503）；`/nodes/attachments/<id>/url` 和 `/nodes/uploads` 是 JSON 接口，响应体是带 `detail`、`code`、`status` 三个字段的 JSON，`code` 取 `too_many_requests` / `unauthorized` / `unavailable`，其余接口是纯文本。已连上的链路被吊销时仍以 4401 关闭。
+- 认证：`Authorization: Bearer <node token>`。控制台 `sha256(token)` 查 `at_nodes.token_hash`，所有者必须存在且 `active`。令牌在 WebSocket 升级**之前**校验：不通过直接回 HTTP **401**（响应体不说明原因，不会拿到 101；守护进程视为“令牌无效”，每 10 分钟重试一次并在日志里提示），数据库故障回 503。被拒的令牌按来源地址计数（地址取法同登录限速：只有来自本机/内网反代的请求才采信 `X-Forwarded-For` 的最后一项），5 分钟内超过 20 次后，该地址在窗口结束前访问所有守护进程接口（`/nodes/connect`、`/nodes/v2/connect`、`/nodes/ssh`、`/nodes/moves/*`、`/nodes/attachments/*`（含 #58 的 `/nodes/attachments/<id>/url`））都回 **429** + `Retry-After`，且不再查令牌。这些 HTTP 接口令牌校验失败的状态码一致（`nodegw.AuthStatus`：429 / 401 / 503）；`/nodes/attachments/<id>/url` 是 JSON 接口，响应体是带 `detail`、`code`、`status` 三个字段的 JSON，`code` 取 `too_many_requests` / `unauthorized` / `unavailable`，其余接口是纯文本。已连上的链路被吊销时仍以 4401 关闭。
 - 帧：WebSocket 文本帧，一帧一个 JSON 对象（UTF-8）。单帧上限 4 MiB；更大的内容（例如很长的命令输出）由发送方截断并标 `truncated: true`。启用 permessage-deflate。
 - 心跳：双方每 20 s 发 WebSocket ping；45 s 收不到任何帧则断开重连。
 - 重连：指数退避 1 s → 30 s，带 ±20% 抖动。
@@ -398,9 +398,9 @@ Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工
 {"session_id": "s_…", "open_gen": 3, "upload_id": "up_01JD3V0000000000000000", "index": 0, "data": "PGh0bWw+PC9odG1sPg=="}
 ```
 
-`publish_file` 的文件内容：守护进程读完文件（必须在会话 cwd 内，合计 ≤ 5 MB），把所有文件按 `upload.files` 的顺序拼起来，切成每段 ≤ 1 MiB 的 base64，先按序发 `file.chunk`，再发带 `upload` 的 `tool.call {call_id, session_id, tool, args, upload}`，其中 `upload = {upload_id, chunks, files: [{path, size, sha256, content_type}]}`（`path` 是交付物里的路径：单个文件就是文件名，网站目录则相对目录，入口为 `index.html`）。`write_shared_file` 走同一条路，只是 `upload.files` 恰好一个文件，`path` 是共享区里的目标路径（`args.path`，没给时由守护进程按 §6.5 的规则从 `args.file` 推出），单文件 ≤ 20 MB。
+`publish_file` 的文件内容：守护进程读完文件（必须在会话 cwd 内，合计 ≤ 5 MB），把所有文件按 `upload.files` 的顺序拼起来，切成每段 ≤ 1 MiB 的 base64，先按序发 `file.chunk`，再发带 `upload` 的 `tool.call {call_id, session_id, tool, args, upload}`，其中 `upload = {upload_id, chunks, files: [{path, size, sha256, content_type}]}`（`path` 是交付物里的路径：单个文件就是文件名，网站目录则相对目录，入口为 `index.html`）。
 
-可靠消息按序处理，所以控制台处理 `tool.call` 时分段都已到齐；分段数不对、大小或 sha256 不符、扩展名不允许都作为工具失败返回。分段只属于发它的会话；一天没被认领的分段会被清掉；一个会话未认领的分段合计超过 40 MB（两次满额的 `write_shared_file` 上传）时，新分段直接丢弃，随后的 `tool.call` 按“分段不完整”失败。路径不合法等本机就能判断的错误不发到控制台，守护进程直接回 `isError`。
+可靠消息按序处理，所以控制台处理 `tool.call` 时分段都已到齐；分段数不对、大小或 sha256 不符、扩展名不允许都作为工具失败返回。分段只属于发它的会话；一天没被认领的分段会被清掉；一个会话未认领的分段合计超过 10 MB（两次满额的 `publish_file` 上传）时，新分段直接丢弃，随后的 `tool.call` 按“分段不完整”失败。路径不合法等本机就能判断的错误不发到控制台，守护进程直接回 `isError`。
 
 ### 6.4 `file.download`（控制台 → 守护进程，可靠，键：`download_id + index`）
 
@@ -412,19 +412,17 @@ Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工
 
 守护进程只为仍在等待、且属于同一会话的 `read_deliverable` 调用保存分段（内存里，合计不超过 5 MB 的 base64），其他分段丢弃。收到 `tool.result` 后写到会话 cwd 下的 `.agent-deliverables/<deliverable_id>/v<version>/`，写之前重新校验 id 和版本、每个路径（相对、各段不以点开头、扩展名在白名单内、不重复）、分段是否到齐、合计 ≤ 5 MB、每个文件的大小和 sha256；`.agent-deliverables` 和其下目录必须是真目录，版本目录先整体删掉再写，文件以 `O_CREAT | O_EXCL | O_NOFOLLOW` 创建，顶层写 `.gitignore`（`*`）。成功时在结果文字前加一行本地绝对路径（`structured.abs_dir` 同样），失败（分段不全、校验不符、路径不合法）时把结果改成 `ok:false` 的工具失败。守护进程重启后未完成的调用按 §6.2 取消，分段随之作废；控制台对重复的 `tool.call` 只重发结果、不重发分段，这时结果按“内容不完整”失败，员工重新调用即可。只有 hello 带 `file_download` 特性的守护进程才会收到 `file.download`，否则工具直接失败并提示升级。
 
-`read_shared_file` 也用 `file.download` 下发，只是 `tool.result` 带的是 `shared_download = {download_id, chunks, files: [{path, size, sha256}]}`（恰好一个文件，`path` 是共享区路径，≤ 20 MB 所以最多 20 段），不带 `download`。守护进程为这次调用收分段（上限按 20 MB 计），校验同上，写到会话 cwd 下的 `.shared/<path>`：`.shared` 和其下目录必须是真目录，顶层写 `.gitignore`（`*`），目标文件已存在时整体替换（不跟随符号链接）。成功时把 `structured.local_path`（`.shared/<path>`）补成绝对路径写进结果文字。只有 `hello.features` 含 `shared_files` 的守护进程才会收到这种下发，否则控制台不发分段、工具直接失败并提示升级；老守护进程调用 `write_shared_file` 时不带 `upload`，同样按“需要升级”失败。
+有 `attachments_v2` 的守护进程（#58）：`read_attachment` 的 `tool.result` 带 `attachment_download = {attachment, url?, expires_at?}`，守护进程下载到 `.attachments/` 后只把 `local_path` 给 AI。`url` 一律不出现在给 AI 的结果里。同一个 `call_id` 的 `tool.call` 重复到达（守护进程重连后重发）时，控制台回放存下的结果，但先给 `attachment_download` 重新签名，免得发出已过期的地址。会话有共享文件夹时（`session.open.fs`），附件下载到 `.attachments/` 这个链接指向的项目目录 `attachments/` 里。
 
-有 `attachments_v2` 的守护进程（#58）：`read_shared_file` 的 `shared_download.files[0]` 带 `url` 和 `expires_at`、`chunks` 为 0、不发分段，守护进程直接 GET 并校验大小和 sha256；`write_shared_file` 先调 `POST <控制台>/nodes/uploads` 拿预签名 PUT 地址上传，`tool.call` 的 `upload` 带 `storage: "s3"`、`chunks: 0` 和那一个文件；`read_attachment` 的 `tool.result` 带 `attachment_download = {attachment, url?, expires_at?}`，守护进程下载到 `.attachments/` 后只把 `local_path` 给 AI。`url` 一律不出现在给 AI 的结果里。同一个 `call_id` 的 `tool.call` 重复到达（守护进程重连后重发）时，控制台回放存下的结果，但先给 `shared_download` / `attachment_download` 重新签名（对象没变时），免得发出已过期的地址。`write_shared_file` 的 `storage: "s3"` 由控制台在调用事务之后完成（复制、校验），所以 `tool.result` 会在 finalize 结束后才到。
+### 6.5 共享文件夹（没有共享文件工具）
 
-### 6.5 共享文件工具
+项目文件、用户文件和附件都放在用户的共享文件夹里（JuiceFS，每个用户一个卷，`shared-folder.md`）：节点挂载后，守护进程在每个会话的工作目录里建三个链接，员工用自己的文件工具直接读写，没有专门的 MCP 工具（原来的 `list_shared_files` / `read_shared_file` / `write_shared_file` / `delete_shared_file` 和 `save_attachment` 已删除）：
 
-项目级共享区：文件存在控制台（PG），不进 git，按项目隔离，项目里所有会话（统筹、各讨论串的组长和成员）和用户都能看到、覆盖和删除。四个工具三层都有（“只读”会话只是不能改仓库，平台级写入它们本来就有，比如 `publish_file`、`memory_write`）。不要放密钥、密码等凭证（凭证以后走远程服务器配置）。同名直接覆盖；单文件 ≤ 20 MB，项目合计 ≤ 500 MB、最多 1000 个文件（覆盖按新旧大小的差值算）。项目事件 `shared_file`（字段 op、path、by，见 `api.md` §1.1）在每次写入和删除后发出。
+- `.project-files/` → 卷里的 `projects/<pid>/`：本项目的文件，网页“共享文件”页浏览的就是它。
+- `.user-files/` → 卷里的 `shared/`：用户所有项目共用的文件。
+- `.attachments/` → `projects/<pid>/attachments/`：`read_attachment` 下载的附件。
 
-- 共享区路径（`SharedPath`）：相对路径、`/` 分隔、1～8 段、UTF-8 总长 ≤ 255 字节（schema 只能按字符数查 ≤ 255，以控制台的字节校验为准）；每段不能为空、不能是 `.` `..`、不能以 `.` 开头（所以也不能是 `.shared`、`.agent-*`）、不能以空格开头或结尾；不能有反斜杠、控制字符（C0、DEL、C1 即 U+0080～U+009F）和 U+2028/U+2029，不能以 `/` 开头。控制台和守护进程都按这条规则再校验一次。
-- `list_shared_files {prefix?} → {files: [{path, size, content_type, sha256, uploaded_by, uploaded_by_thread_no?, updated_at}], total_bytes, limit_bytes}`，按 path 排序；`total_bytes` 是全项目合计。
-- `read_shared_file {path} → {path, size, sha256, local_path}`：文件按 §6.4 下发到 `.shared/<path>`，结果只给本地路径（控制台填相对路径 `.shared/<path>`，守护进程补成绝对路径），**绝不返回文件内容**，员工之后用自己的文件工具读。会话没有工作目录时工具直接失败。
-- `write_shared_file {file, path?} → {path, size, sha256, overwritten}`：守护进程按 `publish_file` 的规则读 cwd 内的单个普通文件（目录拒绝），按 §6.3 上传。`path` 缺省为 `file` 规范化后的相对路径，若位于 `.shared/` 下则去掉这个前缀（取回、修改、写回落在同一路径）。
-- `delete_shared_file {path} → {path, deleted}`：不存在时 `deleted: false`；已经取到各工作目录里的副本不动。
+`.project-files/.deliverables/<id>/v<N>/` 是交付物各版本的文件（用户的共享文件夹开着时 `publish_file` 写到这里），由平台维护：员工只读，发布和取回仍用 `publish_file` / `read_deliverable`。仓库还在节点本地的工作目录里（`owner__repo`），没提交的改动留在那台节点上。
 
 ## 7. Git 作业
 

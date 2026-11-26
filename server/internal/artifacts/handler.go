@@ -8,8 +8,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-
-	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // Prefix is where files are served: /files/<token>/<path>.
@@ -20,7 +18,8 @@ const cdns = "https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflar
 
 // Server serves stored files to whoever holds a signed URL.
 type Server struct {
-	db     store.DB
+	// st is read per request: the shared folders may be switched on after the server is built.
+	st     func() Store
 	signer *Signer
 	// origin is AGENT_TEAMS_ARTIFACT_ORIGIN (scheme://host) or "" to serve under the console's /files/.
 	origin string
@@ -30,8 +29,8 @@ type Server struct {
 }
 
 // NewServer builds the file server. origin and appOrigin are scheme://host[:port] or "".
-func NewServer(db store.DB, signer *Signer, origin, appOrigin string, log *slog.Logger) *Server {
-	return &Server{db: db, signer: signer, origin: strings.TrimRight(origin, "/"), appOrigin: strings.TrimRight(appOrigin, "/"), log: log}
+func NewServer(st func() Store, signer *Signer, origin, appOrigin string, log *slog.Logger) *Server {
+	return &Server{st: st, signer: signer, origin: strings.TrimRight(origin, "/"), appOrigin: strings.TrimRight(appOrigin, "/"), log: log}
 }
 
 // Isolated reports whether files have their own origin (then the frame may keep allow-same-origin).
@@ -91,7 +90,7 @@ func (s *Server) parse(escaped string) (string, int, string, bool) {
 
 func (s *Server) find(ctx context.Context, id string, version int, path string) (ArtifactFile, error) {
 	if path == "" {
-		files, err := Files(ctx, s.db, id, version)
+		files, err := Files(ctx, s.st().DB, id, version)
 		if err != nil {
 			return ArtifactFile{}, err
 		}
@@ -106,7 +105,8 @@ func (s *Server) find(ctx context.Context, id string, version int, path string) 
 	if !ValidPath(path) {
 		return ArtifactFile{}, ErrNotFound
 	}
-	return Load(ctx, s.db, id, version, path)
+	st := s.st()
+	return st.Load(ctx, st.DB, id, version, path)
 }
 
 func (s *Server) headers(h http.Header, f ArtifactFile) {

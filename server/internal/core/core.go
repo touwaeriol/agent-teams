@@ -9,6 +9,7 @@ package core
 import (
 	"time"
 
+	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 
 	"context"
@@ -51,6 +52,13 @@ type Store struct {
 	Blobs blobstore.Store
 	// AttachmentTTL is how long an attachment is kept after its last use (0 = DefaultAttachmentTTL).
 	AttachmentTTL time.Duration
+	// Volume keeps deliverable versions in their owners' shared folders (nil: database only).
+	Volume artifacts.Volume
+}
+
+// Artifacts is where deliverable versions are stored and read.
+func (s *Store) Artifacts() artifacts.Store {
+	return artifacts.Store{DB: s.Pool, Volume: s.Volume}
 }
 
 // New returns a Store; pub may be nil (no realtime hints).

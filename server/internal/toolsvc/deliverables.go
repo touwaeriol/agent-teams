@@ -124,7 +124,7 @@ func (s *Service) readDeliverable(ctx context.Context, tx *core.Tx, c *call) (Re
 	if version == 0 {
 		return Result{}, refuse("交付物 %s 没有托管的文件", d.ID)
 	}
-	files, err := artifacts.LoadVersion(ctx, tx, d.ID, version)
+	files, err := s.core.Artifacts().LoadVersion(ctx, tx, d.ID, version)
 	if err != nil {
 		return Result{}, err
 	}

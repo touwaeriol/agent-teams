@@ -42,9 +42,11 @@ func readFsStatus(ctx context.Context, q core.DB, nodeID string) (nodeFsStatus, 
 func (e *Engine) UseSharedFolder(s *userfs.Service) {
 	if e.FS = s; s == nil {
 		e.Orch.SharedFolder = nil
+		e.Core.Volume = nil
 		return
 	}
 	s.OnChange = e.pushFS
+	e.Core.Volume = s
 	e.Orch.SharedFolder = e.sharedFolder
 }
 

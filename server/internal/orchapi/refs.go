@@ -413,7 +413,7 @@ func (a *API) hostedRef(ctx context.Context, b *strings.Builder, d core.Delivera
 		fmt.Fprintf(b, "\n%s 是%s，这里不附内容；需要时用 %s 把文件取到工作目录查看。", entry, binaryKind(entry), fetch)
 		return nil
 	}
-	f, err := artifacts.Load(ctx, a.e.Core.Pool, d.ID, v.Version, entry)
+	f, err := a.e.Core.Artifacts().Load(ctx, a.e.Core.Pool, d.ID, v.Version, entry)
 	if err != nil {
 		return err
 	}

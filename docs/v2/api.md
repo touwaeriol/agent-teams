@@ -36,7 +36,6 @@
 | `ci` | `{thread_no, sha, checks: CheckView[]}` | CI 结果变化 |
 | `memory` | `{op: "write"|"delete", name}` | 记忆文件变了（网页重新拉列表和打开的文件） |
 | `server` | `{server, server_id, employee, session_id, conn_id, duration_ms, commands, bytes_in, bytes_out, reason, last_command?, exit_code?, summary}` | 员工一条到远程服务器的 SSH 连接结束（architecture.md §10.6）；`last_command` 已脱敏、最多 200 字；`summary` 是给讨论串动态的一句话 |
-| `shared_file` | `{op: "write"|"delete", path, by}` | 共享文件写入（新建或覆盖）/ 删除；`by` 是 `user` 或 `dev-1 #31` 这样的员工名加讨论串号（网页重新拉共享文件列表） |
 | `session_controls` | `{thread_id, applied, error?}` | 会话（多仓库会话）的权限模式、模型或思考强度变了：`applied: false` 是切换已发出、等节点回音，`true` 是节点回了（`error` 为失败原因，这次切换一项都没生效）；网页重新拉 `GET /api/projects/{pid}/session-controls`（sessions.md） |
 | `node` | `{node: NodeBrief}` | 该项目用到的节点上下线、槽位变化 |
 | `context` | `{thread_no, conversation_id, session_id, reason: "turn"\|"refresh", refresh_id?, error?, updated_at?}` | 会话（多仓库会话）的上下文细分存好了（每轮结束或刷新），或刷新失败（`error`）；网页重新拉 `GET /api/conversations/{cid}/context/detail` |
@@ -273,38 +272,39 @@ RepoItem        = {full_name, private, default_branch, used_by_projects: [{id, n
 
 PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平台轮询 / webhook 更新。设计类和托管交付物（员工用 `publish_file` 发布）在查看器 DesignViewer（`/projects/:pid/deliverables/:id`）里打开：HTML 在 sandbox iframe 里，Markdown 安全渲染，图片内联（只有截图不再算交付物之前发布的旧数据），可切换版本，批注发回给员工。
 
-### 3.5.1 共享文件
+### 3.5.1 项目文件（共享文件页）
 
-项目级共享区（讨论串 #33，`architecture.md` §6.3、`protocol.md` §6.5）：元数据在控制台（`at_shared_files`，`data-model.md` §2.13），字节在对象存储（#58；#58 之前的行在 `atctl storage migrate` 之前仍在 `data` 列），不进 git，项目里所有会话和用户都能看到、覆盖、删除；同名直接覆盖，不做版本。上限（#58）：单文件 200 MB、项目合计 5 GB（只算共享文件，附件不计）、项目最多 1000 个文件（覆盖按差值算总量）。下面的 `multipart/form-data` 上传每个文件仍限 20 MB（没有对象存储时的退路）；网页默认走 §3.5.2 的分片直传（`kind: shared`）。路径规则：相对、`/` 分隔、1～8 段、≤ 255 字节，每段不能为空、不能是 `.` `..`、不能以 `.` 开头、不能以空格开头或结尾，不能有反斜杠、控制字符（C0、DEL、C1）和 U+2028/U+2029（255 按 UTF-8 字节算）——控制台对浏览器和节点送来的路径都再校验一次。任何类型都能上传，`content_type` 按扩展名推断（未知为 `application/octet-stream`）。不要放密钥等凭证。别人的项目一律 404。
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/projects/{pid}/shared-files?prefix=` | → `{files: SharedFile[], total_bytes, file_count, limits: {file_bytes, project_bytes, project_files}}`，按路径排序（不含内容）；`SharedFile = {path, content_type, size, sha256, uploaded_by, uploaded_by_thread_no?, created_at, updated_at}`，`uploaded_by` 是员工名或 `user`（网页显示为“你”），员工上传的带 `uploaded_by_thread_no`（显示成“dev-1 #31”，统筹没有） |
-| POST | `/api/projects/{pid}/shared-files` | `multipart/form-data`：一个或多个 `file` 部分；可选 `dir`（目录前缀，例如 `data/`）；可选 `path`（要么不给、用文件名，要么每个文件给一个、按顺序对应，可带子目录）→ 201 `{files: [SharedFile + overwritten], total_bytes}`。一次请求整体成功或整体失败（一个事务）；路径不合法或一次里有重名 422 `validation`，单个文件超 20 MB 413 `file_too_large`，超出项目合计或文件数 409 `quota_exceeded`；请求体上限 101 MB。上传者记为 `user`，每个文件发一条 `shared_file` 事件 |
-| GET | `/api/projects/{pid}/shared-files/download?path=` | 文件内容：总是 `Content-Disposition: attachment`（文件名取路径最后一段，非 ASCII 按 RFC 2231 编码）、`X-Content-Type-Options: nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`、`Cache-Control: private, no-store`；HTML、SVG、XML、JS 一律以 `application/octet-stream` 发送，绝不内联渲染。路径不合法 422，没有 404 |
-| DELETE | `/api/projects/{pid}/shared-files?path=` | 204，发 `shared_file` 事件（`op: delete`）；没有 404。已经取到各会话工作目录里的副本不动 |
-
-### 3.5.2 分片直传（附件和共享文件，#58）
-
-浏览器把文件直接 PUT 到对象存储（RustFS，S3 兼容），控制台只签名、记账，字节不经过控制台。附件和共享文件共用一套接口；
-没配对象存储（`AGENT_TEAMS_S3_*`）时 `create` 返回 503 `storage_unavailable`，网页对 5 MB 以内的附件退回 `POST /api/projects/{pid}/attachments`、对 20 MB 以内的共享文件退回表单上传。
+项目文件是用户共享文件夹（JuiceFS，`shared-folder.md`）里的 `projects/<pid>/`，也就是员工工作目录里的 `.project-files/`。控制台经 `juicefs gateway` 读写，不进 git，没有配额以外的限制（卷容量见 `AGENT_TEAMS_FS_CAPACITY_GB`）。路径相对项目目录、`/` 分隔、≤ 1024 字节，不能有空段、`.`、`..`、反斜杠和控制字符（`userfs.CleanPath`，不合法 422）。`.deliverables/` 是交付物版本，只能看，写入、删除、建文件夹一律 403 `managed_folder`。用户的共享文件夹没开或不可用时，列表返回 `available: false` 和原因，其余接口 409 `folder_unavailable`。别人的项目一律 404。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/api/projects/{pid}/uploads` | `UploadCreate {kind: attachment\|shared, name（≤ 300 字符）, size（精确字节数，≤ 200 MB，超过 413 `file_too_large`）, path?（共享文件的目标路径，默认 name）, overwrite?（共享文件，默认 true；false 时同名 409 `file_exists`）}` → 201 `UploadSession {upload_id, kind, id, part_size, parts, expires_at}`。`upload_id`：附件是 `img_…`（同时就是附件 id），共享文件是 `up_…`；`part_size` 固定 16 MB，`parts` = ⌈size / part_size⌉（空文件 1 片）。共享文件在这里先查路径和配额（409 `quota_exceeded`）；附件不计配额。每个用户同时进行中的上传（附件和本人各项目的共享文件、含节点 `write_shared_file`，按声明大小）最多 16 个、共 2 GB，超出 429 `too_many_uploads`（`core.MaxUploadsInFlight` / `MaxUploadBytesInFlight`）。24 小时没完成的上传由 blobgc 取消清理 |
+| GET | `/api/projects/{pid}/files?dir=` | → `ProjectFiles {available, reason?, dir, entries: FileEntry[]}`，文件夹在前、再按名字；`FileEntry = {name, path, dir, size, content_type?, mod_time}`。项目目录还不存在时是空列表 |
+| POST | `/api/projects/{pid}/files` | `multipart/form-data`：一个或多个 `file` 部分；可选 `dir`；可选 `path`（要么不给、用文件名，要么每个文件一个、按顺序，可带子目录，相对 `dir`）→ 201 `{files: FileEntry[]}`，同名替换。请求体上限 1 GiB，网页按批发送 |
+| GET | `/api/projects/{pid}/files/download?path=` | 文件内容：总是 `Content-Disposition: attachment`、`nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`、`Cache-Control: private, no-store`；HTML、SVG、XML、JS 以 `application/octet-stream` 发送。没有 404 |
+| DELETE | `/api/projects/{pid}/files?path=` | 204：删一个文件，或一个文件夹连同里面的一切。没有 404 |
+| POST | `/api/projects/{pid}/files/folders` | `{path}` → 204：建文件夹（含上级） |
+| POST | `/api/attachments/{id}/save-shared` | `{path, overwrite?}` → `FileEntry`：把附件存进项目文件；同名 409 `file_exists`（除非 overwrite），附件过期 410 |
+
+### 3.5.2 分片直传（附件，#58）
+
+浏览器把附件直接 PUT 到对象存储（RustFS，S3 兼容），控制台只签名、记账，字节不经过控制台；
+没配对象存储（`AGENT_TEAMS_S3_*`）时 `create` 返回 503 `storage_unavailable`，网页对 5 MB 以内的附件退回 `POST /api/projects/{pid}/attachments`。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/projects/{pid}/uploads` | `UploadCreate {kind: attachment, name（≤ 300 字符）, size（精确字节数，≤ 200 MB，超过 413 `file_too_large`）}` → 201 `UploadSession {upload_id, kind, id, part_size, parts, expires_at}`。`upload_id` 是 `img_…`（同时就是附件 id）；`part_size` 固定 16 MB，`parts` = ⌈size / part_size⌉（空文件 1 片）。每个用户同时进行中的上传（按声明大小）最多 16 个、共 2 GB，超出 429 `too_many_uploads`（`core.MaxUploadsInFlight` / `MaxUploadBytesInFlight`）。24 小时没完成的上传由 blobgc 取消清理 |
 | POST | `/api/projects/{pid}/uploads/{upload_id}/parts` | `{numbers: int[]}`（一次最多 100 个）→ `{urls: [{number, url}]}`：每片的预签名 PUT 地址，1 小时有效。每片的确切长度（前面各片 `part_size`，最后一片是剩余字节）签进了地址，长度不符的 PUT 会被对象存储拒绝。网页消息框的附件同一页面同时最多传 4 个（`UPLOADS_AT_ONCE`）（其余排队，免得撞上 429 `too_many_uploads`），每个文件 3 片并发、单片失败重试 3 次，地址过期（403/400）时重新取 |
-| POST | `/api/projects/{pid}/uploads/{upload_id}/complete` | `{parts: [{number, etag}]}`（PUT 响应头里的 ETag；RustFS 的 CORS 已暴露 ETag）→ `UploadDone {kind, attachment?: AttachmentView, shared_file?: UploadedSharedFile}`。控制台完成分片合并，核对对象大小（不符 422 `size_mismatch`，对象删除），附件按前 512 字节嗅探类型（png/jpeg/gif/webp/pdf 以嗅探为准，其余按扩展名，未知 `application/octet-stream`；浏览器声明的类型不采用），sha256 由后台任务流式补算（算出之前为空）；共享文件在项目锁下再查一次配额并落到路径上（同名覆盖时旧对象进删除队列）、发 `shared_file` 事件。片不全 409 `upload_incomplete`；重复 complete 安全 |
+| POST | `/api/projects/{pid}/uploads/{upload_id}/complete` | `{parts: [{number, etag}]}`（PUT 响应头里的 ETag；RustFS 的 CORS 已暴露 ETag）→ `UploadDone {kind, attachment?: AttachmentView}`。控制台完成分片合并，核对对象大小（不符 422 `size_mismatch`，对象删除），附件按前 512 字节嗅探类型（png/jpeg/gif/webp/pdf 以嗅探为准，其余按扩展名，未知 `application/octet-stream`；浏览器声明的类型不采用），sha256 由后台任务流式补算（算出之前为空）。片不全 409 `upload_incomplete`；重复 complete 安全 |
 | DELETE | `/api/projects/{pid}/uploads/{upload_id}` | 204：取消（abort 分片上传、删暂存行）。已完成或不存在 404 |
 | POST … | `/api/uploads…` | 不带项目的附件上传（新建普通会话用），见 §3.2 |
 
-附件的保留期：最后一次使用后 `AGENT_TEAMS_ATTACHMENT_TTL`（默认 24 小时）。发消息、转发、派任务、批注、网页或节点下载、存为共享文件都算使用，会把 `at_attachments.expires_at` 顺延；到期后 blobgc 把附件标成 `expired`、删掉字节和对象，行保留：消息里显示“已过期”，`GET /api/attachments/{id}` 返回 410 `attachment_expired`，再引用它的发送被拒（410）。
+附件的保留期：最后一次使用后 `AGENT_TEAMS_ATTACHMENT_TTL`（默认 24 小时）。发消息、转发、派任务、批注、网页或节点下载、存到项目文件都算使用，会把 `at_attachments.expires_at` 顺延；到期后 blobgc 把附件标成 `expired`、删掉字节和对象，行保留：消息里显示“已过期”，`GET /api/attachments/{id}` 返回 410 `attachment_expired`，再引用它的发送被拒（410）。
 
-节点用的两个接口（节点令牌 `Authorization: Bearer`，不是 huma 接口；错误体 `{detail, code, status}`）：
+节点用的接口（节点令牌 `Authorization: Bearer`，不是 huma 接口；错误体 `{detail, code, status}`）：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/nodes/attachments/{id}/url` | 节点投递附件前现取下载地址（session.send 只带附件引用，地址不进可重放的节点命令）：→ `{size, sha256, name, content_type, url?, expires_at?}`，`url` 是 15 分钟有效的预签名 GET；#58 之前字节还在库里的附件没有 `url`，节点退回 `GET /nodes/attachments/{id}`（流式输出字节）。只能取本节点所属用户的项目附件；算一次使用。过期 410 `attachment_expired`，不存在 404，没配对象存储 503 |
-| POST | `/nodes/uploads` | 新守护进程 `write_shared_file` 的第一步：`{session_id, call_id?, name（目标共享路径）, size, sha256, content_type?}` → 201 `{upload_id, url, headers, expires_at}`：单个预签名 PUT（30 分钟有效，必须带上 `headers`）。守护进程 PUT 完再发带 `upload: {upload_id, storage: "s3"}` 的 `tool.call`；控制台把对象复制到一个从没签过名的 key，再核对大小和声明的 sha256（重放 PUT 改不了已登记的内容），这一步在调用事务之后完成，不挡节点链路。会话不在这个节点上 409 `session_not_on_node`（从不返回 404：404 表示老控制台没有这个接口，守护进程会退回分块上传）；配额等拒绝和 `POST /api/projects/{pid}/uploads` 相同；签名失败时刚建的上传立即取消。被拒或取消的上传，对象立即删除，并在 PUT 地址过期后再删一次 |
 
 ### 3.6 NewProject 与 ProjectSettings
 
@@ -525,7 +525,7 @@ v1 的旧对话只读页和它的接口（`GET /api/conversations`、`…/{cid}/
 | `/projects/:pid/threads/:no` · `/projects/:pid/threads/:no/:tab` | 宽屏（≥1024 px）：Main，右侧面板打开这个讨论串，`tab` = `progress`（默认，可省）· `tasks` · `deliverables` · `members`；窄屏：Thread / MobileThread。旧链接 `/projects/:pid?thread=N` 跳到这里 |
 | `/projects/:pid/threads/:no/full` | Thread（全屏，主要任务 / 任务池 / 和组长的对话 / 交付） |
 | `/projects/:pid/deliverables` | Deliverables |
-| `/projects/:pid/shared-files` | SharedFiles：项目共享文件（§3.5.1），入口在项目侧栏“资料库”下面。上传前按同样的路径规则和上限先检查一遍；同名覆盖先确认一次；每个文件走 §3.5.2 的分片直传（单个 ≤ 200 MB，项目合计 5 GB 的配额提示带已用量），进度按全部字节算，没有对象存储时退回表单上传（每个 ≤ 20 MB）；选或拖入的文件夹保留目录结构，其中点开头的文件和目录自动跳过；收到 `shared_file` 事件刷新列表 |
+| `/projects/:pid/files` | ProjectFiles（侧栏“共享文件”，旧地址 `/shared-files` 跳转过来）：浏览项目文件（§3.5.1），面包屑进出文件夹（`?dir=`）；上传文件或文件夹到当前目录（保留子目录，`.DS_Store`、`.git` 等系统文件跳过），同名替换先确认一次；新建文件夹、下载、删除（文件夹连同内容）；共享文件夹没开时提示并链接到 设置 → 共享文件夹 |
 | `/projects/:pid/office` | Office |
 | `/projects/:pid/settings` · `/projects/:pid/settings/:section` | ProjectSettings：Main 上打开的设置对话框，分区 `general`（通用：名称图标、简介、模型、自动继续、归档删除）· `memory`（记忆：项目指令 = `context`，自动记忆 = MEMORY.md 和记忆文件）· `environment`（环境：每个讨论串都包含的仓库，工作树开关 = `work_mode`：开启 `worktree` / 关闭 `clone` 独立克隆；没有云环境或远程环境，节点在 设置 → 节点）· `usage`（使用情况）· `advanced`（高级：审批与交付、合并方式、分支命名与清理说明），关闭回到 `/projects/:pid` |
 | `/settings/team` · `/settings/nodes` · `/settings/git` · `/settings/appearance` | Team · Nodes · GitHub · 外观（用户端设置，侧栏里没有管理入口） |

@@ -111,6 +111,23 @@ func filesFail(err error) error {
 	return err
 }
 
+// errManaged refuses page writes into the deliverables' folder, which the platform keeps.
+var errManaged = httpapi.Fail(http.StatusForbidden, "managed_folder", "交付物目录（.deliverables）由平台维护：发布新版本用 publish_file，删除交付物在资料库里删")
+
+// managed tells whether rel is the deliverables' folder or inside it.
+func managed(rel string) bool {
+	first, _, _ := strings.Cut(strings.Trim(rel, "/"), "/")
+	return first == userfs.DeliverablesDir
+}
+
+// writableFiles is projectFiles for a write: never into the deliverables' folder.
+func (a *API) writableFiles(ctx context.Context, userID, projectID, rel string) (userfs.Files, string, error) {
+	if managed(rel) {
+		return nil, "", errManaged
+	}
+	return a.projectFiles(ctx, userID, projectID, rel)
+}
+
 // projectFiles opens the owner's volume and resolves rel inside the project's folder.
 func (a *API) projectFiles(ctx context.Context, userID, projectID, rel string) (userfs.Files, string, error) {
 	p, err := userfs.Join(userfs.ProjectDir(projectID), rel)
@@ -194,6 +211,9 @@ func uploadTargets(form *multipart.Form) ([]string, []*multipart.FileHeader, err
 		if seen[p] {
 			return nil, nil, httpapi.Invalid("path", fmt.Sprintf("同一次上传里有两个 %s", p))
 		}
+		if managed(p) {
+			return nil, nil, errManaged
+		}
 		seen[p], out[i] = true, p
 	}
 	return out, heads, nil
@@ -275,7 +295,7 @@ func (a *API) deleteProjectFile(ctx context.Context, in *filePathInput) (*struct
 	if err != nil {
 		return nil, err
 	}
-	f, abs, err := a.projectFiles(ctx, u.ID, p.ID, in.Path)
+	f, abs, err := a.writableFiles(ctx, u.ID, p.ID, in.Path)
 	if err != nil {
 		return nil, filesFail(err)
 	}
@@ -287,7 +307,7 @@ func (a *API) createProjectFolder(ctx context.Context, in *folderCreateInput) (*
 	if err != nil {
 		return nil, err
 	}
-	f, abs, err := a.projectFiles(ctx, u.ID, p.ID, in.Body.Path)
+	f, abs, err := a.writableFiles(ctx, u.ID, p.ID, in.Body.Path)
 	if err != nil {
 		return nil, filesFail(err)
 	}
@@ -308,7 +328,7 @@ func (a *API) saveAttachmentFile(ctx context.Context, in *saveSharedInput) (*sav
 	if err != nil {
 		return nil, fail(err, "没有这个附件")
 	}
-	f, abs, err := a.projectFiles(ctx, u.ID, att.ProjectID, in.Body.Path)
+	f, abs, err := a.writableFiles(ctx, u.ID, att.ProjectID, in.Body.Path)
 	if err != nil {
 		return nil, filesFail(err)
 	}

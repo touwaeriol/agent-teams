@@ -83,6 +83,7 @@ export function sharedFolderPrompt(dirs: SharedDirs): string {
     `- .project-files/ → ${dirs.project} ($AGENT_TEAMS_PROJECT_DIR): this project's files. Put documents, data, reports, exports and anything other employees, threads or later sessions of the project need here, never in a repository unless it belongs to the code. The user sees these files on the project's 共享文件 page.`,
     `- .user-files/ → ${dirs.shared} ($AGENT_TEAMS_SHARED_DIR): files shared by all of the user's projects.`,
     `- .attachments/ → ${sharedAttachmentDir(dirs)}: files the user attached to messages (kept with the project).`,
+    "- .project-files/.deliverables/<id>/v<N>/ holds the published versions of the project's deliverables. The platform keeps it: read from it freely, but never write, move or delete there (a changed file is no longer served). Publish with publish_file and fetch with read_deliverable as usual.",
     "Do not put secrets (keys, passwords, tokens) there. Several nodes may use the folder at once: a SQLite database there must be written from one session at a time (rollback journal, not WAL).",
   ].join("\n");
 }

@@ -1963,8 +1963,9 @@ INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, s
 	}
 }
 
-// TestUserFsMigration: 00480 adds at_user_fs (one volume per user, deleted with the user) and
-// at_nodes.fs_status ({} by default); down drops both.
+// TestUserFsMigration: 00480 adds at_user_fs (one volume per user, deleted with the user),
+// at_nodes.fs_status ({} by default) and deliverable files kept in a volume (no data, only then);
+// down drops them.
 func TestUserFsMigration(t *testing.T) {
 	db := open(t, testdb.URL(t))
 	ctx := context.Background()
@@ -1996,11 +1997,25 @@ INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capa
 	if err := db.QueryRow(`SELECT count(*) FROM at_user_fs`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("volume row not deleted with the user: %d %v", n, err)
 	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u2', 'b@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u2', 'p');
+INSERT INTO at_deliverables (id, project_id, kind, title) VALUES ('dl_1', 'p1', 'doc', 't');
+INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, size, sha256, data) VALUES ('dl_1', 1, 'a.md', 'text/markdown', 1, 'x', 'a');
+INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, size, sha256, in_volume) VALUES ('dl_1', 2, 'a.md', 'text/markdown', 1, 'x', true);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, size, sha256) VALUES ('dl_1', 3, 'a.md', 'text/markdown', 1, 'x')`); err == nil {
+		t.Fatal("file without data outside a volume accepted")
+	}
 	if _, err := p.DownTo(ctx, 470); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`SELECT fs_status FROM at_nodes`); err == nil {
 		t.Fatal("fs_status still there after down")
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM at_deliverable_files`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("deliverable files after down: %d %v", n, err)
 	}
 	if _, err := p.UpTo(ctx, 480); err != nil {
 		t.Fatal(err)

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/blobmigrate"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/config"
@@ -23,7 +24,9 @@ const storageUsage = `usage: atctl storage migrate|verify|purge-data|restore|imp
   purge-data  verify each migrated row again and clear its data column when the object matches
   restore     rollback: copy objects back into data for rows whose data was cleared (<= 20 MB)
   import-shared  copy the old project shared files into each owner's shared folder (projects/<pid>/),
-              switching the folder on where needed; files already there are skipped (needs AGENT_TEAMS_FS_*)
+              switching the folder on where needed; files already there are skipped (needs AGENT_TEAMS_FS_*);
+              then move deliverable versions kept in the database into their owners' shared folders
+              (projects/<pid>/.deliverables/<id>/v<n>/; skipped with --dry-run)
 
 Needs DATABASE_URL and AGENT_TEAMS_S3_*. Every step can be re-run and interrupted. Back up the
 database before migrate and before purge-data.`
@@ -124,8 +127,20 @@ func importShared(ctx context.Context, getenv config.Getenv, db *store.Store, bs
 	for _, e := range rep.Errors {
 		fmt.Fprintf(out, "  %s\n", e)
 	}
-	if err == nil && rep.Failed > 0 {
-		err = fmt.Errorf("%d files failed (listed above)", rep.Failed)
+	if err != nil {
+		return err
 	}
-	return err
+	failed := rep.Failed
+	if !dryRun {
+		moved, err := (artifacts.Store{DB: db.Pool, Volume: svc}).MoveToVolumes(ctx, log)
+		fmt.Fprintf(out, "move-deliverables moved=%d skipped=%d (owner without a shared folder) failed=%d\n", moved.Moved, moved.Skipped, moved.Failed)
+		if err != nil {
+			return err
+		}
+		failed += moved.Failed
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d items failed (listed above)", failed)
+	}
+	return nil
 }

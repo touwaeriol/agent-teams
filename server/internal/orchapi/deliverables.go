@@ -213,6 +213,9 @@ func (a *API) deleteDeliverable(ctx context.Context, in *deliverableIDInput) (*s
 	if err != nil {
 		return nil, err
 	}
+	if err := a.e.Core.Artifacts().Remove(ctx, d.ID); err != nil {
+		return nil, err
+	}
 	return nil, a.e.Core.InTx(ctx, func(tx *core.Tx) error {
 		if err := core.DeleteDeliverable(ctx, tx, d.ID); err != nil {
 			return err

@@ -8,9 +8,16 @@ directory; it survives sessions, threads and node moves. Code stays in the node-
 One JuiceFS volume per user, `at-<id>` (`id` = first 16 hex of sha256("agent-teams-user-fs|"+user_id)):
 
 ```
-/projects/<project_id>/   one per project ($AGENT_TEAMS_PROJECT_DIR)
-/shared/                  every project of the user ($AGENT_TEAMS_SHARED_DIR)
+/projects/<project_id>/                     one per project ($AGENT_TEAMS_PROJECT_DIR)
+/projects/<project_id>/attachments/         attachments fetched with read_attachment
+/projects/<project_id>/.deliverables/<id>/v<N>/   published deliverable versions (platform-kept)
+/shared/                                    every project of the user ($AGENT_TEAMS_SHARED_DIR)
 ```
+
+Every session's working directory (`projects/<pid>/threads/<no>/<emp>/` on the node) holds the
+project's repositories as `owner__repo` plus three links: `.project-files` → the project's folder,
+`.user-files` → `shared/`, `.attachments` → the project's `attachments/`. The system prompt explains
+them. There are no file tools: employees read and write with their own file tools.
 
 Projects are only softly separated: a session can reach the user's other project folders. The
 boundary that matters is between users, and that one is hard (separate metadata role and schema,
@@ -56,6 +63,29 @@ is ready and the node reports it mounted. The daemon creates both directories, a
 `additionalDirectories` and sandbox `allowWrite`, and to Codex's workspace-write `writable_roots`,
 exports the two variables, and appends a short note to the system prompt.
 
+## Console access
+
+The console never mounts a volume. For each volume in use it runs `juicefs gateway` as a child
+process on 127.0.0.1 (random port and key, bucket `files`, no background jobs, no cache), stopped
+after 10 idle minutes and before the volume is deleted, and talks to its S3 API
+(`userfs.Gateways`, `userfs.S3Files`). Through it:
+
+- the project's 共享文件 page lists, uploads, downloads and deletes `projects/<pid>/`
+  (`/api/projects/{pid}/files…`, api.md §3.5.1) and saves attachments there;
+- deliverable versions are written and read (`artifacts.Store`): with the owner's folder on,
+  `publish_file` writes `projects/<pid>/.deliverables/<id>/v<N>/` and `at_deliverable_files` keeps
+  only the metadata (`in_volume`); signed URLs and `read_deliverable` read the files back and refuse
+  one whose size changed. The page cannot write into `.deliverables/` (403 `managed_folder`), and
+  employees are told to leave it alone. Versions from before the folder was on stay in the database.
+
+## Moving old data in
+
+`atctl storage import-shared` copies the old platform shared files (`at_shared_files`) into each
+owner's `projects/<pid>/`, switching the folder on where needed and skipping files already there
+with the same size; then it moves deliverable versions kept in the database into the volumes of
+owners whose folder is on. Both steps can be re-run. A later migration drops `at_shared_files` and
+`at_shared_uploads`.
+
 ## Consistency
 
 JuiceFS gives close-to-open consistency. SQLite works there with a single writer at a time
@@ -64,5 +94,4 @@ committed data.
 
 ## Not in v1
 
-- Per-project quotas (`juicefs quota`), a web file browser for the volume, tool fallback for nodes
-  without a mount, and moving the old shared files into the volume.
+- Per-project quotas (`juicefs quota`) and a tool fallback for nodes without a mount.
