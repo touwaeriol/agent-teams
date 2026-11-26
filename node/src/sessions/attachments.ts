@@ -1,7 +1,8 @@
 // Attachments of session.send / first_message (attachments_v2, #58): any type, up to 200 MB each.
 // The daemon asks the console for a short-lived download URL at delivery time (GET
 // /nodes/attachments/{id}/url, node token), streams the file into <cwd>/.attachments/<id>-<name>
-// (git-ignored by its own .gitignore) and lists every attachment's path in the text. Images and
+// (git-ignored by its own .gitignore; with the shared folder, a link to the project's attachments/
+// there, kept with the project) and lists every attachment's path in the text. Images and
 // PDFs under the runtime's per-file limits also go in as content blocks. The URL never reaches the AI.
 import { createHash, randomBytes } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
@@ -122,7 +123,7 @@ export function attachmentFileName(ref: Pick<AttachmentRef, "id" | "name">): str
  * (the session was closed).
  */
 export async function downloadAttachment(
-  cwd: string, ref: AttachmentRef, http: ConsoleHttp, opts: AttachmentOptions, presetUrl?: string | null, cancel?: AbortSignal,
+  cwd: string, ref: AttachmentRef, http: ConsoleHttp, opts: AttachmentOptions, presetUrl?: string | null, cancel?: AbortSignal, into?: string | null,
 ): Promise<SavedAttachment> {
   const deadline = Date.now() + opts.timeoutMs;
   const left = () => deadline - Date.now();
@@ -133,7 +134,8 @@ export async function downloadAttachment(
   const root = await realpath(cwd).catch(() => {
     throw new AttachmentError("the working directory is missing");
   });
-  const dir = await attachmentDir(root);
+  // into: the shared folder's attachments/ (reached from the working directory through the .attachments link).
+  const dir = into ?? (await attachmentDir(root));
   const name = attachmentFileName(ref);
   const abs = join(dir, name);
   const rel = `${ATTACH_DIR}/${name}`;

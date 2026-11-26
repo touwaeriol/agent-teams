@@ -28,6 +28,8 @@ const DOWNLOAD_TOOLS = new Set(["read_deliverable", "read_shared_file"]);
 export interface BrokerDeps {
   http?: ConsoleHttp;
   attachments?: () => AttachmentOptions;
+  /** The shared folder's attachments/ for a working directory linked to it (null: the local .attachments). */
+  attachmentDir?: (absCwd: string) => string | null;
   /** A .attachments folder was written in this working directory (swept for old copies). */
   noteAttachmentDir?: (absCwd: string) => void;
 }
@@ -229,8 +231,9 @@ export class ToolBroker {
     const fail = (msg: string): ToolResult => ({ session_id: body.session_id, call_id: body.call_id, ok: false, content: [{ type: "text", text: `read_attachment: ${msg}` }] });
     if (!this.deps.http) return fail("this node cannot download attachments");
     try {
-      const saved = await downloadAttachment(p.cwd ?? "", ad.attachment, this.deps.http, this.attachmentOptions, ad.url ?? null);
-      if (p.cwd) this.deps.noteAttachmentDir?.(p.cwd);
+      const into = p.cwd ? (this.deps.attachmentDir?.(p.cwd) ?? null) : null;
+      const saved = await downloadAttachment(p.cwd ?? "", ad.attachment, this.deps.http, this.attachmentOptions, ad.url ?? null, undefined, into);
+      if (p.cwd && !into) this.deps.noteAttachmentDir?.(p.cwd);
       const a = ad.attachment;
       const note =
         `Saved attachment ${a.id} (${a.name}, ${a.content_type}, ${a.size} bytes) to ${saved.abs} (relative: ${saved.rel}; git-ignored)` +

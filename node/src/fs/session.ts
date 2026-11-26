@@ -1,3 +1,5 @@
+import { lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import type { SessionOpen } from "../protocol.js";
 
 export interface SharedDirs {
@@ -26,12 +28,61 @@ export function withSharedDirs(spec: SessionOpen, dirs: SharedDirs): SessionOpen
   return out;
 }
 
+/** Where attachments of a session with the shared folder are kept: the project's attachments/. */
+export function sharedAttachmentDir(dirs: SharedDirs): string {
+  return join(dirs.project, "attachments");
+}
+
+/** The links a working directory gets, by name, to the shared folder. */
+export function sharedLinks(dirs: SharedDirs): [string, string][] {
+  return [
+    [".project-files", dirs.project],
+    [".user-files", dirs.shared],
+    [".attachments", sharedAttachmentDir(dirs)],
+  ];
+}
+
+/**
+ * Puts the links into the working directory (not a git repository: the repositories are folders
+ * inside it). A link to elsewhere is replaced; an old local .attachments folder (downloaded copies,
+ * fetched again on demand) is removed; any other file in the way is left alone and reported.
+ */
+export function linkSharedDirs(absCwd: string, dirs: SharedDirs): string[] {
+  const problems: string[] = [];
+  mkdirSync(sharedAttachmentDir(dirs), { recursive: true });
+  for (const [name, target] of sharedLinks(dirs)) {
+    const at = join(absCwd, name);
+    const st = lstatOrNull(at);
+    if (st?.isSymbolicLink()) {
+      if (readlinkSync(at) === target) continue;
+      unlinkSync(at);
+    } else if (st?.isDirectory() && name === ".attachments") {
+      rmSync(at, { recursive: true, force: true });
+    } else if (st) {
+      problems.push(`${at} exists and is not a link`);
+      continue;
+    }
+    symlinkSync(target, at, "dir");
+  }
+  return problems;
+}
+
+function lstatOrNull(p: string) {
+  try {
+    return lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
 /** What the employee is told about the folders (appended to the system prompt). */
 export function sharedFolderPrompt(dirs: SharedDirs): string {
   return [
     "## Shared folder",
-    `This project's persistent folder is ${dirs.project} ($AGENT_TEAMS_PROJECT_DIR); the user's folder shared by all their projects is ${dirs.shared} ($AGENT_TEAMS_SHARED_DIR).`,
-    "Both are a network file system mounted on every node of this user and survive the session: put files there that other employees, threads or later sessions need. Code still lives in the git worktree.",
-    "Several nodes may use the folders at once: a SQLite database there must be written from one session at a time (rollback journal, not WAL).",
+    "Your working directory holds the project's repositories (code: commit and push it, anything left uncommitted on this node is lost) and three links into the user's shared folder, a network file system mounted on every node of this user that survives sessions:",
+    `- .project-files/ → ${dirs.project} ($AGENT_TEAMS_PROJECT_DIR): this project's files. Put documents, data, reports, exports and anything other employees, threads or later sessions of the project need here, never in a repository unless it belongs to the code. The user sees these files on the project's 共享文件 page.`,
+    `- .user-files/ → ${dirs.shared} ($AGENT_TEAMS_SHARED_DIR): files shared by all of the user's projects.`,
+    `- .attachments/ → ${sharedAttachmentDir(dirs)}: files the user attached to messages (kept with the project).`,
+    "Do not put secrets (keys, passwords, tokens) there. Several nodes may use the folder at once: a SQLite database there must be written from one session at a time (rollback journal, not WAL).",
   ].join("\n");
 }

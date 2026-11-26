@@ -157,6 +157,19 @@ describe("downloading attachments", () => {
     expect(statSync(saved.abs).mtimeMs).toBe(0);
   });
 
+  it("saves into the shared folder's attachments/ when given one", async () => {
+    await setup();
+    const body = Buffer.from("shared bytes");
+    store.files.set("img_s1", body);
+    const cwd = workdir();
+    const into = workdir();
+    const saved = await downloadAttachment(cwd, ref("img_s1", body), http, opts, undefined, undefined, into);
+    expect(saved.abs).toBe(join(into, "img_s1-报告_v2.pdf"));
+    expect(saved.rel).toBe(`${ATTACH_DIR}/img_s1-报告_v2.pdf`);
+    expect(readFileSync(saved.abs)).toEqual(body);
+    expect(existsSync(join(cwd, ATTACH_DIR))).toBe(false);
+  });
+
   it("falls back to GET /nodes/attachments/{id} when the URL is null or the endpoint is missing", async () => {
     await setup();
     const body = Buffer.from("legacy bytes");

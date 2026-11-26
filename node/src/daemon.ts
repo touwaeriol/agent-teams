@@ -43,7 +43,7 @@ import { absPath } from "./sessions/claude/options.js";
 import { consoleImageFetcher } from "./sessions/images.js";
 import { consoleHttp, type AttachmentOptions, type ConsoleHttp } from "./sessions/attachments.js";
 import { SharedFs, type SharedFsOptions } from "./fs/shared.js";
-import { sharedFolderPrompt, withSharedDirs } from "./fs/session.js";
+import { linkSharedDirs, sharedAttachmentDir, sharedFolderPrompt, withSharedDirs } from "./fs/session.js";
 import { DAEMON_BUILD, DAEMON_RELEASE, DAEMON_VERSION, PROTOCOLS } from "./version.js";
 
 export interface DaemonOptions {
@@ -125,6 +125,8 @@ const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "g
 export class Daemon {
   readonly link: Link;
   readonly sessions: SessionManager;
+  /** Working directories linked to the shared folder → its attachments/ (attachments go there). */
+  private readonly linked = new Map<string, string>();
   readonly git: GitJobs;
   private readonly outbox: Outbox;
   private readonly inbox: Inbox;
@@ -179,7 +181,10 @@ export class Daemon {
     const send = (type: string, body: object) => this.link.send(type, body);
     this.approvals = new ApprovalBroker(send);
     this.http = consoleHttp(o.url, o.token, o.transferFetch);
-    this.tools = new ToolBroker(send, { http: this.http, attachments: () => this.sessions.attachmentOptions, noteAttachmentDir: (cwd) => this.sessions.noteAttachmentDir(cwd) });
+    this.tools = new ToolBroker(send, {
+      http: this.http, attachments: () => this.sessions.attachmentOptions, noteAttachmentDir: (cwd) => this.sessions.noteAttachmentDir(cwd),
+      attachmentDir: (cwd) => this.linked.get(cwd) ?? null,
+    });
     this.creds = new CredBroker(send);
     this.platform = installPlatformFiles(o.platformDir, o.nodeCmd);
     const dataDir = dirname(o.platformDir);
@@ -224,6 +229,7 @@ export class Daemon {
       waitForJob: (id, ms) => this.git.waitFor(id, ms),
       importMove: (spec, absCwd) => this.mover.import(spec, absCwd),
       createDriver: (spec, cwd, sink) => this.createDriver(spec, cwd, sink),
+      attachmentDir: (cwd) => this.linked.get(cwd) ?? null,
       onSessionGone: (id) => this.forgetSession(id),
       onTurnEnd: (s) => this.live.turnEnded(s),
       onDriverGone: (id) => this.ssh.drop(id),
@@ -439,6 +445,7 @@ export class Daemon {
   private createDriver(open: SessionOpen, absCwd: string, sink: Session): { driver: Driver; ctx: DriverContext } {
     const dirs = open.employee.tier === "coordinator" ? null : this.sharedFs.sessionDirs(open.fs);
     const spec = dirs ? withSharedDirs(open, dirs) : open;
+    if (dirs) this.linkShared(absCwd, dirs);
     const runtime = this.runtimes.get(spec.runtime);
     const skills = runtime.nativeSkills ? materializeSkills(this.skillsRoot, spec) : null;
     const plugins = materializePlugins(this.pluginsRoot, spec);
@@ -447,6 +454,16 @@ export class Daemon {
     const extra = [env.AT_SSH_CONFIG ? sshPrompt((spec.ssh_servers ?? []).map((s) => s.name)) : "", dirs ? sharedFolderPrompt(dirs) : ""].filter(Boolean).join("\n\n");
     const ctx: DriverContext = { spec, absCwd, env, ...(extra ? { systemExtra: extra } : {}), ...(dirs ? { extraDirs: [dirs.project, dirs.shared] } : {}), policy: this.policy(spec, absCwd, readable), sink, log: this.o.log.child({ session: spec.session_id }) };
     return { driver: runtime.createDriver(ctx, { skills, plugins }), ctx };
+  }
+
+  /** Links the working directory to the shared folder (.project-files, .user-files, .attachments). */
+  private linkShared(absCwd: string, dirs: { project: string; shared: string }): void {
+    try {
+      for (const p of linkSharedDirs(absCwd, dirs)) this.o.log.warn({ cwd: absCwd }, `shared folder: ${p}`);
+      this.linked.set(absCwd, sharedAttachmentDir(dirs));
+    } catch (err) {
+      this.o.log.warn({ cwd: absCwd, err: (err as Error).message }, "shared folder: cannot link the working directory");
+    }
   }
 
   private policy(spec: SessionOpen, absCwd: string, readable: string[]): ToolPolicy {

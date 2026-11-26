@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SharedFs, platformKey, type SharedFsOptions } from "../src/fs/shared.js";
-import { withSharedDirs } from "../src/fs/session.js";
+import { linkSharedDirs, withSharedDirs } from "../src/fs/session.js";
 import type { FsMount, FsStatus, SessionOpen } from "../src/protocol.js";
 import { claudeOpen, startHarness, type Harness } from "./helpers/daemon.js";
 import { silentLogger } from "../src/util/log.js";
@@ -141,6 +141,25 @@ describe("withSharedDirs", () => {
   });
 });
 
+describe("linkSharedDirs", () => {
+  it("links the working directory to the folder, replacing an old .attachments folder and leaving other files alone", () => {
+    const cwd = tmp();
+    const vol = tmp();
+    const dirs = { project: join(vol, "projects/p1"), shared: join(vol, "shared") };
+    mkdirSync(dirs.project, { recursive: true });
+    mkdirSync(dirs.shared);
+    mkdirSync(join(cwd, ".attachments"));
+    writeFileSync(join(cwd, ".attachments", "old.png"), "x");
+    writeFileSync(join(cwd, ".user-files"), "mine");
+    expect(linkSharedDirs(cwd, dirs)).toEqual([`${join(cwd, ".user-files")} exists and is not a link`]);
+    expect(readlinkSync(join(cwd, ".project-files"))).toBe(dirs.project);
+    expect(readlinkSync(join(cwd, ".attachments"))).toBe(join(dirs.project, "attachments"));
+    expect(existsSync(join(dirs.project, "attachments"))).toBe(true);
+    expect(lstatSync(join(cwd, ".user-files")).isFile()).toBe(true);
+    expect(linkSharedDirs(cwd, dirs)).toHaveLength(1);
+  });
+});
+
 describe("daemon shared folder", () => {
   let h: Harness;
   afterEach(async () => {
@@ -163,6 +182,8 @@ describe("daemon shared folder", () => {
     expect(o.additionalDirectories).toEqual([join(ext, "projects/p1"), join(ext, "shared")]);
     expect(o.env?.AGENT_TEAMS_PROJECT_DIR).toBe(join(ext, "projects/p1"));
     expect(existsSync(join(ext, "projects/p1"))).toBe(true);
-    expect(JSON.stringify(o.systemPrompt)).toContain("Shared folder");
+    expect(JSON.stringify(o.systemPrompt)).toContain(".project-files/");
+    expect(readlinkSync(join(o.cwd!, ".project-files"))).toBe(join(ext, "projects/p1"));
+    expect(readlinkSync(join(o.cwd!, ".attachments"))).toBe(join(ext, "projects/p1/attachments"));
   });
 });

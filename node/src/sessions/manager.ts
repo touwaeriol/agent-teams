@@ -31,6 +31,8 @@ export interface ManagerDeps {
   importMove?: (spec: SessionOpen, absCwd: string) => Promise<void>;
   /** Builds env/policy and the runtime driver for a session. */
   createDriver: (spec: SessionOpen, absCwd: string, sink: Session) => { driver: Driver; ctx: DriverContext };
+  /** The shared folder's attachments/ for a working directory linked to it (null: the local .attachments). */
+  attachmentDir?: (absCwd: string) => string | null;
   /** Downloads an attached image from the console (session.send images). */
   fetchImage?: ImageFetcher;
   /** The console over HTTP (session.send attachments: /nodes/attachments/{id}/url and the legacy download). */
@@ -342,11 +344,12 @@ export class SessionManager implements SessionHost {
       for (const ref of body.attachments) outcomes.push({ ref, error: "这个节点无法下载附件" });
       return { legacy, outcomes };
     }
-    this.noteAttachmentDir(s.absCwd);
+    const into = this.d.attachmentDir?.(s.absCwd) ?? null;
+    if (!into) this.noteAttachmentDir(s.absCwd);
     for (const ref of body.attachments) {
       try {
         if (s.downloads.signal.aborted) throw new Error("下载已取消（会话已关闭）");
-        outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions, undefined, s.downloads.signal) });
+        outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions, undefined, s.downloads.signal, into) });
       } catch (err) {
         this.d.log.warn({ session: s.id, attachment: ref.id, err: (err as Error).message }, "attachment download failed");
         outcomes.push({ ref, error: (err as Error).message, ...(err instanceof AttachmentExpired ? { expired: true } : {}) });
