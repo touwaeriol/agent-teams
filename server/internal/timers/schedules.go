@@ -396,10 +396,10 @@ func changed(ctx context.Context, tx *core.Tx, s Schedule) error {
 
 // endSchedule ends an active schedule with status (done / cancelled / missed).
 func endSchedule(ctx context.Context, tx *core.Tx, s Schedule, status string, now time.Time) error {
-	err := tx.Gorm(ctx).Table("at_schedules").Where("id = ? AND status = ?", s.ID, StatusActive).
-		Updates(map[string]any{"status": status, "next_run_at": nil, "ended_at": now, "updated_at": gorm.Expr("now()")}).Error
-	if err != nil {
-		return err
+	res := tx.Gorm(ctx).Table("at_schedules").Where("id = ? AND status = ?", s.ID, StatusActive).
+		Updates(map[string]any{"status": status, "next_run_at": nil, "ended_at": now, "updated_at": gorm.Expr("now()")})
+	if res.Error != nil || res.RowsAffected == 0 { // already ended: nothing changed for the pages
+		return res.Error
 	}
 	return changed(ctx, tx, s)
 }

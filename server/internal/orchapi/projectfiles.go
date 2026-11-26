@@ -105,8 +105,8 @@ func filesFail(err error) error {
 		return httpapi.Invalid("path", err.Error())
 	case errors.Is(err, userfs.ErrNoFile):
 		return httpapi.Fail(http.StatusNotFound, "not_found", err.Error())
-	case errors.Is(err, userfs.ErrDisabled), userfs.IsNotFound(err):
-		return httpapi.Fail(http.StatusConflict, "folder_unavailable", "共享文件夹还没有开通或还不可用（设置 → 共享文件夹）")
+	case userfs.Unavailable(err):
+		return httpapi.Fail(http.StatusConflict, "folder_unavailable", userfs.UnavailableMessage)
 	}
 	return err
 }
@@ -120,12 +120,20 @@ func managed(rel string) bool {
 	return first == userfs.DeliverablesDir
 }
 
-// writableFiles is projectFiles for a write: never into the deliverables' folder.
+// writableFiles is projectFiles for a write: never the project's folder itself (rel "", "/", "//")
+// nor into the deliverables' folder.
 func (a *API) writableFiles(ctx context.Context, userID, projectID, rel string) (userfs.Files, string, error) {
-	if managed(rel) {
+	clean, err := userfs.CleanPath(rel)
+	if err != nil {
+		return nil, "", err
+	}
+	if clean == "" {
+		return nil, "", httpapi.Invalid("path", "要给出项目文件里的一个文件或目录，不能是项目文件的根目录")
+	}
+	if managed(clean) {
 		return nil, "", errManaged
 	}
-	return a.projectFiles(ctx, userID, projectID, rel)
+	return a.projectFiles(ctx, userID, projectID, clean)
 }
 
 // projectFiles opens the owner's volume and resolves rel inside the project's folder.
@@ -161,8 +169,8 @@ func (a *API) listProjectFiles(ctx context.Context, in *filesListInput) (*filesL
 	}
 	out := ProjectFiles{Dir: dir, Entries: []FileEntry{}}
 	f, abs, err := a.projectFiles(ctx, u.ID, p.ID, dir)
-	if errors.Is(err, userfs.ErrDisabled) || userfs.IsNotFound(err) {
-		out.Reason = "共享文件夹还没有开通或还不可用（设置 → 共享文件夹）"
+	if userfs.Unavailable(err) {
+		out.Reason = userfs.UnavailableMessage
 		return &filesListOutput{Body: out}, nil
 	}
 	if err != nil {
@@ -236,11 +244,26 @@ func (a *API) uploadProjectFiles(ctx context.Context, in *filesUploadInput) (*fi
 	out := FilesUploaded{Files: make([]FileEntry, 0, len(targets))}
 	for i, rel := range targets {
 		if err := putPart(ctx, f, base+"/"+rel, heads[i]); err != nil {
-			return nil, filesFail(err)
+			return nil, partialUpload(err, rel, targets[:i])
 		}
 		out.Files = append(out.Files, entryOf(path.Dir(rel), userfs.Entry{Name: path.Base(rel), Size: heads[i].Size, ModTime: time.Now()}))
 	}
 	return &filesUploadOutput{Body: out}, nil
+}
+
+// partialUpload is a failed upload: the files before the failing one stay written (uploads are not
+// atomic), and the error names them.
+func partialUpload(err error, rel string, written []string) error {
+	err = filesFail(err)
+	if len(written) == 0 {
+		return err
+	}
+	status, why := http.StatusInternalServerError, "写入失败"
+	var ae *httpapi.APIError
+	if errors.As(err, &ae) {
+		status, why = ae.Status, ae.Detail
+	}
+	return httpapi.Fail(status, "upload_partial", fmt.Sprintf("%s 没有上传（%s）；这次上传里已经写入的文件：%s", rel, why, strings.Join(written, "、")))
 }
 
 func putPart(ctx context.Context, f userfs.Files, name string, h *multipart.FileHeader) error {

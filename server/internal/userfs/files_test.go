@@ -100,10 +100,23 @@ func TestGatewayFiles(t *testing.T) {
 	}
 	defer g.Stop("at-test")
 	again, _ := g.Files(context.Background(), "at-test", meta, "")
-	if again != f {
+	if again.(*gatewayFiles).gw != f.(*gatewayFiles).gw {
 		t.Fatal("a running gateway is reused")
 	}
 	exerciseFiles(t, f)
+	// A body that cannot be rewound (an attachment's reader, an object-store download) goes as an
+	// unsigned payload over the gateway's plain http.
+	if err := f.Put(context.Background(), "projects/p1/stream.txt", io.NopCloser(strings.NewReader("streamed")), 8); err != nil {
+		t.Fatalf("non-seekable put: %v", err)
+	}
+	r, _, err := f.Open(context.Background(), "projects/p1/stream.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := io.ReadAll(r); string(b) != "streamed" {
+		t.Fatalf("streamed content %q", b)
+	}
+	r.Close()
 	g.Stop("at-test")
 	if _, err := f.List(context.Background(), ""); err == nil {
 		t.Fatal("stopped gateway still answers")
@@ -128,7 +141,9 @@ func TestServiceFiles(t *testing.T) {
 	if len(vols.opened) != 1 || !strings.Contains(vols.opened[0], "@db.internal:5432/agent_teams") || !strings.Contains(vols.opened[0], "sslmode=disable") {
 		t.Fatalf("meta url: %v", vols.opened)
 	}
-	if err := s.Disable(ctx, "u1"); err != nil || len(vols.closed) != 1 || vols.closed[0] != NamesFor("u1").Volume {
+	err = s.Disable(ctx, "u1")
+	s.Wait()
+	if err != nil || len(vols.closed) != 1 || vols.closed[0] != NamesFor("u1").Volume {
 		t.Fatalf("disable: %v closed %v", err, vols.closed)
 	}
 }

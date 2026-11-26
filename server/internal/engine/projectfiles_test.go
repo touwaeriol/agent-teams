@@ -148,6 +148,37 @@ func TestProjectFiles(t *testing.T) {
 	if code, _ := w.signUp("intruder@example.com").do("GET", base, nil); code != 404 {
 		t.Fatalf("intruder = %d", code)
 	}
+
+	// The project's folder itself is never a write target.
+	for _, root := range []string{"/", "//"} {
+		for _, q := range []string{root, url.QueryEscape(root)} {
+			if code, _ := b.do("DELETE", base+"?path="+q, nil); code != 422 {
+				t.Fatalf("delete %q = %d", q, code)
+			}
+		}
+		if code, _ := b.do("POST", base+"/folders", map[string]string{"path": root}); code != 422 {
+			t.Fatalf("mkdir %q = %d", root, code)
+		}
+	}
+	projectDir := filepath.Join(fakes.root, userfs.NamesFor(tm.ownerID(t)).Volume, "projects", pid)
+	if _, err := os.Stat(filepath.Join(projectDir, "docs", "纪要.md")); err != nil {
+		t.Fatalf("project folder touched: %v", err)
+	}
+
+	// An upload is not atomic: a failing file leaves the earlier ones, and the error names them.
+	code, raw = b.multipart(base, map[string][]string{"path": {"p/ok.txt", "docs/纪要.md/x.txt"}}, []formFile{{"a", "1"}, {"b", "2"}})
+	if code < 400 || !strings.Contains(string(raw), "upload_partial") || !strings.Contains(string(raw), "p/ok.txt") {
+		t.Fatalf("partial upload = %d %s", code, raw)
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, "p", "ok.txt")); err != nil {
+		t.Fatalf("earlier file of the upload: %v", err)
+	}
+
+	// Deleting the project removes its folder from the shared folder.
+	b.must(204, "DELETE", "/api/projects/"+pid, nil, nil)
+	if _, err := os.Stat(projectDir); !os.IsNotExist(err) {
+		t.Fatalf("project folder left after delete: %v", err)
+	}
 }
 
 // TestSaveAttachmentToProjectFiles: POST /api/attachments/{id}/save-shared copies an attachment
@@ -184,8 +215,10 @@ func TestSaveAttachmentToProjectFiles(t *testing.T) {
 		t.Fatalf("existing path = %d %s", code, raw)
 	}
 	b.must(200, "POST", save, map[string]any{"path": "docs/纪要.md", "overwrite": true}, &saved)
-	if code, _ := b.do("POST", save, map[string]any{"path": "../x"}); code != 422 {
-		t.Fatalf("bad path = %d", code)
+	for _, bad := range []string{"../x", "/", "//"} {
+		if code, _ := b.do("POST", save, map[string]any{"path": bad}); code != 422 {
+			t.Fatalf("bad path %q = %d", bad, code)
+		}
 	}
 
 	if code, _ := w.signUp("intruder@example.com").do("POST", save, map[string]any{"path": "x.md"}); code != 404 {

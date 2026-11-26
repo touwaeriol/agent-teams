@@ -52,10 +52,13 @@ func (s *Server) checkRepos(ctx context.Context, userID string, in []RepoRef, kn
 	return out, nil
 }
 
+// checkOneRepo validates one repository of a PATCH. A repository already bound with an unchanged
+// base is kept as it is, even with an empty base (bound before 00480: WarmRepos fills it), so that
+// editing the other repositories does not need GitHub.
 func (s *Server) checkOneRepo(ctx context.Context, userID string, r RepoRef, known []store.ProjectRepo) (store.ProjectRepo, error) {
 	base := strings.TrimSpace(r.BaseBranch)
 	if id := deref(r.GitRepoID); id != "" {
-		if k, ok := knownStandalone(known, id); ok && (base == "" || base == k.BaseBranch) && k.BaseBranch != "" {
+		if k, ok := knownStandalone(known, id); ok && (base == "" || base == k.BaseBranch) {
 			return k, nil
 		}
 		return s.checkStandaloneRepo(ctx, userID, id, base)
@@ -67,7 +70,7 @@ func (s *Server) checkOneRepo(ctx context.Context, userID string, r RepoRef, kno
 	if err != nil {
 		return store.ProjectRepo{}, githubErr(err)
 	}
-	if k, ok := knownRepo(known, slug, *r.GitConnectionID); ok && (base == "" || base == k.BaseBranch) && k.BaseBranch != "" {
+	if k, ok := knownRepo(known, slug, *r.GitConnectionID); ok && (base == "" || base == k.BaseBranch) {
 		return k, nil
 	}
 	token, _, err := s.connectionToken(ctx, userID, *r.GitConnectionID)

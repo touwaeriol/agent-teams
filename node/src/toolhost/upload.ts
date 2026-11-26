@@ -48,11 +48,12 @@ export function validFilePath(path: string): boolean {
 
 /**
  * Reads what publish_file points at: one file, or a directory with index.html (a small site).
- * The path must stay inside the employee's working directory after resolving symlinks; hidden
- * files, node_modules and symlinks inside a directory are skipped.
+ * The path must stay inside the employee's working directory, or one of `extraRoots` (the session's
+ * shared-folder directories, reached through .project-files / .user-files), after resolving
+ * symlinks; hidden files, node_modules and symlinks inside a directory are skipped.
  */
-export async function prepareUpload(cwd: string, rawPath: unknown): Promise<PreparedUpload> {
-  const { real: abs } = await resolveInside(cwd, rawPath, "publish_file only publishes files inside your working directory");
+export async function prepareUpload(cwd: string, rawPath: unknown, extraRoots: string[] = []): Promise<PreparedUpload> {
+  const { real: abs } = await resolveInside(cwd, rawPath, "publish_file only publishes files inside your working directory or the shared folder", extraRoots);
   const st = await lstat(abs);
   if (!st.isDirectory() && !st.isFile()) throw new UploadError(`${String(rawPath)}: not a regular file`);
   const picked = st.isDirectory() ? await walkSite(abs) : [checkFile({ path: basename(abs), abs })];
@@ -69,18 +70,19 @@ function buildUpload(entries: { path: string; body: Buffer; contentType: string 
 }
 
 /**
- * Resolves a path given by the employee: it must exist and stay inside the working directory after
- * resolving symlinks. Returns the real path and the normalised '/'-separated path relative to cwd
+ * Resolves a path given by the employee: it must exist and stay inside the working directory (or one
+ * of extraRoots) after resolving symlinks. Returns the real path and the normalised '/'-separated path relative to cwd
  * (lexical when the given path is inside cwd, so a symlink keeps its own name).
  */
-async function resolveInside(cwd: string, rawPath: unknown, outside: string): Promise<{ real: string; rel: string }> {
+async function resolveInside(cwd: string, rawPath: unknown, outside: string, extraRoots: string[] = []): Promise<{ real: string; rel: string }> {
   if (typeof rawPath !== "string" || !rawPath.trim() || rawPath.includes("\0")) throw new UploadError("path is required");
   const root = await realpath(cwd);
   const wanted = isAbsolute(rawPath) ? resolve(rawPath) : resolve(cwd, rawPath);
   const real = await realpath(wanted).catch(() => {
     throw new UploadError(`no such file: ${rawPath}`);
   });
-  if (!isInside(root, real) || real === root) throw new UploadError(outside);
+  const roots = [root, ...(await Promise.all(extraRoots.map((r) => realpath(r).catch(() => null))))];
+  if (!roots.some((r) => r && isInside(r, real) && real !== r)) throw new UploadError(outside);
   const lexical = relative(resolve(cwd), wanted);
   const rel = lexical && isInside(resolve(cwd), wanted) ? lexical : relative(root, real);
   return { real, rel: rel.split(sep).join("/") };

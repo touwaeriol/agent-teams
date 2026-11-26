@@ -55,23 +55,50 @@ export class PartError extends Error {
   }
 }
 
-/** XMLHttpRequest PUT (fetch reports no upload progress). The storage's CORS exposes ETag. */
-export const xhrPut: PutPart = (url, body, onProgress, signal) =>
-  new Promise((resolve, reject) => {
+export interface XhrRequest {
+  method: string;
+  url: string;
+  body: XMLHttpRequestBodyInit;
+  /** Bytes sent so far and the total (when the browser knows it). */
+  onProgress?: (loaded: number, total: number) => void;
+  signal?: AbortSignal;
+  headers?: Record<string, string>;
+  withCredentials?: boolean;
+  /** The error for a request that never got an answer. */
+  networkError: () => Error;
+}
+
+/**
+ * One XMLHttpRequest (fetch reports no upload progress). Resolves with the finished request
+ * whatever its status; rejects with networkError() when there is no answer and with
+ * UploadCancelled when signal aborts.
+ */
+export function sendXhr(r: XhrRequest): Promise<XMLHttpRequest> {
+  return new Promise((resolve, reject) => {
+    if (r.signal?.aborted) return reject(new UploadCancelled());
     const xhr = new XMLHttpRequest();
-    xhr.open("PUT", url);
-    xhr.upload.onprogress = (e) => onProgress(e.loaded);
-    xhr.onload = () => {
-      if (xhr.status < 200 || xhr.status >= 300) return reject(new PartError(xhr.status, `分片上传失败（HTTP ${xhr.status}）`));
-      const etag = xhr.getResponseHeader("ETag");
-      if (!etag) return reject(new PartError(0, "存储没有返回 ETag（检查存储的 CORS 是否暴露了 ETag 头）"));
-      resolve(etag);
-    };
-    xhr.onerror = () => reject(new PartError(0, "网络错误，分片没有传上去"));
-    xhr.onabort = () => reject(new UploadCancelled());
-    signal.addEventListener("abort", () => xhr.abort(), { once: true });
-    xhr.send(body);
+    const abort = () => xhr.abort();
+    const done = (settle: () => void) => () => (r.signal?.removeEventListener("abort", abort), settle());
+    xhr.open(r.method, r.url);
+    xhr.withCredentials = r.withCredentials ?? false;
+    for (const [k, v] of Object.entries(r.headers ?? {})) xhr.setRequestHeader(k, v);
+    xhr.upload.onprogress = (e) => r.onProgress?.(e.loaded, e.lengthComputable ? e.total : 0);
+    xhr.onload = done(() => resolve(xhr));
+    xhr.onerror = done(() => reject(r.networkError()));
+    xhr.onabort = done(() => reject(new UploadCancelled()));
+    r.signal?.addEventListener("abort", abort, { once: true });
+    xhr.send(r.body);
   });
+}
+
+/** XMLHttpRequest PUT of one part. The storage's CORS exposes ETag. */
+export const xhrPut: PutPart = async (url, body, onProgress, signal) => {
+  const xhr = await sendXhr({ method: "PUT", url, body, signal, onProgress, networkError: () => new PartError(0, "网络错误，分片没有传上去") });
+  if (xhr.status < 200 || xhr.status >= 300) throw new PartError(xhr.status, `分片上传失败（HTTP ${xhr.status}）`);
+  const etag = xhr.getResponseHeader("ETag");
+  if (!etag) throw new PartError(0, "存储没有返回 ETag（检查存储的 CORS 是否暴露了 ETag 头）");
+  return etag;
+};
 
 export class UploadCancelled extends Error {
   constructor() {

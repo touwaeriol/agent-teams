@@ -2,7 +2,9 @@
 // volume; .project-files/ in every employee's working directory). Path rules, breadcrumbs, the
 // upload plan and the multipart upload with progress live here; the page is pages/ProjectFiles.vue.
 import { ApiError, csrfToken, CSRF_HEADER, toApiError } from "@/api/client";
-import type { FileEntry, FilesUploaded } from "@/api/views";
+import type { FileEntry, FilesUploaded, FsView } from "@/api/views";
+import { formatBytes } from "./bytes";
+import { sendXhr, UploadCancelled } from "./upload";
 
 /** The body limit of one upload request (server orchapi.maxFilesUpload, 1 GiB) minus room for the multipart framing. */
 export const BATCH_BYTES = 1000 << 20;
@@ -11,18 +13,19 @@ export const MAX_PATH_BYTES = 1024;
 
 export const FILES_NOTICE = "项目文件对本项目所有会话和成员可见，不要放密钥或密码。";
 
-/** 820 B / 1.5 KB / 20 MB (binary units). */
-export function formatSize(n: number | undefined | null): string {
-  if (n === undefined || n === null || !Number.isFinite(n) || n < 0) return "—";
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i += 1;
-  }
-  return `${v >= 100 || Number.isInteger(v) ? Math.round(v) : Number(v.toFixed(1))} ${units[i]}`;
+/** The folder at the project's root where the platform keeps deliverable versions (the server refuses to delete it). */
+export const MANAGED_FOLDER = ".deliverables";
+
+/** Whether an entry is managed by the platform (no delete button). */
+export const isManaged = (e: Pick<FileEntry, "dir" | "path">) => e.dir && e.path === MANAGED_FOLDER;
+
+/** The text of the link to the shared folder setting, by the volume's state. */
+export function folderLinkText(view: Pick<FsView, "volume"> | null | undefined): string {
+  const state = view?.volume?.state;
+  if (state === "error") return "开通失败，去重试";
+  if (state === "provisioning") return "正在开通，去查看";
+  if (state === "deleting") return "正在删除，去查看";
+  return state ? "去查看" : "去开通";
 }
 
 const utf8Length = (s: string) => new TextEncoder().encode(s).length;
@@ -179,30 +182,41 @@ export async function droppedFiles(dt: Pick<DataTransfer, "items" | "files"> | n
 
 export interface UploadPlan {
   files: PickedFile[];
-  /** Entries of the current folder the upload replaces (a file, or a top-level folder it writes into). */
+  /** Entries of the current folder the upload replaces (a file, or a folder it writes into, once). */
   overwrites: string[];
   /** Why the upload cannot start (bad paths, duplicates, a file over one request). */
   problems: string[];
 }
 
+/** The existing entry of the current folder an upload path replaces or writes into, if any. */
+function replaced(path: string, files: Set<string>, dirs: Set<string>): string | null {
+  if (files.has(path)) return path;
+  const top = path.split("/")[0]!;
+  return top !== path && dirs.has(top) ? `${top}/` : null;
+}
+
 /**
- * Checks an upload into the current folder: every path, duplicates within the upload, files too
- * big for one request, and which existing files it would replace (the page asks once first).
+ * Checks an upload into dir (the current folder): every path (with dir in front, for the length),
+ * duplicates within the upload, files too big for one request, and which existing files or
+ * folders it would replace or write into (the page asks once first).
  */
-export function planUpload(picked: PickedFile[], entries: FileEntry[] | null | undefined): UploadPlan {
-  const files = new Set((entries ?? []).filter((e) => !e.dir).map((e) => e.name));
+export function planUpload(picked: PickedFile[], entries: FileEntry[] | null | undefined, dir = ""): UploadPlan {
+  const names = (dir: boolean) => new Set((entries ?? []).filter((e) => e.dir === dir).map((e) => e.name));
+  const files = names(false);
+  const dirs = names(true);
   const problems: string[] = [];
-  const overwrites: string[] = [];
+  const overwrites = new Set<string>();
   const seen = new Set<string>();
   for (const { file, path } of picked) {
-    const bad = pathProblem(path);
+    const bad = pathProblem(path) ?? pathProblem(joinPath(dir, path));
     if (bad) problems.push(`${path || file.name}：${bad}`);
     else if (seen.has(path)) problems.push(`${path}：这次上传里有两个同名文件`);
     seen.add(path);
-    if (file.size > BATCH_BYTES) problems.push(`${path}：${formatSize(file.size)}，网页一次最多上传 ${formatSize(BATCH_BYTES)}，更大的文件请让员工直接放进 .project-files/`);
-    if (files.has(path)) overwrites.push(path);
+    if (file.size > BATCH_BYTES) problems.push(`${path}：${formatBytes(file.size)}，网页一次最多上传 ${formatBytes(BATCH_BYTES)}，更大的文件请让员工直接放进 .project-files/`);
+    const hit = replaced(path, files, dirs);
+    if (hit) overwrites.add(hit);
   }
-  return { files: picked, overwrites, problems };
+  return { files: picked, overwrites: [...overwrites], problems };
 }
 
 /** The download link of a file (always served as an attachment). */
@@ -241,6 +255,7 @@ export class UploadBatchError extends Error {
 
 /** A readable message for a failed upload (409 folder_unavailable / 422 path come with the server's detail). */
 export function uploadErrorText(e: unknown): string {
+  if (e instanceof UploadCancelled) return e.message;
   if (e instanceof UploadBatchError) {
     const done = e.done.length;
     const reason = uploadErrorText(e.cause);
@@ -250,14 +265,21 @@ export function uploadErrorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export type SendBatch = (pid: string, dir: string, files: PickedFile[], onProgress?: (fraction: number) => void) => Promise<FilesUploaded>;
+export type SendBatch = (pid: string, dir: string, files: PickedFile[], onProgress?: (fraction: number) => void, signal?: AbortSignal) => Promise<FilesUploaded>;
 
 /**
  * Uploads the files into dir in batches of at most BATCH_BYTES, one request after another.
- * onProgress gets 0..1 over all bytes. When a batch fails the promise rejects with
- * UploadBatchError naming what was stored and what was not.
+ * onProgress gets 0..1 over all bytes. When a batch fails (or signal aborts: the cause is then
+ * UploadCancelled) the promise rejects with UploadBatchError naming what was stored and what was not.
  */
-export async function uploadProjectFiles(pid: string, dir: string, files: PickedFile[], onProgress?: (fraction: number) => void, send: SendBatch = sendBatch): Promise<FileEntry[]> {
+export async function uploadProjectFiles(
+  pid: string,
+  dir: string,
+  files: PickedFile[],
+  onProgress?: (fraction: number) => void,
+  signal?: AbortSignal,
+  send: SendBatch = sendBatch,
+): Promise<FileEntry[]> {
   const all = files.reduce((n, f) => n + f.file.size, 0) || 1;
   const done: FileEntry[] = [];
   let sent = 0;
@@ -265,7 +287,8 @@ export async function uploadProjectFiles(pid: string, dir: string, files: Picked
   for (const [i, batch] of batches.entries()) {
     const bytes = batch.reduce((n, f) => n + f.file.size, 0);
     try {
-      const res = await send(pid, dir, batch, (fraction) => onProgress?.(Math.min(1, (sent + fraction * bytes) / all)));
+      if (signal?.aborted) throw new UploadCancelled();
+      const res = await send(pid, dir, batch, (fraction) => onProgress?.(Math.min(1, (sent + fraction * bytes) / all)), signal);
       done.push(...(res.files ?? []));
     } catch (e) {
       throw new UploadBatchError(e, done, batches.slice(i).flat());
@@ -280,31 +303,32 @@ export async function uploadProjectFiles(pid: string, dir: string, files: Picked
  * One request (multipart: dir, one `path` field and one `file` part per file, in order) with
  * XMLHttpRequest, which reports upload progress (fetch does not). onProgress gets 0..1.
  */
-function sendBatch(pid: string, dir: string, files: PickedFile[], onProgress?: (fraction: number) => void): Promise<FilesUploaded> {
+async function sendBatch(pid: string, dir: string, files: PickedFile[], onProgress?: (fraction: number) => void, signal?: AbortSignal): Promise<FilesUploaded> {
   const form = new FormData();
   form.append("dir", dir);
   for (const f of files) form.append("path", f.path);
   for (const f of files) form.append("file", f.file, f.file.name);
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/projects/${encodeURIComponent(pid)}/files`);
-    xhr.withCredentials = true;
-    const token = csrfToken();
-    if (token) xhr.setRequestHeader(CSRF_HEADER, token);
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
-    };
-    xhr.onload = () => {
-      let body: unknown = xhr.responseText;
-      try {
-        body = JSON.parse(xhr.responseText);
-      } catch {
-        // not JSON: keep the text
-      }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(body as FilesUploaded);
-      else reject(toApiError(xhr.status, body, xhr.statusText));
-    };
-    xhr.onerror = () => reject(new ApiError(0, "网络错误，上传没有完成"));
-    xhr.send(form);
+  const token = csrfToken();
+  const xhr = await sendXhr({
+    method: "POST",
+    url: `/api/projects/${encodeURIComponent(pid)}/files`,
+    body: form,
+    signal,
+    withCredentials: true,
+    headers: token ? { [CSRF_HEADER]: token } : {},
+    onProgress: (loaded, total) => total > 0 && onProgress?.(loaded / total),
+    networkError: () => new ApiError(0, "网络错误，上传没有完成"),
   });
+  const body = parseBody(xhr.responseText);
+  if (xhr.status >= 200 && xhr.status < 300) return body as FilesUploaded;
+  throw toApiError(xhr.status, body, xhr.statusText);
+}
+
+/** JSON when it is, else the text. */
+function parseBody(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }

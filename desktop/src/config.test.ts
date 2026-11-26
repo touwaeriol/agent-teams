@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_APP_URL, desktopUserAgent, resolveAppUrl } from "./config";
+import { DEFAULT_APP_URL, canInstallUpdates, desktopUserAgent, resolveAppUrl } from "./config";
 
 describe("resolveAppUrl", () => {
+  it("ignores AGENT_TEAMS_URL in a packaged build", () => {
+    expect(resolveAppUrl({ AGENT_TEAMS_URL: "https://phish.example" }, true).origin).toBe(DEFAULT_APP_URL);
+  });
   it("defaults to the production site", () => {
     expect(resolveAppUrl({}).toString()).toBe(`${DEFAULT_APP_URL}/`);
     expect(resolveAppUrl({ AGENT_TEAMS_URL: "  " }).origin).toBe(DEFAULT_APP_URL);
@@ -18,4 +21,10 @@ describe("resolveAppUrl", () => {
 
 it("desktopUserAgent appends the product token", () => {
   expect(desktopUserAgent("Mozilla/5.0 Chrome/140", "0.1.0")).toBe("Mozilla/5.0 Chrome/140 AgentTeamsDesktop/0.1.0");
+});
+
+it("an unsigned Mac build does not install updates itself", () => {
+  expect(canInstallUpdates("darwin", {})).toBe(false);
+  expect(canInstallUpdates("darwin", { macSigned: true })).toBe(true);
+  expect(canInstallUpdates("win32", {})).toBe(true);
 });

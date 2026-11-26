@@ -21,10 +21,10 @@ func (r ImportReport) String() string {
 	return fmt.Sprintf("users %d, copied %d, skipped %d (already there), failed %d", r.Users, r.Copied, r.Skipped, r.Failed)
 }
 
+// legacyFile is one old shared file without its bytes (body loads them one file at a time).
 type legacyFile struct {
 	ProjectID, UserID, Path string
 	StorageKey              *string
-	Data                    []byte
 	Size                    int64
 }
 
@@ -35,7 +35,7 @@ type legacyFile struct {
 func (s *Service) ImportSharedFiles(ctx context.Context, blobs blobstore.Store, dryRun bool, log *slog.Logger) (ImportReport, error) {
 	var rep ImportReport
 	var files []legacyFile
-	if err := store.Raw(ctx, s.db, `SELECT f.project_id, p.user_id, f.path, f.storage_key, f.data, f.size
+	if err := store.Raw(ctx, s.db, `SELECT f.project_id, p.user_id, f.path, f.storage_key, f.size
 		FROM at_shared_files f JOIN at_projects p ON p.id = f.project_id
 		WHERE f.state = 'ready' ORDER BY p.user_id, f.project_id, f.path`).Scan(&files).Error; err != nil {
 		return rep, err
@@ -44,26 +44,32 @@ func (s *Service) ImportSharedFiles(ctx context.Context, blobs blobstore.Store, 
 	user := ""
 	for _, f := range files {
 		if f.UserID != user {
-			user, vol = f.UserID, nil
-			rep.Users++
-			if !dryRun {
-				var err error
-				if vol, err = s.openForImport(ctx, user); err != nil {
-					rep.fail("user %s: %v", user, err)
-				}
-			}
+			user = f.UserID
+			vol = s.openUser(ctx, user, dryRun, &rep)
 		}
-		if dryRun {
+		switch {
+		case dryRun:
 			rep.Copied++
-			continue
+		case vol != nil:
+			s.importOne(ctx, blobs, vol, f, &rep, log)
 		}
-		if vol == nil {
-			rep.Failed++
-			continue
-		}
-		s.importOne(ctx, blobs, vol, f, &rep, log)
 	}
 	return rep, nil
+}
+
+// openUser counts the next user and opens their volume (nil on a dry run or a failure, which is
+// counted once for the user, not again for each of their files).
+func (s *Service) openUser(ctx context.Context, userID string, dryRun bool, rep *ImportReport) Files {
+	rep.Users++
+	if dryRun {
+		return nil
+	}
+	vol, err := s.openForImport(ctx, userID)
+	if err != nil {
+		rep.fail("user %s: %v", userID, err)
+		return nil
+	}
+	return vol
 }
 
 func (r *ImportReport) fail(format string, a ...any) {
@@ -99,15 +105,10 @@ func (s *Service) importOne(ctx context.Context, blobs blobstore.Store, vol File
 			return
 		}
 	}
-	var body io.ReadCloser
-	switch {
-	case f.StorageKey != nil:
-		if body, err = blobs.Open(ctx, *f.StorageKey); err != nil {
-			rep.fail("%s:%s: open %s: %v", f.ProjectID, f.Path, *f.StorageKey, err)
-			return
-		}
-	default:
-		body = io.NopCloser(bytes.NewReader(f.Data))
+	body, err := s.legacyBody(ctx, blobs, f)
+	if err != nil {
+		rep.fail("%s:%s: open: %v", f.ProjectID, f.Path, err)
+		return
 	}
 	defer body.Close()
 	if err := vol.Put(ctx, target, body, f.Size); err != nil {
@@ -118,4 +119,16 @@ func (s *Service) importOne(ctx context.Context, blobs blobstore.Store, vol File
 	if log != nil {
 		log.Info("imported shared file", "project", f.ProjectID, "path", f.Path, "size", f.Size)
 	}
+}
+
+// legacyBody opens one old file: from the object store, or its data column (files from before #58).
+func (s *Service) legacyBody(ctx context.Context, blobs blobstore.Store, f legacyFile) (io.ReadCloser, error) {
+	if f.StorageKey != nil {
+		return blobs.Open(ctx, *f.StorageKey)
+	}
+	var data []byte
+	if err := store.QueryRow(ctx, s.db, `SELECT data FROM at_shared_files WHERE project_id = $1 AND path = $2`, f.ProjectID, f.Path).Scan(&data); err != nil {
+		return nil, err
+	}
+	return io.NopCloser(bytes.NewReader(data)), nil
 }

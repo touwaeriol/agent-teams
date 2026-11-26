@@ -57,8 +57,17 @@ func files(ctx context.Context, q store.DB, deliverableID string) *gorm.DB {
 	return q.Gorm(ctx).Model(&fileRow{}).Where("deliverable_id = ?", deliverableID)
 }
 
-// NextVersion is 1 + the highest stored version (1 for a new deliverable).
+// NextVersion is 1 + the highest stored version (1 for a new deliverable). Call it in the
+// publishing transaction: it locks the deliverable's row first (SELECT … FOR UPDATE), so two
+// publishes of one deliverable take turns and never get the same number.
 func NextVersion(ctx context.Context, q store.DB, deliverableID string) (int, error) {
+	var id string
+	if err := store.QueryRow(ctx, q, `SELECT id FROM at_deliverables WHERE id = $1 FOR UPDATE`, deliverableID).Scan(&id); err != nil {
+		if store.IsNoRows(err) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
 	var v int
 	err := files(ctx, q, deliverableID).Select("COALESCE(MAX(version), 0) + 1").Row().Scan(&v)
 	return v, err

@@ -103,7 +103,9 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
 
           <Panel v-if="vol.state !== 'deleting'" title="删除" tone="danger">
             <p class="text-[13px] leading-[22px] text-muted-foreground">
-              删除会清空卷里的所有文件，无法恢复。确认请输入卷名 <span class="font-mono">{{ vol.volume }}</span>。</p>
+              开通期间发布的交付物会先移回平台存储，不会丢；卷里的其他文件（项目文件、公共目录等）会全部删除，无法恢复。确认请输入卷名
+              <span class="font-mono">{{ vol.volume }}</span>。
+            </p>
             <div class="flex flex-wrap gap-2">
               <el-input v-model="typed" class="max-w-[280px]" :placeholder="vol.volume" aria-label="输入卷名确认删除" />
               <el-button type="danger" :disabled="typed !== vol.volume" :loading="remove.isPending.value" @click="remove.mutate()">删除共享文件夹</el-button>

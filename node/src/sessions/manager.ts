@@ -42,7 +42,7 @@ export interface ManagerDeps {
   /** How often old .attachments/ copies are removed (default 1 h). */
   attachmentSweepMs?: number;
   /** Called when a session stops for good (unregister cred secrets, loopback routes). */
-  onSessionGone?: (sessionId: string) => void;
+  onSessionGone?: (sessionId: string, absCwd: string) => void;
   /** A session's turn ended (session.digest, move/live.ts). */
   onTurnEnd?: (s: { id: string; gen: number; spec: SessionOpen; absCwd: string }) => void;
   /** The console takes session.context (welcome.features has context_detail). */
@@ -151,6 +151,11 @@ export class SessionManager implements SessionHost {
   /** True when an active session works inside the path (git.purge guard). */
   busyUnder(abs: string): boolean {
     return [...this.sessions.values()].some((s) => s.driver && s.absCwd && isInside(abs, s.absCwd));
+  }
+
+  /** True when a session this node still knows works in exactly this directory. */
+  cwdInUse(abs: string): boolean {
+    return [...this.sessions.values()].some((s) => s.absCwd === abs);
   }
 
   // ---- commands ----
@@ -531,7 +536,7 @@ export class SessionManager implements SessionHost {
     if (body.forget) rmSync(this.recordPath(s.id), { force: true });
     else this.persist(s);
     removeImages(this.imageDir(s.id));
-    this.d.onSessionGone?.(s.id);
+    this.d.onSessionGone?.(s.id, s.absCwd);
     return [reply];
   }
 

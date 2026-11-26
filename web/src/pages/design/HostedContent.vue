@@ -4,7 +4,8 @@
 import type { DeliverableFiles } from "@/api/views";
 import EmptyState from "@/components/common/EmptyState.vue";
 import Loading from "@/components/common/Loading.vue";
-import { fileUrl, formatBytes, frameSandbox, renderLabel } from "@/lib/artifacts";
+import { fileUrl, frameSandbox, renderLabel } from "@/lib/artifacts";
+import { formatBytes } from "@/lib/bytes";
 import MarkdownFile from "./MarkdownFile.vue";
 import { FRAME_CLASS } from "./frame";
 

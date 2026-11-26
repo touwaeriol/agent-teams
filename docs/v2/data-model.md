@@ -639,13 +639,20 @@ CREATE TABLE at_deliverable_files (                -- publish_file 发布的文�
   content_type   TEXT NOT NULL,                    -- 由扩展名决定
   size           INT  NOT NULL,
   sha256         TEXT NOT NULL,
-  data           BYTEA NOT NULL,
+  data           BYTEA,                           -- in_volume 时为空（CHECK (in_volume OR data IS NOT NULL)，00490）
+  in_volume      BOOLEAN NOT NULL DEFAULT false,  -- 00490：字节在所有者共享文件夹的 projects/<pid>/.deliverables/<id>/v<N>/<path>，行只留元数据
   published_by   TEXT NOT NULL DEFAULT '',        -- 这一版的发布者名字（员工名或 user）
   publisher_id   TEXT NOT NULL DEFAULT '',        -- 这一版的发布员工 id（00180；'' = 用户或更早的版本）；批注投递按它找人
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (deliverable_id, version, path)
 );
 
+-- in_volume（00490，artifacts/volume.go）：所有者的共享文件夹开着时，新版本的文件写进卷、行不带 data；
+-- 之前发布的版本留在库里，MoveToVolumes 可以把它们搬进卷。读取时按 size 和 sha256 校验卷里的文件，
+-- 被删或被改过就当作取不到（签名 URL 404，@ 引用只附一句说明）。同一交付物的并发发布由 NextVersion
+-- 锁 at_deliverables 行（SELECT … FOR UPDATE）排队，已经有行的版本不会被覆盖，卷里只有失败尝试留下的
+-- 同号目录会被替换。删交付物先删行，提交后再尽力删卷里的目录；删项目提交后尽力删卷里的 projects/<pid>/。
+-- 关掉共享文件夹（销毁卷）之前 MoveFromVolumes 把这个用户的 in_volume 版本读回 data；卷里已经没有的文件记日志、行不动。
 CREATE TABLE at_upload_chunks (                    -- file.chunk 暂存，tool.call 认领后删除；一天没认领的清掉
   upload_id  TEXT NOT NULL,
   idx        INT  NOT NULL,
@@ -841,7 +848,9 @@ ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -
 
 内置兜底：Claude 为 `claude-opus-5-5`（Opus 5.5）；Codex 为空字符串，节点不传 `model`，由 Codex CLI 用自己的默认（Codex 员工不会落到 Claude 模型名）。平台内置命令存在 `at_settings.composer_commands = {commands: [...]}`。`at_usage.model` 记每一轮实际回答的模型（`session.event turn_ended.model`）。
 
-### 2.13 共享文件（00312）
+### 2.13 共享文件（00312，只用于导入）
+
+> 项目文件现在是用户共享文件夹（JuiceFS 卷）里的 `projects/<pid>/`（api.md §3.5.1、`shared-folder.md`）。`at_shared_files` 和 `at_shared_uploads` 不再有读写入口，只在开通共享文件夹时由 `userfs` 的导入把旧文件搬进卷；以后的迁移会删掉这两张表。下面是它们原来的结构和规则，留作导入参考。
 
 ```sql
 CREATE TABLE at_shared_files (          -- 项目共享文件：项目里所有会话和用户都能存取，不进 git（讨论串 #33）

@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -19,11 +21,14 @@ import (
 )
 
 type fakeMeta struct {
+	mu    sync.Mutex
 	roles map[string]string
 	fail  error
 }
 
 func (f *fakeMeta) Ensure(_ context.Context, role, password string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.fail != nil {
 		return f.fail
 	}
@@ -31,42 +36,82 @@ func (f *fakeMeta) Ensure(_ context.Context, role, password string) error {
 	return nil
 }
 
-func (f *fakeMeta) Drop(_ context.Context, role string) error { delete(f.roles, role); return nil }
+func (f *fakeMeta) Drop(_ context.Context, role string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.roles, role)
+	return nil
+}
 
-type fakeIAM struct{ users map[string]string }
+func (f *fakeMeta) Exists(_ context.Context, role string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.roles[role]
+	return ok, nil
+}
+
+type fakeIAM struct {
+	mu    sync.Mutex
+	users map[string]string
+}
 
 func (f *fakeIAM) Ensure(_ context.Context, n Names, secret string, policy []byte) error {
 	if !strings.Contains(string(policy), "arn:aws:s3:::bkt/"+n.Volume+"/*") {
 		return errors.New("policy not limited to the volume prefix")
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.users[n.AccessKey] = secret
 	return nil
 }
 
-func (f *fakeIAM) Remove(_ context.Context, n Names) error { delete(f.users, n.AccessKey); return nil }
+func (f *fakeIAM) Remove(_ context.Context, n Names) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.users, n.AccessKey)
+	return nil
+}
 
 type fakeVolumes struct {
+	mu        sync.Mutex
 	formatted map[string]FormatSpec
+	formats   int
 	destroyed int
 	root      string
 	closed    []string
 	opened    []string // metaURL of each Files
+	destroyAt []string // metaURL of each Destroy
 }
 
 func (f *fakeVolumes) Files(_ context.Context, volume, metaURL, _ string) (Files, error) {
+	f.mu.Lock()
 	f.opened = append(f.opened, metaURL)
+	f.mu.Unlock()
 	return DirFiles{Root: filepath.Join(f.root, volume)}, os.MkdirAll(filepath.Join(f.root, volume), 0o755)
 }
-func (f *fakeVolumes) Close(volume string) { f.closed = append(f.closed, volume) }
+func (f *fakeVolumes) Close(volume string) {
+	f.mu.Lock()
+	f.closed = append(f.closed, volume)
+	f.mu.Unlock()
+}
 
 func (f *fakeVolumes) Format(_ context.Context, s FormatSpec) error {
+	time.Sleep(20 * time.Millisecond) // long enough for concurrent Enables to overlap
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.formatted[s.Volume] = s
+	f.formats++
 	return nil
 }
-func (f *fakeVolumes) Destroy(context.Context, string, string) error {
+func (f *fakeVolumes) Destroy(_ context.Context, metaURL, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.destroyed++
+	f.destroyAt = append(f.destroyAt, metaURL)
 	return nil
 }
+
+func (f *fakeVolumes) destroys() int { f.mu.Lock(); defer f.mu.Unlock(); return f.destroyed }
 
 func testConfig() Config {
 	return Config{AdminURL: "postgres://admin:pw@db.internal:5432/agent_teams", MetaHost: "db.example.net:15432", MetaSSLMode: "verify-full",
@@ -87,6 +132,7 @@ func newTest(t *testing.T) (*Service, *fakeMeta, *fakeIAM, *fakeVolumes, *store.
 	v, _ := credvault.New("k1")
 	m, i, vols := &fakeMeta{roles: map[string]string{}}, &fakeIAM{users: map[string]string{}}, &fakeVolumes{formatted: map[string]FormatSpec{}, root: t.TempDir()}
 	s := New(testConfig(), st.Pool, v, m, i, vols, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s.UnmountPoll = 10 * time.Millisecond
 	return s, m, i, vols, st
 }
 
@@ -149,6 +195,7 @@ func TestEnableMountDisable(t *testing.T) {
 	if err := s.Disable(ctx, "u1"); err != nil {
 		t.Fatal(err)
 	}
+	s.Wait()
 	if _, err := s.Get(ctx, "u1"); !IsNotFound(err) || vols.destroyed != 1 || len(m.roles) != 0 || len(i.users) != 0 || len(changes) != 2 {
 		t.Fatalf("after disable: %v destroyed=%d roles=%v users=%v", err, vols.destroyed, m.roles, i.users)
 	}
@@ -186,8 +233,19 @@ func TestPGMeta(t *testing.T) {
 	}
 	m := &PGMeta{URL: admin}
 	role := NamesFor("u1").Role
+	if ok, err := m.Exists(ctx, role); err != nil || ok {
+		t.Fatalf("exists before ensure: %v %v", ok, err)
+	}
 	if err := m.Ensure(ctx, role, "pw-1"); err != nil {
 		t.Fatal(err)
+	}
+	if ok, err := m.Exists(ctx, role); err != nil || !ok {
+		t.Fatalf("exists after ensure: %v %v", ok, err)
+	}
+	var stored string
+	if err := store.QueryRow(ctx, mustStore(t, admin).Pool, `SELECT rolpassword FROM pg_authid WHERE rolname = $1`, role).Scan(&stored); err != nil ||
+		!strings.HasPrefix(stored, "SCRAM-SHA-256$4096:") {
+		t.Fatalf("stored password %q %v", stored, err)
 	}
 	if err := m.Ensure(ctx, role, "pw-2"); err != nil { // idempotent, password reset
 		t.Fatal(err)
@@ -217,6 +275,9 @@ func TestPGMeta(t *testing.T) {
 	}
 	if err := m.Drop(ctx, role); err != nil { // missing is fine
 		t.Fatal(err)
+	}
+	if ok, err := m.Exists(ctx, role); err != nil || ok {
+		t.Fatalf("exists after drop: %v %v", ok, err)
 	}
 	if _, err := pgx.Connect(ctx, u.String()); err == nil {
 		t.Fatal("role still logs in after drop")

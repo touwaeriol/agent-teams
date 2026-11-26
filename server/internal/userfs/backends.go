@@ -3,6 +3,11 @@ package userfs
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/pbkdf2"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,10 +48,16 @@ func (m *PGMeta) open(ctx context.Context) (*pgxpool.Pool, error) {
 }
 
 // Ensure implements Meta. The role can log in and owns its schema only: it gets no privilege on
-// the console's tables (they are not granted to PUBLIC) nor on the other volumes' schemas.
+// the console's tables (they are not granted to PUBLIC) nor on the other volumes' schemas. The
+// password goes as a SCRAM-SHA-256 verifier, so the plain password never reaches the server (nor
+// its statement log).
 func (m *PGMeta) Ensure(ctx context.Context, role, password string) error {
-	if !roleRE.MatchString(role) || strings.ContainsAny(password, `'\`) {
+	if !roleRE.MatchString(role) {
 		return fmt.Errorf("bad role %q", role)
+	}
+	verifier, err := scramVerifier(password)
+	if err != nil {
+		return err
 	}
 	pool, err := m.open(ctx)
 	if err != nil {
@@ -59,8 +70,46 @@ ALTER ROLE %[1]s SET search_path = %[1]s;
 ALTER ROLE %[1]s SET statement_timeout = '60s';
 ALTER ROLE %[1]s SET idle_in_transaction_session_timeout = '60s';
 CREATE SCHEMA IF NOT EXISTS %[1]s AUTHORIZATION %[1]s;
-REVOKE ALL ON SCHEMA %[1]s FROM PUBLIC;`, role, password))
+REVOKE ALL ON SCHEMA %[1]s FROM PUBLIC;`, role, verifier))
 	return err
+}
+
+// scramIterations is PostgreSQL's default scram_iterations.
+const scramIterations = 4096
+
+// scramVerifier is the SCRAM-SHA-256 verifier PostgreSQL stores for password (RFC 5802/7677:
+// SCRAM-SHA-256$<iterations>:<salt>$<StoredKey>:<ServerKey>, base64). The passwords are ASCII
+// (randomSecret), so SASLprep leaves them unchanged.
+func scramVerifier(password string) (string, error) {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	salted, err := pbkdf2.Key(sha256.New, password, salt, scramIterations, sha256.Size)
+	if err != nil {
+		return "", err
+	}
+	clientKey := hmacSHA256(salted, "Client Key")
+	storedKey := sha256.Sum256(clientKey)
+	b64 := base64.StdEncoding.EncodeToString
+	return fmt.Sprintf("SCRAM-SHA-256$%d:%s$%s:%s", scramIterations, b64(salt), b64(storedKey[:]), b64(hmacSHA256(salted, "Server Key"))), nil
+}
+
+func hmacSHA256(key []byte, msg string) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write([]byte(msg))
+	return h.Sum(nil)
+}
+
+// Exists implements Meta.
+func (m *PGMeta) Exists(ctx context.Context, role string) (bool, error) {
+	pool, err := m.open(ctx)
+	if err != nil {
+		return false, err
+	}
+	var ok bool
+	err = pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AND EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)`, role).Scan(&ok)
+	return ok, err
 }
 
 // Drop implements Meta.
@@ -160,6 +209,9 @@ func (c CLI) Files(ctx context.Context, volume, metaURL, metaPassword string) (F
 // Close implements Volumes.
 func (c CLI) Close(volume string) { c.Gateways.Stop(volume) }
 
+// Shutdown stops every gateway (Service.Close).
+func (c CLI) Shutdown() { c.Gateways.Close() }
+
 func (c CLI) run(ctx context.Context, env []string, args ...string) ([]byte, error) {
 	t := c.Timeout
 	if t == 0 {
@@ -193,12 +245,13 @@ func (c CLI) Format(ctx context.Context, f FormatSpec) error {
 	return err
 }
 
-// Destroy implements Volumes.
+// Destroy implements Volumes. A volume that was never formatted, or whose role is gone or no
+// longer logs in, has nothing left to destroy.
 func (c CLI) Destroy(ctx context.Context, metaURL, metaPassword string) error {
 	env := []string{"META_PASSWORD=" + metaPassword}
 	out, err := c.run(ctx, env, "status", metaURL)
 	if err != nil {
-		if strings.Contains(err.Error(), "not formatted") || strings.Contains(err.Error(), "database is not formatted") {
+		if nothingToDestroy(err) {
 			return nil
 		}
 		return err
@@ -213,4 +266,11 @@ func (c CLI) Destroy(ctx context.Context, metaURL, metaPassword string) error {
 	}
 	_, err = c.run(ctx, env, "destroy", "--yes", "--force", metaURL, st.Setting.UUID)
 	return err
+}
+
+// nothingToDestroy tells the juicefs status errors of a volume without metadata.
+func nothingToDestroy(err error) bool {
+	s := err.Error()
+	roleGone := strings.Contains(s, `role "`) && strings.Contains(s, "does not exist")
+	return roleGone || strings.Contains(s, "not formatted") || strings.Contains(s, "password authentication failed")
 }

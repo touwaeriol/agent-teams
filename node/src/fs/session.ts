@@ -1,6 +1,10 @@
-import { lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { SessionOpen } from "../protocol.js";
+import { isInside } from "../util/paths.js";
+
+/** The names of the links a working directory gets into the shared folder. */
+const LINK_NAMES = [".project-files", ".user-files", ".attachments"];
 
 export interface SharedDirs {
   project: string;
@@ -65,6 +69,30 @@ export function linkSharedDirs(absCwd: string, dirs: SharedDirs): string[] {
     symlinkSync(target, at, "dir");
   }
   return problems;
+}
+
+/**
+ * Removes the shared-folder links from a working directory whose session has no folder (off, not
+ * mounted here): only our own symlinks by name, never a file or folder the employee made.
+ */
+export function unlinkSharedDirs(absCwd: string): void {
+  for (const name of LINK_NAMES) {
+    const at = join(absCwd, name);
+    if (lstatOrNull(at)?.isSymbolicLink()) unlinkSync(at);
+  }
+}
+
+/**
+ * The attachments directory is safe to download into: a real directory (not a symlink an employee
+ * swapped in) whose real path stays inside the volume root.
+ */
+export function safeAttachmentDir(dir: string, volumeRoot: string): boolean {
+  if (!lstatOrNull(dir)?.isDirectory()) return false;
+  try {
+    return isInside(realpathSync(volumeRoot), realpathSync(dir));
+  } catch {
+    return false;
+  }
 }
 
 function lstatOrNull(p: string) {

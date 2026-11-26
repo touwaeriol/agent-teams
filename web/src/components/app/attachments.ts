@@ -8,7 +8,7 @@ import { projects as projectActions } from "@/api/actions";
 import { errorText } from "@/api/mutations";
 import { attachKind, LEGACY_MAX_BYTES, pastedFiles, pickImages, type AttachKind } from "@/lib/images";
 import { fileBase64 } from "@/lib/library";
-import { formatSize } from "@/lib/projectFiles";
+import { formatBytes } from "@/lib/bytes";
 import { toast } from "@/lib/toast";
 import { projectUploads, storageUnavailable, UploadCancelled, uploadFile, type UploadApi } from "@/lib/upload";
 
@@ -68,7 +68,7 @@ export function directUploader(api: (pid: string) => UploadApi = projectUploads,
     } catch (e) {
       if (!storageUnavailable(e)) throw e;
       if (o.legacy === false) throw new Error("文件存储暂时不可用，现在不能上传附件");
-      if (file.size > LEGACY_MAX_BYTES) throw new Error(`文件存储暂时不可用，现在只能上传 5 MB 以内的文件（这个文件 ${formatSize(file.size)}）`);
+      if (file.size > LEGACY_MAX_BYTES) throw new Error(`文件存储暂时不可用，现在只能上传 5 MB 以内的文件（这个文件 ${formatBytes(file.size)}）`);
       toast.warning(STORAGE_FALLBACK_NOTE);
       const r = await projectActions.attach(pid, { name: file.name || "file", data: await fileBase64(file) });
       hooks.onProgress?.(1);

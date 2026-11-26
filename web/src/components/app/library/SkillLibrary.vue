@@ -8,7 +8,7 @@ import { keys, useSkills } from "@/api/queries";
 import type { SkillFile } from "@/api/views";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Loading from "@/components/common/Loading.vue";
-import { formatBytes } from "@/lib/artifacts";
+import { formatBytes } from "@/lib/bytes";
 import FolderButton from "./FolderButton.vue";
 import LibrarySection from "./LibrarySection.vue";
 import SkillCard from "./SkillCard.vue";

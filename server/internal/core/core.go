@@ -52,7 +52,9 @@ type Store struct {
 	Blobs blobstore.Store
 	// AttachmentTTL is how long an attachment is kept after its last use (0 = DefaultAttachmentTTL).
 	AttachmentTTL time.Duration
-	// Volume keeps deliverable versions in their owners' shared folders (nil: database only).
+	// Volume keeps deliverable versions in their owners' shared folders (nil: database only). It is
+	// set once while the engine is built (engine.New → UseSharedFolder), before anything serves, and
+	// only read afterwards.
 	Volume artifacts.Volume
 }
 

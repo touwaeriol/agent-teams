@@ -17,7 +17,12 @@ One JuiceFS volume per user, `at-<id>` (`id` = first 16 hex of sha256("agent-tea
 Every session's working directory (`projects/<pid>/threads/<no>/<emp>/` on the node) holds the
 project's repositories as `owner__repo` plus three links: `.project-files` → the project's folder,
 `.user-files` → `shared/`, `.attachments` → the project's `attachments/`. The system prompt explains
-them. There are no file tools: employees read and write with their own file tools.
+them. There are no file tools: employees read and write with their own file tools; `publish_file`
+also accepts files under `.project-files/` and `.user-files/`. A session opened without the folder
+(switched off, not mounted on that node) gets the three links removed (only those symlinks, never an
+employee's files), so attachments fall back to a local `.attachments/`. Attachments are downloaded
+into `attachments/` only while it is a real directory inside the volume; an employee who swaps in a
+symlink gets the download refused.
 
 Projects are only softly separated: a session can reach the user's other project folders. The
 boundary that matters is between users, and that one is hard (separate metadata role and schema,
@@ -27,7 +32,11 @@ separate S3 user).
 
 - **Metadata:** PostgreSQL. Each volume has a role and schema `jfs_<id>` (search_path, no access to
   console tables, CONNECTION LIMIT 30). The console creates them through `AGENT_TEAMS_FS_META_ADMIN_URL`
-  (default `DATABASE_URL`). Nodes reach PostgreSQL at `AGENT_TEAMS_FS_META_HOST` over TLS. In
+  (default `DATABASE_URL`), and sets the role's password as a SCRAM-SHA-256 verifier computed in
+  Go, so the plain password never reaches PostgreSQL or its statement log. The console's own
+  metadata URLs (format, destroy, gateway) take `sslmode` (default `disable`) and the certificate
+  files (`sslrootcert`, `sslcert`, `sslkey`) from that URL. Nodes reach PostgreSQL at
+  `AGENT_TEAMS_FS_META_HOST` over TLS. In
   production this is a dedicated PostgreSQL (not the console's database), so the port opened to
   nodes leads only to volume metadata; it needs its own daily backup, since a volume cannot be read
   without its metadata.
@@ -36,8 +45,16 @@ separate S3 user).
   `juicefs format` stores those keys in the volume's metadata, so mounting needs only the metadata
   URL and password.
 - Table `at_user_fs` (migration 00490) holds the names, sealed secrets (credvault, AAD
-  `UserFsAAD`), `generation` (grows when credentials change: nodes remount) and state
-  provisioning | ready | error | deleting.
+  `UserFsAAD`), `generation` and state provisioning | ready | error | deleting. `generation`
+  comes from the sequence `at_user_fs_generation`: the volume name is derived from the user id, so a
+  folder switched off and on again has the same name, but never a generation a node may still have
+  mounted; any reseal of the secrets must take a new one (it is part of the AAD).
+- Only one call works on a volume at a time: `Enable` provisions only when its insert created the
+  row or it claimed a failed provisioning (a conditional `UPDATE … RETURNING`), and `Disable` only
+  when it moved a ready or failed volume to deleting; a provisioning or deletion left standing for
+  15 minutes (console stopped) can be taken over. Deleting while provisioning answers 409
+  `fs_busy`. Provisioning runs detached from the request, so a closed browser does not leave it
+  failed.
 - Storage is always the platform's (no user-supplied S3 or JuiceFS).
 
 ## Quota
@@ -50,16 +67,30 @@ Each volume has a quota (`AGENT_TEAMS_FS_CAPACITY_GB`, default 20 GiB, 0 = none)
 | Node | How | Feature |
 | --- | --- | --- |
 | Host install with FUSE (`/dev/fuse` + `fusermount3`, or macFUSE) | The daemon downloads the pinned juicefs client (sha256 from the console), runs `juicefs mount -d` at `<data>/mnt/<volume>`, checks it every minute and remounts | `fs_mount` |
-| Docker node | The host mounts it through the official volume plugin (`juicedata/juicefs`); the container gets `AGENT_TEAMS_FS_DIR=/home/agent/fs`, keeps zero privileges and never sees credentials | `fs_external` |
+| Docker node | The host mounts it through the official volume plugin (`juicedata/juicefs`); the container gets `AGENT_TEAMS_FS_DIR=/home/agent/.fs`, keeps zero privileges and never sees credentials | `fs_external` |
 | Existing container without the plugin | One-time hot mount: mount on the host, graft into the container with `open_tree`/`move_mount` (operations only, not in code) | `fs_external` |
 
 `fs.mount` carries the metadata password, so it goes **only on the live link** (unreliable, never
 stored in the outbox). The console sends it when a node with `fs_mount` comes online and when the
 volume becomes ready. `fs.unmount` follows a deletion. The daemon reports `fs.status`, which is
-stored in `at_nodes.fs_status` and shown on the node page.
+stored in `at_nodes.fs_status` and shown on the node page; it is reset to `{}` when the node says
+hello and when its link drops, so a stored status is always the live link's.
+
+The daemon ignores an `fs.mount` whose generation is older than the mounted one. It records the
+mounted volume and generation (never secrets) in its state directory, so after a daemon restart an
+`fs.mount` of the same generation adopts the still-running `juicefs` mount instead of remounting it,
+and `fs.unmount` still finds `<data>/mnt/<volume>`. The session directories are created only while
+the mount point really is a JuiceFS mount, never in the bare directory.
+
+In external mode the daemon cannot remount. When the volume at `AGENT_TEAMS_FS_DIR` was mounted and
+then goes away (the plugin's mount process died), the daemon logs an error and exits with code 76;
+the launcher exits with it, and the container's restart policy (`restart: unless-stopped`) starts a
+new container, whose volume the plugin mounts again. A volume that was never mounted does not cause
+exits (no crash loop when the plugin is not set up).
 
 `session.open.fs` (`project`, `shared`, both relative to the volume root) is set only when the volume
-is ready and the node reports it mounted. The daemon creates both directories, adds them to Claude's
+is ready and the node reports that volume mounted at its current generation (an external mount,
+reported without them, counts unless it names another volume). The daemon creates both directories, adds them to Claude's
 `additionalDirectories` and sandbox `allowWrite`, and to Codex's workspace-write `writable_roots`,
 exports the two variables, and appends a short note to the system prompt.
 
@@ -68,7 +99,12 @@ exports the two variables, and appends a short note to the system prompt.
 The console never mounts a volume. For each volume in use it runs `juicefs gateway` as a child
 process on 127.0.0.1 (random port and key, bucket `files`, no background jobs, no cache), stopped
 after 10 idle minutes and before the volume is deleted, and talks to its S3 API
-(`userfs.Gateways`, `userfs.S3Files`). Through it:
+(`userfs.Gateways`, `userfs.S3Files`). A gateway starts outside the registry lock (callers of the
+same volume wait for one start; other volumes are not held up). Each call, and each opened file
+until it is closed, holds its gateway in use, so the idle reaper never stops one mid-transfer. The
+gateways are stopped at console shutdown, and on Linux get `Pdeathsig` so they never outlive the
+console. Bodies that cannot be rewound (attachment readers, object-store downloads) are uploaded
+with an unsigned payload, since the gateway speaks plain http. Through it:
 
 - the project's 共享文件 page lists, uploads, downloads and deletes `projects/<pid>/`
   (`/api/projects/{pid}/files…`, api.md §3.5.1) and saves attachments there;
@@ -78,12 +114,29 @@ after 10 idle minutes and before the volume is deleted, and talks to its S3 API
   one whose size changed. The page cannot write into `.deliverables/` (403 `managed_folder`), and
   employees are told to leave it alone. Versions from before the folder was on stay in the database.
 
+## Deleting
+
+`DELETE /api/storage/fs` marks the volume deleting, sends `fs.unmount` and returns; the deletion
+runs in the background, detached from the request:
+
+1. wait (60 s at most) until no node whose daemon mounts the volume still reports it mounted. A
+   Docker node (external mount) cannot unmount on request: the volume is destroyed under it, which
+   is logged;
+2. move the deliverable versions kept in the volume back into the database
+   (`artifacts.Store.MoveFromVolumes`, `Service.BeforeTeardown`); meanwhile the volume opens
+   read-only for the console. A failure stops the deletion (state error with the reason; deleting
+   again retries);
+3. stop the console's gateway, `juicefs destroy` (skipped when the role or schema is not there:
+   provisioning failed before creating them, or an earlier attempt dropped them), remove the S3
+   user and policy, drop the schema and role, delete the row.
+
 ## Moving old data in
 
 `atctl storage import-shared` copies the old platform shared files (`at_shared_files`) into each
 owner's `projects/<pid>/`, switching the folder on where needed and skipping files already there
 with the same size; then it moves deliverable versions kept in the database into the volumes of
-owners whose folder is on. Both steps can be re-run. A later migration drops `at_shared_files` and
+owners whose folder is on. Both steps can be re-run. File bytes are read one file at a time, and a
+user whose folder cannot be switched on counts as one failure. A later migration drops `at_shared_files` and
 `at_shared_uploads`.
 
 ## Consistency

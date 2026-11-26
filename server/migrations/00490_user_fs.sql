@@ -4,14 +4,17 @@
 -- (meta_role, also the schema), its data under <volume>/ in the shared bucket, reachable with an
 -- object-storage account limited to that prefix (s3_access_key). The role's password and the
 -- account's secret key are sealed together in secrets (credvault, AAD = user, volume, generation).
--- generation grows whenever the credentials change; nodes remount when it differs.
+-- generation grows whenever the credentials change; nodes remount when it differs. It comes from a
+-- sequence, so a volume switched off and on again (same deterministic name) never repeats a
+-- generation a node may still have mounted.
+CREATE SEQUENCE at_user_fs_generation;
 CREATE TABLE at_user_fs (
   user_id       TEXT PRIMARY KEY REFERENCES at_users(id) ON DELETE CASCADE,
   volume        TEXT NOT NULL UNIQUE,
   meta_role     TEXT NOT NULL UNIQUE,
   s3_access_key TEXT NOT NULL UNIQUE,
   secrets       JSONB NOT NULL,
-  generation    INT  NOT NULL DEFAULT 1,
+  generation    BIGINT NOT NULL DEFAULT nextval('at_user_fs_generation'),
   state         TEXT NOT NULL DEFAULT 'provisioning' CHECK (state IN ('provisioning', 'ready', 'error', 'deleting')),
   error         TEXT NOT NULL DEFAULT '',
   capacity_gb   INT  NOT NULL,
@@ -37,3 +40,4 @@ ALTER TABLE at_deliverable_files ALTER COLUMN data SET NOT NULL;
 ALTER TABLE at_deliverable_files DROP COLUMN in_volume;
 ALTER TABLE at_nodes DROP COLUMN fs_status;
 DROP TABLE at_user_fs;
+DROP SEQUENCE at_user_fs_generation;

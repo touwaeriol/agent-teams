@@ -4,19 +4,21 @@
 // folder into the current one (pick or drop, progress, one confirmation before replacing), create
 // folders, download and delete. Until the user's shared folder is on, it says so and links to the
 // setting. Works on phones: the table becomes stacked rows.
-import { Download, Folder, FolderPlus, FolderUp, Search, ShieldAlert, Trash2, Upload } from "lucide-vue-next";
-import { computed, ref, watch } from "vue";
+import { Download, Folder, FolderPlus, FolderUp, RefreshCw, Search, ShieldAlert, Trash2, Upload } from "lucide-vue-next";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { useQueryClient } from "@tanstack/vue-query";
 import { projectFiles as fileActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useProject, useProjectFiles } from "@/api/queries";
+import { keys, useProject, useProjectFiles, useSharedFolder } from "@/api/queries";
 import type { FileEntry } from "@/api/views";
 import Callout from "@/components/common/Callout.vue";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import FormDialog from "@/components/common/FormDialog.vue";
+import IconButton from "@/components/common/IconButton.vue";
 import Loading from "@/components/common/Loading.vue";
 import NavButton from "@/components/shell/NavButton.vue";
+import { formatBytes } from "@/lib/bytes";
 import { formatDateTime } from "@/lib/library";
 import {
   FILES_NOTICE,
@@ -25,7 +27,8 @@ import {
   downloadUrl,
   droppedFiles,
   filterEntries,
-  formatSize,
+  folderLinkText,
+  isManaged,
   joinPath,
   pathProblem,
   planUpload,
@@ -36,6 +39,7 @@ import {
   type UploadPlan,
 } from "@/lib/projectFiles";
 import { toast } from "@/lib/toast";
+import { UploadCancelled } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 
 const route = useRoute();
@@ -48,6 +52,8 @@ const list = useProjectFiles(pid, dir);
 const qc = useQueryClient();
 
 const available = computed(() => list.data.value?.available ?? true);
+const folder = useSharedFolder(() => !available.value);
+const setupLink = computed(() => folderLinkText(folder.data.value));
 const q = ref("");
 watch(dir, () => (q.value = ""));
 const entries = computed(() => filterEntries(list.data.value?.entries ?? [], q.value));
@@ -69,9 +75,13 @@ const pending = ref<UploadPlan | null>(null);
 const confirming = ref(false);
 const progress = ref<number | null>(null);
 let busy = false;
+let uploading: AbortController | null = null;
+const cancelUpload = () => uploading?.abort();
+onBeforeUnmount(cancelUpload);
 
 /** Shown when files are dropped while an upload is running (the drop is not queued). */
 const BUSY_DROP = "正在上传，等这一批传完再拖入新的文件";
+const EMPTY_PICK = "选中的文件夹是空的，没有可上传的文件";
 
 /** Checks the picked files; asks once when some would be replaced, else uploads right away. */
 function start(picked: (File | SourceFile)[] | null | undefined, notes: string[] = []) {
@@ -82,9 +92,10 @@ function start(picked: (File | SourceFile)[] | null | undefined, notes: string[]
   }
   const { files: chosen, skipped } = collectFiles(picked);
   if (skipped > 0) notes.push(`跳过了 ${skipped} 个系统文件（如 .DS_Store、.git）`);
+  if (chosen.length === 0 && notes.length === 0) notes.push(EMPTY_PICK);
   if (notes.length > 0) toast.warning(notes.join("；"));
   if (chosen.length === 0) return;
-  const plan = planUpload(chosen, list.data.value?.entries);
+  const plan = planUpload(chosen, list.data.value?.entries, dir.value);
   problems.value = plan.problems;
   if (plan.problems.length > 0) return;
   if (plan.overwrites.length > 0) {
@@ -99,19 +110,31 @@ async function send(plan: UploadPlan) {
   if (busy) return;
   busy = true;
   progress.value = 0;
+  uploading = new AbortController();
   try {
-    const done = await uploadProjectFiles(pid.value, dir.value, plan.files, (f) => (progress.value = f));
+    const done = await uploadProjectFiles(pid.value, dir.value, plan.files, (f) => (progress.value = f), uploading.signal);
     toast.success(`已上传 ${done.length} 个文件`);
     problems.value = [];
   } catch (e) {
-    problems.value = [uploadErrorText(e)];
-    if (e instanceof UploadBatchError && e.done.length > 0) toast.warning(`已上传 ${e.done.length} 个文件，其余没有上传`);
+    failed(e);
   } finally {
     busy = false;
+    uploading = null;
     progress.value = null;
     pending.value = null;
     void refresh();
   }
+}
+
+function failed(e: unknown) {
+  const partial = e instanceof UploadBatchError && e.done.length > 0;
+  const cancelled = e instanceof UploadBatchError && e.cause instanceof UploadCancelled;
+  if (cancelled && !partial) {
+    toast.info("已取消上传");
+    return;
+  }
+  problems.value = [uploadErrorText(e)];
+  if (partial) toast.warning(`已上传 ${e.done.length} 个文件，其余没有上传`);
 }
 
 function picked(e: Event) {
@@ -167,8 +190,9 @@ const mkdir = useAction((path: string) => fileActions.mkdir(pid.value, path), {
   onSuccess: () => (folderOpen.value = false),
 });
 function createFolder() {
-  const path = joinPath(dir.value, folderName.value.trim());
-  folderError.value = pathProblem(folderName.value.trim()) ?? "";
+  const name = folderName.value.trim();
+  const path = joinPath(dir.value, name);
+  folderError.value = pathProblem(name) ?? pathProblem(path) ?? "";
   if (!folderError.value) mkdir.mutate(path);
 }
 </script>
@@ -182,20 +206,23 @@ function createFolder() {
           <RouterLink :to="`/projects/${pid}`" class="text-xs text-muted-foreground hover:text-foreground">{{ project.data.value?.name ?? "项目" }}</RouterLink>
           <h1 class="text-[22px] font-semibold">共享文件</h1>
         </div>
+        <IconButton label="刷新" class="ml-auto" data-testid="files-refresh" @click="refresh">
+          <RefreshCw :class="cn(list.isFetching.value && 'animate-spin')" />
+        </IconButton>
       </div>
 
       <Callout v-if="!available" tone="warn" data-testid="files-unavailable">
         <strong class="font-semibold">{{ list.data.value?.reason }}</strong>
         <span class="block text-xs opacity-90">
           项目文件放在你的共享文件夹里。开通后，员工在工作目录的 .project-files/ 里就能直接读写它们。
-          <RouterLink to="/settings/storage" class="underline">去开通</RouterLink>
+          <RouterLink to="/settings/storage" class="underline">{{ setupLink }}</RouterLink>
         </span>
       </Callout>
       <Callout v-else tone="warn" data-testid="files-notice">
         <template #icon><ShieldAlert /></template>
         <strong class="font-semibold">{{ FILES_NOTICE }}</strong>
         <span class="block text-xs opacity-90">
-          这里就是员工工作目录里的 .project-files/：统筹、组长和成员都能直接读写，不进 git。同名文件上传后会被替换。
+          这里就是员工工作目录里的 .project-files/：在会话里工作的组长和成员都能直接读写，不进 git。同名文件上传后会被替换。
         </span>
       </Callout>
 
@@ -236,6 +263,7 @@ function createFolder() {
         <div v-if="progress !== null" class="mt-3 flex items-center gap-3 text-xs text-muted-foreground" role="progressbar" :aria-valuenow="Math.round(progress * 100)">
           <span class="h-1.5 flex-1 overflow-hidden rounded bg-raised"><span class="block h-full rounded bg-primary transition-all" :style="{ width: `${Math.round(progress * 100)}%` }" /></span>
           正在上传 {{ Math.round(progress * 100) }}%
+          <el-button size="small" link data-testid="files-cancel" @click="cancelUpload">取消</el-button>
         </div>
         <Callout v-if="problems.length > 0" tone="bad" class="mt-3" data-testid="files-problems">
           <p class="font-medium">没有上传：</p>
@@ -279,7 +307,7 @@ function createFolder() {
                 </button>
                 <span v-else class="truncate font-mono text-[12.5px] text-foreground" :title="e.path">{{ e.name }}</span>
               </span>
-              <span role="cell" class="tabular-nums text-xs text-muted-foreground md:w-20 md:text-right md:text-[13px]">{{ e.dir ? "—" : formatSize(e.size) }}</span>
+              <span role="cell" class="tabular-nums text-xs text-muted-foreground md:w-20 md:text-right md:text-[13px]">{{ e.dir ? "—" : formatBytes(e.size) }}</span>
               <span role="cell" class="tabular-nums text-xs text-muted-foreground md:w-40 md:text-[13px]">{{ e.dir ? "" : formatDateTime(e.mod_time) }}</span>
               <span class="ml-auto flex w-16 items-center justify-end gap-0.5">
                 <a
@@ -292,6 +320,7 @@ function createFolder() {
                   <Download class="size-4" />
                 </a>
                 <button
+                  v-if="!isManaged(e)"
                   type="button"
                   :aria-label="`删除 ${e.path}`"
                   class="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-bad"
@@ -312,7 +341,7 @@ function createFolder() {
     <ConfirmAction
       v-model:open="confirming"
       title="替换已有的文件？"
-      :description="`这些文件已经存在，上传后会被替换（不保留旧版本）：${pending?.overwrites.join('、') ?? ''}`"
+      :description="`这些文件或文件夹已经存在，同名文件上传后会被替换（不保留旧版本）：${pending?.overwrites.join('、') ?? ''}`"
       confirm-label="替换并上传"
       @confirm="pending && send(pending)"
     />

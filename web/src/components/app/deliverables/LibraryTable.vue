@@ -2,7 +2,8 @@
 import { ChevronDown, ChevronUp } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import type { DeliverableView } from "@/api/views";
-import { fileIcon, formatBytes, formatDateTime, libraryColumns, sizeOf, typeLabel, type SortKey } from "@/lib/library";
+import { fileIcon, formatDateTime, libraryColumns, sizeOf, typeLabel, type SortKey } from "@/lib/library";
+import { formatBytes } from "@/lib/bytes";
 import { cn } from "@/lib/utils";
 import { FILE_ICONS } from "../fileIcons";
 import ItemLink from "../ItemLink.vue";
@@ -57,7 +58,7 @@ const ariaSort = (k: SortKey) => (props.sort.key === k ? (props.sort.dir === "as
         </ItemLink>
         <Owner v-else-if="c.key === 'owner'" :by="d.published_by" />
         <span v-else-if="c.key === 'modified'" class="tabular-nums">{{ formatDateTime(d.updated_at) }}</span>
-        <span v-else-if="c.key === 'size'" class="tabular-nums">{{ formatBytes(sizeOf(d)) }}</span>
+        <span v-else-if="c.key === 'size'" class="tabular-nums">{{ formatBytes(sizeOf(d), "decimal") }}</span>
         <template v-else>{{ typeLabel(d) }}</template>
       </span>
       <ItemMenu :item="d" :pid="pid" />

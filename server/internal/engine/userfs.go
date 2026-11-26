@@ -46,21 +46,45 @@ func (e *Engine) UseSharedFolder(s *userfs.Service) {
 		return
 	}
 	s.OnChange = e.pushFS
+	s.BeforeTeardown = e.moveDeliverablesBack
 	e.Core.Volume = s
 	e.Orch.SharedFolder = e.sharedFolder
 }
 
+// moveDeliverablesBack brings the deliverable versions kept in the user's volume back into the
+// database before the volume is destroyed.
+func (e *Engine) moveDeliverablesBack(ctx context.Context, userID string) error {
+	return e.Core.Artifacts().MoveFromVolumes(ctx, userID, e.log)
+}
+
 // sharedFolder is session.open fs: the project's folder and the user's shared folder, when the
-// user has a ready volume and the node reports it mounted.
+// user has a ready volume and the node reports that very volume and generation mounted (a status
+// left from another volume, or from before a re-enable, does not count; at_nodes.fs_status is
+// reset whenever the node connects or drops).
 func (e *Engine) sharedFolder(ctx context.Context, q core.DB, userID, nodeID, projectID string) (*protocol.SessionOpenFs, error) {
-	if !e.FS.Ready(ctx, userID) {
+	vol, err := e.FS.Get(ctx, userID)
+	if err != nil || vol.State != userfs.StateReady {
 		return nil, nil
 	}
 	st, err := readFsStatus(ctx, q, nodeID)
-	if err != nil || st.State != string(protocol.FsStatusStateMounted) {
+	if err != nil || !st.mounts(vol) {
 		return nil, err
 	}
 	return &protocol.SessionOpenFs{Project: protocol.RelPath(userfs.ProjectDir(projectID)), Shared: protocol.RelPath(userfs.SharedDir)}, nil
+}
+
+// mounts tells whether the status is vol mounted at its current generation. A volume mounted
+// outside the daemon (Docker volume plugin) is reported without them; it counts unless it names
+// another volume.
+func (st nodeFsStatus) mounts(vol userfs.Volume) bool {
+	switch {
+	case st.State != string(protocol.FsStatusStateMounted):
+		return false
+	case st.Mode == string(protocol.FsStatusModeExternal):
+		return st.Volume == "" || st.Volume == vol.Volume
+	default:
+		return st.Volume == vol.Volume && st.Generation == vol.Generation
+	}
 }
 
 // fsStatus stores a node's fs.status and refreshes its node page.

@@ -14,7 +14,8 @@ import {
   downloadUrl,
   droppedFiles,
   filterEntries,
-  formatSize,
+  folderLinkText,
+  isManaged,
   joinPath,
   parentDir,
   pathProblem,
@@ -25,6 +26,8 @@ import {
   uploadProjectFiles,
 } from "@/lib/projectFiles";
 import { ApiError } from "@/api/client";
+import { formatBytes } from "@/lib/bytes";
+import { UploadCancelled } from "@/lib/upload";
 import ProjectFiles from "@/pages/ProjectFiles.vue";
 import { toast } from "@/lib/toast";
 
@@ -49,10 +52,10 @@ const fake = (name: string, size: number) => {
 
 describe("paths", () => {
   it("prints binary units", () => {
-    expect(formatSize(820)).toBe("820 B");
-    expect(formatSize(1536)).toBe("1.5 KB");
-    expect(formatSize(5 * 1024 ** 4)).toBe("5 TB");
-    expect(formatSize(undefined)).toBe("—");
+    expect(formatBytes(820)).toBe("820 B");
+    expect(formatBytes(1536)).toBe("1.5 KB");
+    expect(formatBytes(5 * 1024 ** 4)).toBe("5 TB");
+    expect(formatBytes(undefined)).toBe("—");
   });
   it("accepts what the server accepts (hidden names, non-ASCII, leading or trailing /)", () => {
     for (const p of ["a.txt", "data/raw/x.csv", "报告/v2.pdf", ".env", "/docs/"]) expect(pathProblem(p)).toBeNull();
@@ -76,6 +79,16 @@ describe("paths", () => {
     expect(filterEntries([entry("a.csv"), entry("notes.md")], "NOTE").map((e) => e.name)).toEqual(["notes.md"]);
     expect(downloadUrl("p1", "data/a b.csv")).toBe("/api/projects/p1/files/download?path=data%2Fa%20b.csv");
   });
+  it("keeps the platform's .deliverables folder at the root, and words the setup link by the volume's state", () => {
+    expect(isManaged(folder(".deliverables"))).toBe(true);
+    expect(isManaged(folder("data/.deliverables"))).toBe(false);
+    expect(isManaged(entry(".deliverables"))).toBe(false);
+    const vol = (state: string) => ({ volume: { state } as never });
+    expect(folderLinkText(undefined)).toBe("去开通");
+    expect(folderLinkText({})).toBe("去开通");
+    expect(folderLinkText(vol("error"))).toContain("重试");
+    expect(folderLinkText(vol("provisioning"))).toContain("正在开通");
+  });
 });
 
 describe("planUpload", () => {
@@ -83,6 +96,16 @@ describe("planUpload", () => {
     const plan = planUpload([{ file: fake("a.csv", 4), path: "a.csv" }, { file: fake("b.csv", 4), path: "b.csv" }], [entry("a.csv"), folder("b.csv")]);
     expect(plan.overwrites).toEqual(["a.csv"]);
     expect(plan.problems).toEqual([]);
+  });
+  it("warns once when an uploaded folder writes into an existing folder", () => {
+    const plan = planUpload([{ file: fake("a.md", 1), path: "docs/a.md" }, { file: fake("b.md", 1), path: "docs/sub/b.md" }, { file: fake("c", 1), path: "new/c" }], [folder("docs"), entry("new")]);
+    expect(plan.overwrites).toEqual(["docs/"]);
+  });
+  it("checks the path length with the current folder in front", () => {
+    const deep = "d".repeat(1000);
+    const picked = [{ file: fake("x", 1), path: "x".repeat(30) }];
+    expect(planUpload(picked, [], "").problems).toEqual([]);
+    expect(planUpload(picked, [], deep).problems[0]).toContain("1024");
   });
   it("refuses a file bigger than one request, bad paths and duplicates", () => {
     const plan = planUpload([{ file: fake("big.bin", BATCH_BYTES + 1), path: "big.bin" }, { file: fake("x", 1), path: "a//x" }, { file: fake("c", 1), path: "c" }, { file: fake("c", 1), path: "c" }], []);
@@ -105,7 +128,7 @@ describe("batched upload", () => {
       seen.push(`${dir}:${files.map((x) => x.path).join(",")}`);
       return { files: files.map((x) => entry(joinPath(dir, x.path))) };
     });
-    const done = await uploadProjectFiles("p1", "in", [{ file: fake("a", 600 * MB), path: "a" }, { file: fake("b", 600 * MB), path: "sub/b" }], (f) => progress.push(f), send);
+    const done = await uploadProjectFiles("p1", "in", [{ file: fake("a", 600 * MB), path: "a" }, { file: fake("b", 600 * MB), path: "sub/b" }], (f) => progress.push(f), undefined, send);
     expect(seen).toEqual(["in:a", "in:sub/b"]);
     expect(done.map((e) => e.path)).toEqual(["in/a", "in/sub/b"]);
     expect(progress.at(-1)).toBe(1);
@@ -117,10 +140,18 @@ describe("batched upload", () => {
       if (++n === 2) throw new ApiError(409, "共享文件夹还没有开通", "folder_unavailable");
       return { files: files.map((x) => entry(x.path)) };
     };
-    const err = await uploadProjectFiles("p1", "", [{ file: fake("a", 600 * MB), path: "a" }, { file: fake("b", 600 * MB), path: "b" }], undefined, send).catch((e) => e);
+    const err = await uploadProjectFiles("p1", "", [{ file: fake("a", 600 * MB), path: "a" }, { file: fake("b", 600 * MB), path: "b" }], undefined, undefined, send).catch((e) => e);
     expect(err).toBeInstanceOf(UploadBatchError);
     expect(uploadErrorText(err)).toBe("已上传 1 个文件，其余 1 个没有上传：共享文件夹还没有开通");
     expect(uploadErrorText(new ApiError(413, "too big"))).toContain("请分几次上传");
+  });
+  it("stops before the next batch once cancelled", async () => {
+    const ctl = new AbortController();
+    const send = vi.fn(async (_p: string, _d: string, files: { path: string }[]) => (ctl.abort(), { files: files.map((x) => entry(x.path)) }));
+    const err = await uploadProjectFiles("p1", "", [{ file: fake("a", 600 * MB), path: "a" }, { file: fake("b", 600 * MB), path: "b" }], undefined, ctl.signal, send).catch((e) => e);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(err.cause).toBeInstanceOf(UploadCancelled);
+    expect(err.done.map((e: FileEntry) => e.path)).toEqual(["a"]);
   });
 });
 
@@ -187,6 +218,7 @@ describe("ProjectFiles page", () => {
     const { w } = await mountPage({ "": listing([], { available: false, reason: "共享文件夹还没有开通或还不可用（设置 → 共享文件夹）" }) });
     expect(w.get("[data-testid=files-unavailable]").text()).toContain("还没有开通");
     expect(w.get("[data-testid=files-unavailable] a").attributes("href")).toBe("/settings/storage");
+    expect(w.get("[data-testid=files-unavailable] a").text()).toBe("去开通");
     expect(w.find("[data-testid=files-drop]").exists()).toBe(false);
   });
 
@@ -196,6 +228,7 @@ describe("ProjectFiles page", () => {
       data: listing([entry("data/a.csv")], { dir: "data" }),
     });
     expect(w.get("[data-testid=files-notice]").text()).toContain("不要放密钥或密码");
+    expect(w.get("[data-testid=files-notice]").text()).not.toContain("统筹");
     const rows = w.findAll("[role=row][data-path]");
     expect(rows.map((r) => r.attributes("data-path"))).toEqual(["data", "notes.md"]);
     expect(rows[1].text()).toContain("1.5 KB");
@@ -251,6 +284,50 @@ describe("ProjectFiles page", () => {
     await flushPromises();
     expect(warn).toHaveBeenLastCalledWith("正在上传，等这一批传完再拖入新的文件");
     expect(forms).toHaveLength(1);
+  });
+
+  it("cancels a running upload, and aborts it when the page goes away", async () => {
+    const { w } = await mountPage({ "": listing([]) });
+    const info = vi.spyOn(toast, "info").mockImplementation(() => {});
+    vi.spyOn(XMLHttpRequest.prototype, "open").mockImplementation(() => {});
+    vi.spyOn(XMLHttpRequest.prototype, "send").mockImplementation(() => {}); // never answers
+    const abort = vi.spyOn(XMLHttpRequest.prototype, "abort").mockImplementation(function (this: XMLHttpRequest) {
+      this.onabort?.(new ProgressEvent("abort"));
+    });
+    const drop = w.get("[data-testid=files-drop]");
+    await drop.trigger("drop", { dataTransfer: { items: [], files: [new File(["x"], "a.txt", { type: "text/plain" })] } });
+    await flushPromises();
+    await w.get("[data-testid=files-cancel]").trigger("click");
+    await flushPromises();
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith("已取消上传");
+    expect(w.find("[role=progressbar]").exists()).toBe(false);
+    expect(w.find("[data-testid=files-problems]").exists()).toBe(false);
+    await drop.trigger("drop", { dataTransfer: { items: [], files: [new File(["x"], "b.txt", { type: "text/plain" })] } });
+    await flushPromises();
+    w.unmount();
+    await flushPromises();
+    expect(abort).toHaveBeenCalledTimes(2);
+  });
+
+  it("says so when an empty folder is dropped", async () => {
+    const { w } = await mountPage({ "": listing([]) });
+    const warn = vi.spyOn(toast, "warning").mockImplementation(() => {});
+    const empty = { isFile: false, isDirectory: true, name: "empty", fullPath: "/empty", createReader: () => ({ readEntries: (ok: (e: object[]) => void) => ok([]) }) };
+    await w.get("[data-testid=files-drop]").trigger("drop", { dataTransfer: { items: [{ kind: "file", webkitGetAsEntry: () => empty }], files: [] } });
+    await flushPromises();
+    expect(warn).toHaveBeenCalledWith("选中的文件夹是空的，没有可上传的文件");
+  });
+
+  it("refreshes the listing from the header and has no delete button on .deliverables", async () => {
+    const { w, calls } = await mountPage({ "": listing([folder(".deliverables"), folder("data")]) });
+    expect(w.find("button[aria-label='删除 .deliverables']").exists()).toBe(false);
+    expect(w.find("button[aria-label='删除 data']").exists()).toBe(true);
+    const lists = () => calls.filter((c) => c.url.includes("/api/projects/p1/files?")).length;
+    const before = lists();
+    await w.get("[data-testid=files-refresh]").trigger("click");
+    await flushPromises();
+    expect(lists()).toBe(before + 1);
   });
 
   it("creates a folder inside the current one", async () => {

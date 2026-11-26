@@ -266,6 +266,21 @@ describe("launcher", () => {
     expect(sleeps).toEqual([1000]);
   });
 
+  it("exits with the daemon on exit 76 (external shared folder lost) so the container restarts", async () => {
+    const { layout } = layoutWith();
+    let starts = 0;
+    const spawnFn = () => {
+      starts++;
+      const child = new EventEmitter() as ChildProcess;
+      child.kill = () => true;
+      setTimeout(() => child.emit("exit", 76, null), 1);
+      return child;
+    };
+    const code = await launch({ data: layout.data, args: ["run"], spawnFn, sleep: async () => {}, log: () => {}, checkEveryMs: 1000, signals: new EventEmitter() });
+    expect(code).toBe(76);
+    expect(starts).toBe(1);
+  });
+
   it("refuses to start without an installed release", async () => {
     const data = join(dir, "empty");
     mkdirSync(data);

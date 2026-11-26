@@ -16,6 +16,8 @@ export const RELEASE_ID_RE = /^\d+\.\d+\.\d+(\+[0-9a-f]{8,16})?$/;
 /** A switched release that is not confirmed after this many starts, or this long, is rolled back. */
 export const MAX_UNCONFIRMED_BOOTS = 3;
 export const CONFIRM_DEADLINE_MS = 5 * 60_000;
+/** The daemon's exit code when the external shared-folder mount went away: the launcher exits with it too, so the container restarts and the volume plugin mounts again. */
+export const EXIT_FS_LOST = 76;
 
 export type UpgradeStateName = "switched" | "confirmed" | "rolled_back";
 

@@ -35,6 +35,7 @@ var (
 	ErrNothingToPR     = errors.New("讨论串还没有把改动合并进任何仓库的讨论串分支")
 	ErrStandaloneNoPR  = errors.New("改动所在的是独立 Git 仓库，没有 PR：改动已经在讨论串分支上，直接调用 finish(summary) 结束讨论串")
 	ErrBaseNeedsRepo   = errors.New("项目有多个仓库要开 PR，指定 base 时请同时写 repo")
+	ErrBaseUnknown     = errors.New("不知道这个仓库的起点分支：项目设置里还没记录，GitHub 暂时也查不到默认分支，稍后再试或在项目设置里填上")
 	ErrMergeInProgress = errors.New("合并队列里还有正在合并的条目，等它们处理完再开 PR")
 	ErrPlanOpen        = errors.New("还有主任务没有完成")
 	ErrNoPR            = errors.New("这个讨论串还没有 PR")
@@ -144,7 +145,7 @@ func (e *Engine) pushRepo(ctx context.Context, tx *core.Tx, p store.Project, emp
 // unchangedRefs are the branches whose commits do not count as the member's work in a repository.
 func (e *Engine) unchangedRefs(ctx context.Context, q core.DB, t core.Thread, r ghops.Repo) []string {
 	refs := []string{t.Branch}
-	if base := e.orch.BaseFor(ctx, q, t, r); base != t.Branch {
+	if base := e.orch.BaseFor(ctx, q, t, r); base != "" && base != t.Branch {
 		refs = append(refs, base)
 	}
 	return refs

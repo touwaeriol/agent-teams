@@ -40,16 +40,20 @@ func wire(d httpapi.Deps) (httpapi.Deps, func(context.Context), error) {
 	if err != nil {
 		return d, nil, err
 	}
+	fs := sharedFolders(d.Config.FS, d.Store, vault, d.Log)
 	e, err := engine.New(engine.Deps{Store: d.Store, KV: d.KV, GitHub: d.GitHub, Tokens: d.Tokens,
 		Box: auth.NewSecretBox(d.Config.SecretKeys...), Office: d.Office, Log: d.Log, Gateway: nodegw.Config{Validate: true},
-		Vault: vault, Relay: d.Relay, Blobs: blobs, AttachmentTTL: d.Config.AttachmentTTL,
-		FS: sharedFolders(d.Config.FS, d.Store, vault, d.Log)})
+		Vault: vault, Relay: d.Relay, Blobs: blobs, AttachmentTTL: d.Config.AttachmentTTL, FS: fs})
 	if err != nil {
 		return d, nil, err
 	}
 	d.Nodes, d.Events, d.Hooks, d.SSH = e.Gateway, e.Events, e.Hooks(), e.SSHHooks()
 	d.Extensions = append(d.Extensions, orchapi.New(e, d.Office).WithOrigins(d.Config.ArtifactOrigin, d.Config.PublicURL).Register)
-	return d, e.Start, nil
+	start := func(ctx context.Context) {
+		e.Start(ctx)
+		go func() { <-ctx.Done(); fs.Close() }() // stop the juicefs gateways on shutdown
+	}
+	return d, start, nil
 }
 
 // openAPIDocument builds the server exactly as serve does, without I/O, and renders the document.

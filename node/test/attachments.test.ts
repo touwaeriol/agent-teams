@@ -294,6 +294,8 @@ describe("what the runtime gets directly", () => {
     expect(budget.used).toBe(base64Length(15 * MB));
     expect(d.links).toEqual([]);
     expect(d.note).toContain("[附件]");
+    expect(d.note).not.toContain("save_attachment");
+    expect(d.note).toContain(".project-files/");
     expect(d.note).toMatch(/img_p1 .*→ .*img_p1\.bin（已作为图片附上）/);
     expect(d.note).toMatch(/img_p2 .*未直接附上（超出图片大小上限），请用工具读取路径/);
     expect(d.note).toMatch(/img_d1 .*已作为文档附上/);

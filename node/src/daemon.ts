@@ -43,7 +43,8 @@ import { absPath } from "./sessions/claude/options.js";
 import { consoleImageFetcher } from "./sessions/images.js";
 import { consoleHttp, type AttachmentOptions, type ConsoleHttp } from "./sessions/attachments.js";
 import { SharedFs, type SharedFsOptions } from "./fs/shared.js";
-import { linkSharedDirs, sharedAttachmentDir, sharedFolderPrompt, withSharedDirs } from "./fs/session.js";
+import { linkSharedDirs, safeAttachmentDir, sharedAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs, type SharedDirs } from "./fs/session.js";
+import { EXIT_FS_LOST } from "./release.js";
 import { DAEMON_BUILD, DAEMON_RELEASE, DAEMON_VERSION, PROTOCOLS } from "./version.js";
 
 export interface DaemonOptions {
@@ -125,8 +126,8 @@ const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "g
 export class Daemon {
   readonly link: Link;
   readonly sessions: SessionManager;
-  /** Working directories linked to the shared folder → its attachments/ (attachments go there). */
-  private readonly linked = new Map<string, string>();
+  /** Working directories linked to the shared folder → its directories (attachments go to the project's attachments/). */
+  private readonly linked = new Map<string, SharedDirs>();
   readonly git: GitJobs;
   private readonly outbox: Outbox;
   private readonly inbox: Inbox;
@@ -183,7 +184,8 @@ export class Daemon {
     this.http = consoleHttp(o.url, o.token, o.transferFetch);
     this.tools = new ToolBroker(send, {
       http: this.http, attachments: () => this.sessions.attachmentOptions, noteAttachmentDir: (cwd) => this.sessions.noteAttachmentDir(cwd),
-      attachmentDir: (cwd) => this.linked.get(cwd) ?? null,
+      attachmentDir: (cwd) => this.sharedAttachments(cwd),
+      sharedDirs: (cwd) => { const d = this.linked.get(cwd); return d ? [d.project, d.shared] : []; },
     });
     this.creds = new CredBroker(send);
     this.platform = installPlatformFiles(o.platformDir, o.nodeCmd);
@@ -191,7 +193,10 @@ export class Daemon {
     this.gh = new GhInstaller({ toolsDir: o.toolsDir ?? join(dataDir, "tools"), path: process.env.PATH ?? "", skip: [this.platform.binDir], ...o.gh });
     const realSsh = installSshWrappers(this.platform.binDir, o.sshPath ?? process.env.PATH ?? "");
     this.sshClient = sshClientVersion(realSsh.ssh);
-    this.sharedFs = new SharedFs({ dataDir, ...(o.fsDir ? { externalDir: o.fsDir } : {}), log: o.log.child({ c: "fs" }), send: (t, b) => this.link.send(t, b), ...o.sharedFs });
+    this.sharedFs = new SharedFs({
+      dataDir, stateDir: o.stateDir, ...(o.fsDir ? { externalDir: o.fsDir } : {}), log: o.log.child({ c: "fs" }), send: (t, b) => this.link.send(t, b),
+      onExternalLost: () => o.onExit?.(EXIT_FS_LOST), ...o.sharedFs,
+    });
     this.ssh = new SshHub({
       baseDir: o.sshBaseDir ?? sshBaseDir(dataDir), proxySocket: sshSocketPath(o.runtimeDir), nodeCmd: o.nodeCmd,
       gatewayUrl: gatewayUrl(o.url), token: o.token, send, log: o.log,
@@ -229,8 +234,8 @@ export class Daemon {
       waitForJob: (id, ms) => this.git.waitFor(id, ms),
       importMove: (spec, absCwd) => this.mover.import(spec, absCwd),
       createDriver: (spec, cwd, sink) => this.createDriver(spec, cwd, sink),
-      attachmentDir: (cwd) => this.linked.get(cwd) ?? null,
-      onSessionGone: (id) => this.forgetSession(id),
+      attachmentDir: (cwd) => this.sharedAttachments(cwd),
+      onSessionGone: (id, absCwd) => this.forgetSession(id, absCwd),
       onTurnEnd: (s) => this.live.turnEnded(s),
       onDriverGone: (id) => this.ssh.drop(id),
       contextDetail: () => this.welcomeFeatures.has("context_detail"),
@@ -446,6 +451,7 @@ export class Daemon {
     const dirs = open.employee.tier === "coordinator" ? null : this.sharedFs.sessionDirs(open.fs);
     const spec = dirs ? withSharedDirs(open, dirs) : open;
     if (dirs) this.linkShared(absCwd, dirs);
+    else this.unlinkShared(absCwd);
     const runtime = this.runtimes.get(spec.runtime);
     const skills = runtime.nativeSkills ? materializeSkills(this.skillsRoot, spec) : null;
     const plugins = materializePlugins(this.pluginsRoot, spec);
@@ -457,13 +463,38 @@ export class Daemon {
   }
 
   /** Links the working directory to the shared folder (.project-files, .user-files, .attachments). */
-  private linkShared(absCwd: string, dirs: { project: string; shared: string }): void {
+  private linkShared(absCwd: string, dirs: SharedDirs): void {
     try {
       for (const p of linkSharedDirs(absCwd, dirs)) this.o.log.warn({ cwd: absCwd }, `shared folder: ${p}`);
-      this.linked.set(absCwd, sharedAttachmentDir(dirs));
+      this.linked.set(absCwd, dirs);
     } catch (err) {
       this.o.log.warn({ cwd: absCwd, err: (err as Error).message }, "shared folder: cannot link the working directory");
     }
+  }
+
+  /** A session without the folder (off, not mounted, coordinator): stale links would send downloads to a dead or bare path. */
+  private unlinkShared(absCwd: string): void {
+    this.linked.delete(absCwd);
+    try {
+      unlinkSharedDirs(absCwd);
+    } catch (err) {
+      this.o.log.warn({ cwd: absCwd, err: (err as Error).message }, "shared folder: cannot remove the old links");
+    }
+  }
+
+  /**
+   * Where a linked working directory's attachments go: the project's attachments/, only while it is a
+   * real directory inside the mounted volume (an employee may have swapped in a symlink); else null
+   * (the local .attachments, which then refuses the link).
+   */
+  private sharedAttachments(absCwd: string): string | null {
+    const dirs = this.linked.get(absCwd);
+    const root = dirs ? this.sharedFs.root() : null;
+    if (!dirs || !root) return null;
+    const dir = sharedAttachmentDir(dirs);
+    if (safeAttachmentDir(dir, root)) return dir;
+    this.o.log.warn({ cwd: absCwd, dir }, "shared folder: attachments/ is not a real directory inside the volume; not downloading there");
+    return null;
   }
 
   private policy(spec: SessionOpen, absCwd: string, readable: string[]): ToolPolicy {
@@ -540,7 +571,8 @@ export class Daemon {
     return { ...gitCredentialEnv(this.o.nodeCmd, this.credServer.socketPath, spec.session_id, secret, spec.git_hosts ?? []), AT_GH_WRAPPER_DIR: this.platform.binDir };
   }
 
-  private forgetSession(id: string): void {
+  private forgetSession(id: string, absCwd: string): void {
+    if (!this.sessions.cwdInUse(absCwd)) this.linked.delete(absCwd);
     this.ssh.forget(id);
     this.credServer.unregister(id);
     this.toolhost.remove(id);

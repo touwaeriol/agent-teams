@@ -414,6 +414,10 @@ func (a *API) hostedRef(ctx context.Context, b *strings.Builder, d core.Delivera
 		return nil
 	}
 	f, err := a.e.Core.Artifacts().Load(ctx, a.e.Core.Pool, d.ID, v.Version, entry)
+	if errors.Is(err, artifacts.ErrNotFound) {
+		fmt.Fprintf(b, "\n%s 的内容现在取不到（共享文件夹里的文件不在了或被改过），这里不附内容。", entry)
+		return nil
+	}
 	if err != nil {
 		return err
 	}

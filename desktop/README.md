@@ -12,7 +12,7 @@ desktop/
     main.ts          主进程：窗口、导航、权限、深链接、菜单、离线页、自动更新的接线
     preload.ts       沙盒 preload，只暴露 window.agentTeamsDesktop = { version, platform }
     config.ts        加载哪个站点（AGENT_TEAMS_URL）、User-Agent
-    navigation.ts    链接留在 App 里 / 交给系统浏览器 / 拒绝
+    navigation.ts    链接留在 App 里 / GitHub 流程留在窗口 / 交给系统浏览器 / 拒绝
     deeplink.ts      agentteams://<路径> → 站点上的同一路径
     permissions.ts   放行哪些权限
     menu.ts          应用菜单模板、开发者工具快捷键
@@ -52,10 +52,10 @@ AGENT_TEAMS_URL=http://127.0.0.1:5173 npm start
 
 | 方面 | 做法 |
 | --- | --- |
-| 窗口 | 记住大小、位置和是否最大化（保存在 userData/window-state.json；显示器拔掉后位置作废，只保留大小）。只允许一个实例，再次启动会聚焦已有窗口。Mac 关窗口不退出，点 Dock 图标重新打开；Windows 关掉所有窗口就退出。 |
+| 窗口 | 记住大小、位置和是否最大化（保存在 userData/window-state.json；显示器拔掉后位置作废，只保留大小）。只允许一个实例，再次启动会聚焦已有窗口。Mac 关窗口只是隐藏（页面继续运行，提醒和通知照常），点 Dock 图标重新显示；Windows 关掉所有窗口就退出。 |
 | 安全 | contextIsolation、sandbox 打开，nodeIntegration 关闭，禁用 `<webview>`。网页拿不到任何 Node 能力，只能读 `window.agentTeamsDesktop.version` / `.platform`。 |
-| 链接 | 同源（与加载的站点同协议、同域名、同端口）的跳转留在 App 里；`window.open` 打开同源地址（比如讨论串菜单里的“在新窗口中打开”）会在 App 里开新窗口。其他 http/https 链接一律交给系统浏览器打开；其他协议（file:、javascript:、mailto: 等）直接拒绝。 |
-| 跳到其他网站的操作 | 比如设置里的“连接 GitHub”、安装 GitHub App、批准仓库：都在系统浏览器里打开（不在 App 里开例外）。在浏览器里完成后，回到 App 刷新页面（Cmd+R / Ctrl+R）就能看到结果。 |
+| 链接 | 同源（与加载的站点同协议、同域名、同端口）的跳转留在 App 里；`window.open` 打开同源地址（比如讨论串菜单里的“在新窗口中打开”）会在 App 里开新窗口。其他 http/https 链接和 mailto: 交给系统浏览器 / 邮件程序打开；其他协议（file:、javascript: 等）直接拒绝。 |
+| 跳到 GitHub 的流程 | 设置里的“连接 GitHub”、安装 GitHub App、创建 App：这些表单在 github.com 和站点之间来回提交，所以在 App 窗口里走完（`navigation.ts` 的 `FLOW_ORIGINS`），结束时 GitHub 跳回站点。GitHub 页面里点开的其他链接仍交给系统浏览器。 |
 | 权限 | 只对加载的站点放行：麦克风（只要音频，摄像头拒绝）、通知、剪贴板写入。其他权限（定位、摄像头、剪贴板读取、MIDI、USB 等）和其他来源（比如交付物 iframe）一律拒绝。 |
 | 深链接 | 注册 `agentteams://` 协议。`agentteams://projects/<pid>/threads/12` 打开站点上的 `/projects/<pid>/threads/12`，其他路径同理（`/sessions/new`、`/projects/<pid>/deliverables` 等，见 web/src/router.ts）。只接受站点上的路径：带协议的（`agentteams://https://…`）、带反斜杠或控制字符的、超过 2048 字符的都会被忽略。Mac 走 open-url 事件，Windows 走第二个实例的命令行参数。 |
 | 菜单 | Mac：应用菜单、文件、编辑（没有它 Cmd+C/V 不能用）、显示（重新加载、缩放、全屏）、窗口、帮助。Windows：同样的菜单，菜单栏默认隐藏，按 Alt 显示。 |
@@ -117,7 +117,7 @@ npm run dist:dir      # 只出解包后的目录，不做安装包，检查配�
 - 绕过办法（任选一种）：
   - 在“应用程序”里右键（或按住 Control 点）Agent Teams →“打开”→ 再点“打开”。macOS 15 以后这一招不再有效，要去“系统设置 → 隐私与安全性”，在下方找到被拦下的 Agent Teams，点“仍要打开”，输入密码。
   - 终端执行 `xattr -dr com.apple.quarantine "/Applications/Agent Teams.app"`。
-- **没签名的 Mac 版不能自动更新**（Squirrel.Mac 要求签名），只能手动下载新版覆盖。
+- **没签名的 Mac 版不能自动更新**（Squirrel.Mac 要求签名）：它不在后台下载，“检查更新…”发现新版本时提示并打开发布页，手动下载新版覆盖。
 
 **Windows**（未签名）
 

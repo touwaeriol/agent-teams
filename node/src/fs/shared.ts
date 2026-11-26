@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { accessSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { run as defaultRun, type RunOptions, type RunResult } from "../git/exec.js";
 import type { FsMount, FsStatus, FsUnmount, SessionOpen } from "../protocol.js";
+import type { Logger } from "../util/log.js";
 
 type SessionOpenFs = NonNullable<SessionOpen["fs"]>;
-import type { Logger } from "../util/log.js";
 
 /**
  * The user's JuiceFS shared folder (one volume per user, docs/v2/shared-folder.md).
@@ -22,6 +22,10 @@ export interface SharedFsOptions {
   dataDir: string;
   /** AGENT_TEAMS_FS_DIR: an externally mounted volume root. */
   externalDir?: string;
+  /** Where the mounted {volume, generation} (never secrets) is kept across daemon restarts (default dataDir). */
+  stateDir?: string;
+  /** External mode: the mount that was healthy went away; the process should exit so the container restart brings it back. */
+  onExternalLost?: () => void;
   log: Logger;
   send: (type: "fs.status", body: FsStatus) => void;
   /** Tests: command runner, fetch, platform key, fuse probe, health period. */
@@ -35,6 +39,8 @@ export interface SharedFsOptions {
 }
 
 type Mounted = { spec: FsMount; dir: string };
+/** What survives a daemon restart: the volume and generation of the daemon's own mount. */
+type Saved = { volume: string; generation: number };
 
 export class SharedFs {
   private current: Mounted | null = null;
@@ -43,6 +49,8 @@ export class SharedFs {
   private timer: NodeJS.Timeout | null = null;
   private readonly run: NonNullable<SharedFsOptions["run"]>;
   private readonly canMount: boolean;
+  /** External mode: the mount was seen healthy at least once. */
+  private externalSeen = false;
 
   constructor(private readonly o: SharedFsOptions) {
     this.run = o.run ?? defaultRun;
@@ -59,7 +67,8 @@ export class SharedFs {
   /** Root of the mounted volume, or null. */
   root(): string | null {
     if (this.o.externalDir) return isMounted(this.o.externalDir) ? resolve(this.o.externalDir) : null;
-    return this.current && this.status.state === "mounted" ? this.current.dir : null;
+    const c = this.current;
+    return c && this.status.state === "mounted" && isMounted(c.dir) ? c.dir : null;
   }
 
   /** Sends the current status (after welcome). */
@@ -84,12 +93,13 @@ export class SharedFs {
     return this.serial(() => this.doMount(m));
   }
 
-  /** fs.unmount: unmounts and forgets the credentials. */
+  /** fs.unmount: unmounts and forgets the credentials (also a mount left by a previous daemon process). */
   unmount(u: FsUnmount): Promise<void> {
     return this.serial(async () => {
-      if (!this.current || this.current.spec.volume !== u.volume) return;
-      await this.umount(this.current.dir);
+      if (this.o.externalDir || (this.current && this.current.spec.volume !== u.volume)) return;
+      await this.umount(this.current?.dir ?? this.mountDir(u.volume));
       this.current = null;
+      this.save(null);
       this.set({ state: "unmounted", mode: "daemon" });
     });
   }
@@ -123,15 +133,49 @@ export class SharedFs {
   private async doMount(m: FsMount): Promise<void> {
     if (this.o.externalDir) return this.report();
     if (!this.canMount) return this.set({ state: "error", mode: "daemon", volume: m.volume, generation: m.generation, error: "no FUSE on this node (/dev/fuse and fusermount3 are needed)" });
-    const dir = join(this.o.dataDir, "mnt", m.volume);
-    const same = this.current?.spec.volume === m.volume && this.current.spec.generation === m.generation;
-    if (same && isMounted(dir)) {
+    const dir = this.mountDir(m.volume);
+    const known: Saved | null = this.current?.spec ?? this.saved();
+    const sameVolume = known?.volume === m.volume;
+    if (sameVolume && m.generation < known.generation) {
+      this.o.log.info({ volume: m.volume, generation: m.generation, mounted: known.generation }, "shared folder: ignoring an older fs.mount");
+      return;
+    }
+    if (sameVolume && m.generation === known.generation && isMounted(dir)) {
+      // Kept (or adopted after a daemon restart): the spec stays in memory for health remounts.
       this.current = { spec: m, dir };
+      this.save(m);
       return this.set(mountedStatus(m));
     }
-    if (this.current && this.current.dir !== dir) await this.umount(this.current.dir);
+    if (known && !sameVolume) await this.umount(this.mountDir(known.volume));
     this.current = { spec: m, dir };
     await this.mountNow(m, dir);
+  }
+
+  private mountDir(volume: string): string {
+    return join(this.o.dataDir, "mnt", volume);
+  }
+
+  private get stateFile(): string {
+    return join(this.o.stateDir ?? this.o.dataDir, "fs-mount.json");
+  }
+
+  /** The daemon mount recorded by this or a previous process, or null. */
+  private saved(): Saved | null {
+    try {
+      const v = JSON.parse(readFileSync(this.stateFile, "utf8")) as Partial<Saved>;
+      return typeof v.volume === "string" && typeof v.generation === "number" ? { volume: v.volume, generation: v.generation } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private save(m: Saved | null): void {
+    try {
+      if (!m) return rmSync(this.stateFile, { force: true });
+      writeFileSync(this.stateFile, JSON.stringify({ volume: m.volume, generation: m.generation }), { mode: 0o600 });
+    } catch (err) {
+      this.o.log.warn({ err: (err as Error).message }, "shared folder: cannot record the mount");
+    }
   }
 
   private async mountNow(m: FsMount, dir: string): Promise<void> {
@@ -147,6 +191,7 @@ export class SharedFs {
       const r = await this.run(bin, args, { env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? "/", META_PASSWORD: m.meta_password }, timeoutMs: 120_000 });
       if (r.code !== 0) throw new Error(lastLine(r.stderr || r.stdout) || `juicefs mount exited ${r.code}`);
       if (!(await waitFor(() => isMounted(dir), this.o.mountWaitMs ?? 30_000))) throw new Error("the mount did not appear");
+      this.save(m);
       this.set(mountedStatus(m));
     } catch (err) {
       this.o.log.warn({ err: (err as Error).message, volume: m.volume }, "shared folder: mount failed");
@@ -162,19 +207,26 @@ export class SharedFs {
 
   /** Health check: a daemon mount that went away is mounted again; an external one is re-reported when it changes. */
   private async check(): Promise<void> {
-    if (this.o.externalDir) {
-      const next = this.externalStatus();
-      if (next.state !== this.status.state) this.set(next);
-      return;
-    }
+    if (this.o.externalDir) return this.checkExternal();
     const c = this.current;
     if (!c || this.status.state === "mounting" || isMounted(c.dir)) return;
     this.o.log.warn({ volume: c.spec.volume }, "shared folder: mount lost, mounting again");
     await this.serial(() => (this.current === c ? this.mountNow(c.spec, c.dir) : Promise.resolve()));
   }
 
+  /** An external mount that was healthy and went away cannot come back inside this container: exit (restart policy). */
+  private checkExternal(): void {
+    const next = this.externalStatus();
+    if (next.state !== this.status.state) this.set(next);
+    if (next.state === "mounted" || !this.externalSeen || !this.o.onExternalLost) return;
+    this.o.log.error({ dir: this.o.externalDir }, "shared folder: the external mount went away; exiting so the container restart mounts it again");
+    this.stop();
+    this.o.onExternalLost();
+  }
+
   private externalStatus(): FsStatus {
     const ok = isMounted(this.o.externalDir!);
+    if (ok) this.externalSeen = true;
     return ok ? { state: "mounted", mode: "external" } : { state: "error", mode: "external", error: `${this.o.externalDir} is not a JuiceFS mount` };
   }
 

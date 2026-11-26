@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -39,38 +40,95 @@ type Gateways struct {
 
 	mu      sync.Mutex
 	running map[string]*gateway
+	closed  bool
 	reaper  sync.Once
+	quit    chan struct{}
 }
 
+// gateway is one volume's child. ready closes when its start ended (err tells how); last and
+// refs (under Gateways.mu) keep the reaper off a gateway in use.
 type gateway struct {
 	cmd   *exec.Cmd
 	files *S3Files
-	last  time.Time
+	ready chan struct{}
+	err   error
 	done  chan struct{}
+	last  time.Time
+	refs  int
+	// abort cuts a start short (stop before ready).
+	abort     chan struct{}
+	abortOnce sync.Once
 }
 
-// Files returns the volume's tree, starting its gateway if needed.
+var errGatewaysClosed = errors.New("juicefs gateway: shutting down")
+
+// Files returns the volume's tree, starting its gateway if needed. A start runs outside the lock,
+// so other volumes are not held up; callers of the same volume wait for the one start.
 func (g *Gateways) Files(ctx context.Context, volume, metaURL, metaPassword string) (Files, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.reaper.Do(func() { go g.reap() })
-	if gw := g.running[volume]; gw != nil {
-		select {
-		case <-gw.done:
-		default:
-			gw.last = time.Now()
-			return gw.files, nil
-		}
-	}
-	gw, err := g.start(ctx, metaURL, metaPassword)
+	gw, starting, err := g.entry(volume)
 	if err != nil {
 		return nil, err
 	}
+	if starting {
+		go g.launch(gw, metaURL, metaPassword)
+	}
+	select {
+	case <-gw.ready:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if gw.err != nil {
+		g.forget(volume, gw)
+		return nil, gw.err
+	}
+	return &gatewayFiles{g: g, gw: gw}, nil
+}
+
+// entry is the volume's gateway, a new (not yet started) one when none runs.
+func (g *Gateways) entry(volume string) (*gateway, bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return nil, false, errGatewaysClosed
+	}
+	g.reaper.Do(func() {
+		g.quit = make(chan struct{})
+		go g.reap(g.quit)
+	})
+	if gw := g.running[volume]; gw != nil && !gw.exited() {
+		gw.last = time.Now()
+		return gw, false, nil
+	}
+	gw := &gateway{ready: make(chan struct{}), done: make(chan struct{}), abort: make(chan struct{}), last: time.Now()}
 	if g.running == nil {
 		g.running = map[string]*gateway{}
 	}
 	g.running[volume] = gw
-	return gw.files, nil
+	return gw, true, nil
+}
+
+// exited tells a gateway whose start ended and whose process is gone.
+func (gw *gateway) exited() bool {
+	if !gw.started() {
+		return false
+	}
+	if gw.err != nil {
+		return true
+	}
+	select {
+	case <-gw.done:
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *Gateways) forget(volume string, gw *gateway) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.running[volume] == gw {
+		delete(g.running, volume)
+	}
 }
 
 // Stop stops the volume's gateway (before the volume is destroyed).
@@ -84,42 +142,57 @@ func (g *Gateways) Stop(volume string) {
 	}
 }
 
-func (g *Gateways) start(ctx context.Context, metaURL, password string) (*gateway, error) {
+// Close stops every gateway and refuses new ones (console shutdown).
+func (g *Gateways) Close() {
+	g.mu.Lock()
+	all := g.running
+	g.running, g.closed = nil, true
+	if g.quit != nil {
+		close(g.quit)
+	}
+	g.mu.Unlock()
+	for _, gw := range all {
+		gw.stop()
+	}
+}
+
+// launch starts gw's process and closes ready.
+func (g *Gateways) launch(gw *gateway, metaURL, password string) {
+	defer close(gw.ready)
 	addr, err := freeAddr()
 	if err != nil {
-		return nil, err
+		gw.err = err
+		return
 	}
 	user, secret := "console", randomSecret(24)
 	cmd := exec.Command(g.Bin, "gateway", "--no-banner", "--no-bgjob", "--backup-meta", "0", "--log", os.DevNull,
 		"--bucket-name", gatewayBucket, "--cache-size", "0", "--no-usage-report", "--metrics", "127.0.0.1:0", metaURL, addr)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.TempDir(), "META_PASSWORD=" + password,
 		"MINIO_ROOT_USER=" + user, "MINIO_ROOT_PASSWORD=" + secret}
+	setPdeathsig(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &limitWriter{w: &stderr, n: 4096}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("juicefs gateway: %w", err)
+		gw.err = fmt.Errorf("juicefs gateway: %w", err)
+		close(gw.done)
+		return
 	}
-	gw := &gateway{cmd: cmd, last: time.Now(), done: make(chan struct{}), files: NewS3Files("http://"+addr, user, secret, gatewayBucket)}
+	gw.cmd, gw.files = cmd, NewS3Files("http://"+addr, user, secret, gatewayBucket)
 	go func() { _ = cmd.Wait(); close(gw.done) }()
-	if err := g.waitReady(ctx, gw, "http://"+addr); err != nil {
-		gw.stop()
-		return nil, fmt.Errorf("juicefs gateway: %w %s", err, lastLines(stderr.String(), 3))
+	if err := g.waitReady(gw, "http://"+addr); err != nil {
+		gw.kill()
+		gw.err = fmt.Errorf("juicefs gateway: %w %s", err, lastLines(stderr.String(), 3))
 	}
-	return gw, nil
 }
 
-func (g *Gateways) waitReady(ctx context.Context, gw *gateway, base string) error {
-	timeout := g.StartTimeout
-	if timeout == 0 {
-		timeout = 30 * time.Second
-	}
-	deadline := time.Now().Add(timeout)
+func (g *Gateways) waitReady(gw *gateway, base string) error {
+	deadline := time.Now().Add(orDefault(g.StartTimeout, 30*time.Second))
 	for time.Now().Before(deadline) {
 		select {
 		case <-gw.done:
 			return errors.New("exited")
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-gw.abort:
+			return errors.New("stopped")
 		case <-time.After(200 * time.Millisecond):
 		}
 		resp, err := http.Get(base + "/minio/health/live")
@@ -133,28 +206,72 @@ func (g *Gateways) waitReady(ctx context.Context, gw *gateway, base string) erro
 	return errors.New("not ready in time")
 }
 
-func (g *Gateways) reap() {
-	idle := g.Idle
-	if idle == 0 {
-		idle = 10 * time.Minute
-	}
-	for range time.Tick(time.Minute) {
-		g.mu.Lock()
-		var old []*gateway
-		for v, gw := range g.running {
-			if time.Since(gw.last) > idle {
-				old = append(old, gw)
-				delete(g.running, v)
-			}
-		}
-		g.mu.Unlock()
-		for _, gw := range old {
-			gw.stop()
+func (g *Gateways) reap(quit <-chan struct{}) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-quit:
+			return
+		case <-t.C:
+			g.reapIdle(orDefault(g.Idle, 10*time.Minute))
 		}
 	}
 }
 
+// reapIdle stops the started gateways unused for idle and not serving a call or a download.
+func (g *Gateways) reapIdle(idle time.Duration) {
+	g.mu.Lock()
+	var old []*gateway
+	for v, gw := range g.running {
+		if gw.refs == 0 && gw.started() && time.Since(gw.last) > idle {
+			old = append(old, gw)
+			delete(g.running, v)
+		}
+	}
+	g.mu.Unlock()
+	for _, gw := range old {
+		gw.stop()
+	}
+}
+
+func (gw *gateway) started() bool {
+	select {
+	case <-gw.ready:
+		return true
+	default:
+		return false
+	}
+}
+
+// acquire marks gw in use; release ends that use.
+func (g *Gateways) acquire(gw *gateway) {
+	g.mu.Lock()
+	gw.refs++
+	gw.last = time.Now()
+	g.mu.Unlock()
+}
+
+func (g *Gateways) release(gw *gateway) {
+	g.mu.Lock()
+	gw.refs--
+	gw.last = time.Now()
+	g.mu.Unlock()
+}
+
+// stop cuts a start short, waits for it to end, then stops the process.
 func (gw *gateway) stop() {
+	if gw.abort != nil {
+		gw.abortOnce.Do(func() { close(gw.abort) })
+	}
+	<-gw.ready
+	gw.kill()
+}
+
+func (gw *gateway) kill() {
+	if gw.cmd == nil || gw.cmd.Process == nil {
+		return
+	}
 	_ = gw.cmd.Process.Signal(os.Interrupt)
 	select {
 	case <-gw.done:
@@ -162,6 +279,65 @@ func (gw *gateway) stop() {
 		_ = gw.cmd.Process.Kill()
 		<-gw.done
 	}
+}
+
+// gatewayFiles is a running gateway's tree: each call (and each opened file until it is closed)
+// holds the gateway in use, so the reaper never stops it mid-transfer.
+type gatewayFiles struct {
+	g  *Gateways
+	gw *gateway
+}
+
+func (f *gatewayFiles) use() func() {
+	f.g.acquire(f.gw)
+	return func() { f.g.release(f.gw) }
+}
+
+// List implements Files.
+func (f *gatewayFiles) List(ctx context.Context, dir string) ([]Entry, error) {
+	defer f.use()()
+	return f.gw.files.List(ctx, dir)
+}
+
+// Open implements Files: the gateway stays in use until the file is closed.
+func (f *gatewayFiles) Open(ctx context.Context, name string) (io.ReadCloser, Entry, error) {
+	done := f.use()
+	r, e, err := f.gw.files.Open(ctx, name)
+	if err != nil {
+		done()
+		return nil, e, err
+	}
+	return &releasingReader{ReadCloser: r, done: done}, e, nil
+}
+
+// Put implements Files.
+func (f *gatewayFiles) Put(ctx context.Context, name string, r io.Reader, size int64) error {
+	defer f.use()()
+	return f.gw.files.Put(ctx, name, r, size)
+}
+
+// Mkdir implements Files.
+func (f *gatewayFiles) Mkdir(ctx context.Context, dir string) error {
+	defer f.use()()
+	return f.gw.files.Mkdir(ctx, dir)
+}
+
+// Remove implements Files.
+func (f *gatewayFiles) Remove(ctx context.Context, name string) error {
+	defer f.use()()
+	return f.gw.files.Remove(ctx, name)
+}
+
+type releasingReader struct {
+	io.ReadCloser
+	once sync.Once
+	done func()
+}
+
+func (r *releasingReader) Close() error {
+	err := r.ReadCloser.Close()
+	r.once.Do(r.done)
+	return err
 }
 
 func freeAddr() (string, error) {
@@ -267,8 +443,21 @@ func (f *S3Files) Put(ctx context.Context, name string, r io.Reader, size int64)
 	if err != nil || name == "" {
 		return ErrBadPath
 	}
-	_, err = f.c.PutObject(ctx, &s3.PutObjectInput{Bucket: &f.bucket, Key: &name, Body: r, ContentLength: aws.Int64(size)})
+	in := &s3.PutObjectInput{Bucket: &f.bucket, Key: &name, Body: r, ContentLength: aws.Int64(size)}
+	_, err = f.c.PutObject(ctx, in, unsignedUnlessSeekable(r))
 	return err
+}
+
+// unsignedUnlessSeekable sends a body that cannot be rewound with an unsigned payload: over plain
+// http the SDK otherwise reads it twice to hash it ("request stream is not seekable"). The length
+// is known, so nothing else changes.
+func unsignedUnlessSeekable(r io.Reader) func(*s3.Options) {
+	return func(o *s3.Options) {
+		if _, ok := r.(io.ReadSeeker); ok {
+			return
+		}
+		o.APIOptions = append(o.APIOptions, v4.SwapComputePayloadSHA256ForUnsignedPayloadMiddleware)
+	}
 }
 
 // Mkdir implements Files.

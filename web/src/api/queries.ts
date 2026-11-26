@@ -261,7 +261,8 @@ export const useProjectFiles = (pid: Arg, dir: Arg) =>
   useKeyed(
     () => keys.projectDir(val(pid), val(dir)),
     () => unwrap(client.GET("/api/projects/{pid}/files", { params: { path: { pid: val(pid) }, query: { dir: val(dir) } } })),
-    { enabled: has(pid) },
+    // Employees write into .project-files/ too: poll while the page is visible (not in the background).
+    { enabled: has(pid), refetchInterval: 15_000 },
   );
 
 /** One memory file with its content; `name` empty = nothing to load (a new file). */
@@ -347,9 +348,10 @@ export const useDeliverableFiles = (id: Arg, version: Arg<number> = 0, enabled: 
 export const useDeliverableComments = (id: Arg) =>
   useKeyed(() => keys.deliverableComments(val(id)), () => unwrap(client.GET("/api/deliverables/{id}/comments", path({ id: val(id) }))), { enabled: has(id) });
 
-export const useSharedFolder = () =>
+export const useSharedFolder = (enabled: Arg<boolean> = true) =>
   useQuery({
     queryKey: keys.sharedFolder,
+    enabled: computed(() => toValue(enabled)),
     queryFn: () => unwrap(client.GET("/api/storage/fs")),
     refetchInterval: (q) => (q.state.data?.volume?.state === "provisioning" || q.state.data?.volume?.state === "deleting" ? 2000 : false),
   });

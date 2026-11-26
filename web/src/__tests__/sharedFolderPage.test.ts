@@ -53,4 +53,12 @@ describe("SharedFolder page", () => {
     expect(w.text()).toContain("不限");
     expect(w.text()).not.toContain("开通共享文件夹");
   });
+
+  it("says what deleting keeps (published deliverables move back) and what it removes", async () => {
+    api(READY);
+    const w = mountPage();
+    await flushPromises();
+    expect(w.text()).toContain("交付物会先移回平台存储");
+    expect(w.text()).toContain("其他文件");
+  });
 });

@@ -20,6 +20,7 @@ export type MemoryBrief = S["MemoryBrief"];
 export type MemoryFileView = S["MemoryFile"];
 export type FileEntry = S["FileEntry"];
 export type ProjectFiles = S["ProjectFiles"];
+export type FsView = S["FsView"];
 export type FilesUploaded = S["FilesUploaded"];
 /** usage: subscription quota per runtime. The openapi does not mark it nullable, but the server
  * sends null until the node reports (and older servers omit it): both mean "no data yet". */

@@ -413,7 +413,11 @@ func (g *Gateway) detach(ctx context.Context, l *link) {
 		delete(g.links, l.node.ID)
 	}
 	g.mu.Unlock()
-	_ = nodeRow(ctx, g.core.Pool, l.node.ID).Update("last_seen_at", gorm.Expr("now()")).Error
+	seen := map[string]any{"last_seen_at": gorm.Expr("now()")}
+	if current {
+		seen["fs_status"] = gorm.Expr("'{}'::jsonb") // an offline node mounts nothing we can count on
+	}
+	_ = nodeRow(ctx, g.core.Pool, l.node.ID).Updates(seen).Error
 	if current && g.handler != nil {
 		g.handler.NodeOffline(ctx, l.node)
 	}
@@ -457,8 +461,9 @@ func (g *Gateway) recordHello(ctx context.Context, nodeID, tokenHash string, hel
 				return err
 			}
 		}
+		// fs_status starts over: the daemon reports its mount again after the welcome.
 		return nodeRow(ctx, tx, nodeID).Updates(map[string]any{"epoch": hello.Epoch, "ack_seq": ackSeq,
-			"last_hello": stored, "isolation": isolation, "last_seen_at": gorm.Expr("now()")}).Error
+			"last_hello": stored, "isolation": isolation, "last_seen_at": gorm.Expr("now()"), "fs_status": gorm.Expr("'{}'::jsonb")}).Error
 	})
 	return ackSeq, err
 }

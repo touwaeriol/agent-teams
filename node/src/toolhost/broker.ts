@@ -29,6 +29,8 @@ export interface BrokerDeps {
   attachments?: () => AttachmentOptions;
   /** The shared folder's attachments/ for a working directory linked to it (null: the local .attachments). */
   attachmentDir?: (absCwd: string) => string | null;
+  /** The shared-folder directories of a working directory linked to it (publish_file may read there). */
+  sharedDirs?: (absCwd: string) => string[];
   /** A .attachments folder was written in this working directory (swept for old copies). */
   noteAttachmentDir?: (absCwd: string) => void;
 }
@@ -77,7 +79,7 @@ export class ToolBroker {
     let upload: PreparedUpload | undefined;
     if (UPLOAD_TOOLS.has(req.tool)) {
       try {
-        upload = await prepareUpload(req.cwd ?? "", req.args.path);
+        upload = await prepareUpload(req.cwd ?? "", req.args.path, req.cwd ? (this.deps.sharedDirs?.(req.cwd) ?? []) : []);
       } catch (err) {
         return { content: [{ type: "text", text: `${req.tool}: ${(err as Error).message}` }], isError: true };
       }

@@ -280,11 +280,13 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/projects/{pid}/files?dir=` | → `ProjectFiles {available, reason?, dir, entries: FileEntry[]}`，文件夹在前、再按名字；`FileEntry = {name, path, dir, size, content_type?, mod_time}`。项目目录还不存在时是空列表 |
-| POST | `/api/projects/{pid}/files` | `multipart/form-data`：一个或多个 `file` 部分；可选 `dir`；可选 `path`（要么不给、用文件名，要么每个文件一个、按顺序，可带子目录，相对 `dir`）→ 201 `{files: FileEntry[]}`，同名替换。请求体上限 1 GiB，网页按批发送 |
+| POST | `/api/projects/{pid}/files` | `multipart/form-data`：一个或多个 `file` 部分；可选 `dir`；可选 `path`（要么不给、用文件名，要么每个文件一个、按顺序，可带子目录，相对 `dir`）→ 201 `{files: FileEntry[]}`，同名替换。请求体上限 1 GiB，网页按批发送。一次上传不是原子的：中途某个文件写失败时，它之前的文件已经写进去了、不会撤回，错误码是 `upload_partial`，`detail` 里列出失败的路径和已经写入的路径（第一个文件就失败时是原来的错误） |
 | GET | `/api/projects/{pid}/files/download?path=` | 文件内容：总是 `Content-Disposition: attachment`、`nosniff`、`Content-Security-Policy: default-src 'none'; sandbox`、`Cache-Control: private, no-store`；HTML、SVG、XML、JS 以 `application/octet-stream` 发送。没有 404 |
-| DELETE | `/api/projects/{pid}/files?path=` | 204：删一个文件，或一个文件夹连同里面的一切。没有 404 |
-| POST | `/api/projects/{pid}/files/folders` | `{path}` → 204：建文件夹（含上级） |
-| POST | `/api/attachments/{id}/save-shared` | `{path, overwrite?}` → `FileEntry`：把附件存进项目文件；同名 409 `file_exists`（除非 overwrite），附件过期 410 |
+| DELETE | `/api/projects/{pid}/files?path=` | 204：删一个文件，或一个文件夹连同里面的一切。没有 404；`path` 是项目目录本身（`/`、`//`）422 |
+| POST | `/api/projects/{pid}/files/folders` | `{path}` → 204：建文件夹（含上级）；项目目录本身 422 |
+| POST | `/api/attachments/{id}/save-shared` | `{path, overwrite?}` → `FileEntry`：把附件存进项目文件；同名 409 `file_exists`（除非 overwrite），附件过期 410，项目目录本身 422 |
+
+删项目时（`DELETE /api/projects/{pid}`），行删掉提交之后再尽力删卷里的 `projects/<pid>/`（含 `.deliverables/`），失败只记日志。
 
 ### 3.5.2 分片直传（附件，#58）
 

@@ -360,7 +360,7 @@ export async function planDelivery(runtime: AttachmentRuntime, outcomes: Attachm
   if (!lines.length) return { note: "", images, links };
   const note =
     `\n\n[附件]\n${lines.join("\n")}\n` +
-    "用 read_attachment(id) 可以重新下载；assign_task、send_message 等工具带 attachments=[id] 可以把附件转给别人；save_attachment(id, path) 可以存为共享文件。";
+    "用 read_attachment(id) 可以重新下载；assign_task、send_message 等工具带 attachments=[id] 可以把附件转给别人；开了共享文件夹时附件已经在 .attachments/（随项目保存），要整理成项目文件就复制到 .project-files/。";
   return { note, images, links };
 }
 

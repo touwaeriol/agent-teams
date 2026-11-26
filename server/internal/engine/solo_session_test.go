@@ -80,7 +80,7 @@ func TestSessionMultiRepo(t *testing.T) {
 	if open.FirstMessage == nil || open.FirstMessage.Text != msg {
 		t.Fatalf("first message %+v", open.FirstMessage)
 	}
-	if prot := open.Env["AT_PROTECTED_REFS"]; strings.Contains(prot, "session/") || !strings.Contains(prot, "develop") {
+	if prot := open.Env["AT_PROTECTED_REFS"]; strings.Contains(prot, "session/") || !strings.Contains(prot, "develop") || !strings.Contains(prot, "main") { // the upstream default stays protected
 		t.Fatalf("protected refs %q", prot)
 	}
 	emp.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(emp.session), MsgID: open.FirstMessage.MsgID})

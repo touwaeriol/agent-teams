@@ -221,6 +221,9 @@ func (e *Engine) startEntry(ctx context.Context, t core.Thread, repo ghops.Repo,
 // changes may be missing from the new one (lostMergesNote).
 func (e *Engine) recreateThreadBranch(ctx context.Context, t core.Thread, repo ghops.Repo) (string, error) {
 	base := e.orch.BaseFor(ctx, e.core.Pool, t, repo)
+	if base == "" {
+		return "", fmt.Errorf("讨论串分支 %s 不存在：%w", t.Branch, ErrBaseUnknown)
+	}
 	e.log.Warn("thread branch missing, recreating it", "thread_id", t.ID, "repo", repo.Slug, "branch", t.Branch, "base", base)
 	sha, err := e.gh.EnsureBranch(ctx, repo, t.Branch, base)
 	if err != nil {

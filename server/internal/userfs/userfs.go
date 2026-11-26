@@ -117,6 +117,22 @@ func (c Config) adminHost() string {
 	return u.Host
 }
 
+// adminTLS are the TLS settings of AdminURL (sslmode, default disable, and the certificate files
+// when given): the console's own metadata URLs connect like AdminURL does.
+func (c Config) adminTLS() url.Values {
+	q := url.Values{"sslmode": {"disable"}}
+	u, err := url.Parse(c.AdminURL)
+	if err != nil {
+		return q
+	}
+	for _, k := range []string{"sslmode", "sslrootcert", "sslcert", "sslkey"} {
+		if v := u.Query().Get(k); v != "" {
+			q.Set(k, v)
+		}
+	}
+	return q
+}
+
 // ClientAssets are the client downloads with URLs filled in.
 func (c Config) ClientAssets() []Asset {
 	out := make([]Asset, 0, len(c.Assets))
@@ -166,8 +182,15 @@ func NewSecrets() Secrets {
 
 // MetaURL is the metadata URL without password for host (META_PASSWORD carries it).
 func MetaURL(role, host, database, sslmode string) string {
+	return metaURL(role, host, database, url.Values{"sslmode": {sslmode}})
+}
+
+// metaURL is MetaURL with the connection settings in tls (sslmode and certificate files).
+func metaURL(role, host, database string, tls url.Values) string {
 	q := url.Values{}
-	q.Set("sslmode", sslmode)
+	for k, v := range tls {
+		q[k] = v
+	}
 	q.Set("search_path", role)
 	return (&url.URL{Scheme: "postgres", User: url.User(role), Host: host, Path: "/" + database, RawQuery: q.Encode()}).String()
 }

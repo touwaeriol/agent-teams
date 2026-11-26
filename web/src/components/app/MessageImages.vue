@@ -10,7 +10,7 @@ import { Download, FolderInput } from "lucide-vue-next";
 import type { AttachmentRef } from "@/api/views";
 import { attachmentState } from "@/lib/attachmentActions";
 import { attachKind, attachmentDownloadUrl, attachmentUrl, isImageType, typeLabel } from "@/lib/images";
-import { formatSize } from "@/lib/projectFiles";
+import { formatBytes } from "@/lib/bytes";
 import { cn } from "@/lib/utils";
 import FileIcon from "./FileIcon.vue";
 import ImagePreview from "./ImagePreview.vue";
@@ -70,7 +70,7 @@ function save(x: Item) {
         <span class="truncate font-medium">{{ x.name }}</span>
         <span class="truncate text-[11px] text-muted-foreground">
           <template v-if="isExpired(x)"><span class="text-destructive">已过期</span> · 超过保留期已删除</template>
-          <template v-else>{{ typeLabel(x.content_type, x.name) }}<template v-if="x.size"> · {{ formatSize(x.size) }}</template></template>
+          <template v-else>{{ typeLabel(x.content_type, x.name) }}<template v-if="x.size"> · {{ formatBytes(x.size) }}</template></template>
         </span>
       </span>
       <template v-if="!isExpired(x)">

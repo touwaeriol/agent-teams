@@ -132,6 +132,11 @@ p, user, /api/projects/:pid/deliverables, GET
 p, user, /api/projects/:pid/deliverables, POST
 p, user, /api/projects/:pid/deliverables/request, POST
 p, user, /api/projects/:pid/events, GET
+p, user, /api/projects/:pid/files, DELETE
+p, user, /api/projects/:pid/files, GET
+p, user, /api/projects/:pid/files, POST
+p, user, /api/projects/:pid/files/download, GET
+p, user, /api/projects/:pid/files/folders, POST
 p, user, /api/projects/:pid/library, POST
 p, user, /api/projects/:pid/memory, GET
 p, user, /api/projects/:pid/memory/:name, GET
@@ -147,11 +152,6 @@ p, user, /api/projects/:pid/search, GET
 p, user, /api/projects/:pid/server-audit, GET
 p, user, /api/projects/:pid/servers, GET
 p, user, /api/projects/:pid/servers, PUT
-p, user, /api/projects/:pid/files, DELETE
-p, user, /api/projects/:pid/files, GET
-p, user, /api/projects/:pid/files, POST
-p, user, /api/projects/:pid/files/download, GET
-p, user, /api/projects/:pid/files/folders, POST
 p, user, /api/projects/:pid/threads, GET
 p, user, /api/projects/:pid/threads, POST
 p, user, /api/projects/:pid/usage, GET
@@ -184,6 +184,10 @@ p, user, /api/sessions/:pid/repos, PUT
 p, user, /api/projects/:pid/session-controls, GET
 p, user, /api/projects/:pid/session-controls, PUT
 p, user, /api/session-options, GET
+p, user, /api/storage/fs, GET
+p, user, /api/storage/fs, POST
+p, user, /api/storage/fs, DELETE
+p, user, /api/storage/fs/docker-volume, POST
 p, user, /api/threads/:tid, DELETE
 p, user, /api/threads/:tid, GET
 p, user, /api/threads/:tid, PATCH
@@ -244,7 +248,3 @@ p, admin, /api/admin/users/:id/password-reset, POST
 p, admin, /api/admin/voice, GET
 p, admin, /api/admin/voice, PUT
 p, admin, /api/admin/voice/test, POST
-p, user, /api/storage/fs, GET
-p, user, /api/storage/fs, POST
-p, user, /api/storage/fs, DELETE
-p, user, /api/storage/fs/docker-volume, POST

@@ -53,7 +53,7 @@ type FsDockerVolume struct {
 type fsDockerOutput struct{ Body FsDockerVolume }
 
 // FsDockerMount is where the node image mounts the folder.
-const FsDockerMount = "/home/agent/fs"
+const FsDockerMount = "/home/agent/.fs"
 
 func (a *API) registerUserFs(api huma.API) {
 	t := "storage"
@@ -87,9 +87,6 @@ func (a *API) getUserFs(ctx context.Context, _ *struct{}) (*fsOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	if a.e.FS == nil {
-		return &fsOutput{Body: FsView{ProjectDir: userfs.ProjectDir("{project_id}"), SharedDir: userfs.SharedDir}}, nil
-	}
 	v, err := a.fsView(ctx, u.ID)
 	return &fsOutput{Body: v}, err
 }
@@ -100,6 +97,9 @@ func fsErr(err error) error {
 	}
 	if userfs.IsNotFound(err) {
 		return httpapi.Fail(404, "not_found", err.Error())
+	}
+	if errors.Is(err, userfs.ErrBusy) {
+		return httpapi.Fail(409, "fs_busy", err.Error())
 	}
 	return err
 }
