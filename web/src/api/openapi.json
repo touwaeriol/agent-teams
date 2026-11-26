@@ -3874,6 +3874,32 @@
         ],
         "type": "object"
       },
+      "NodeFsView": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "mode": {
+            "description": "daemon: the node mounts it itself; external: mounted for it (Docker volume plugin)",
+            "enum": [
+              "daemon",
+              "external"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "description": "mounting, mounted, unmounted, error; empty before the first report",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "state",
+          "error"
+        ],
+        "type": "object"
+      },
       "NodeLog": {
         "additionalProperties": false,
         "properties": {
@@ -4280,6 +4306,10 @@
           "self_update": {
             "description": "hello.features has self_update (the last hello while offline)",
             "type": "boolean"
+          },
+          "shared_folder": {
+            "$ref": "#/components/schemas/NodeFsView",
+            "description": "Shared-folder support and mount state; absent when the daemon cannot use it"
           },
           "since": {
             "format": "date-time",

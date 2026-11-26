@@ -141,6 +141,13 @@ export const servers = {
     unwrap(client.PUT("/api/projects/{pid}/servers", { params: { path: { pid } }, body: { servers: list } })) as Promise<ProjectServersView>,
 };
 
+/** The user's JuiceFS shared folder (one volume per user). */
+export const sharedFolder = {
+  enable: () => unwrap(client.POST("/api/storage/fs")),
+  remove: (confirm: string) => unwrap(client.DELETE("/api/storage/fs", { body: { confirm } })),
+  dockerVolume: () => unwrap(client.POST("/api/storage/fs/docker-volume")),
+};
+
 export const roles = {
   save: (list: S["Role"][]) => unwrap(client.PUT("/api/roles", { body: { roles: list } })),
   saveYaml: (yaml: string) => unwrap(client.PUT("/api/roles/yaml", { body: { yaml } })),

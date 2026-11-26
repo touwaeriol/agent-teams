@@ -37,6 +37,17 @@ func readFsStatus(ctx context.Context, q core.DB, nodeID string) (nodeFsStatus, 
 	return st, json.Unmarshal(raw, &st)
 }
 
+// UseSharedFolder wires the shared-folder service (nil: none): volume changes reach the user's
+// nodes and session.open carries the folders.
+func (e *Engine) UseSharedFolder(s *userfs.Service) {
+	if e.FS = s; s == nil {
+		e.Orch.SharedFolder = nil
+		return
+	}
+	s.OnChange = e.pushFS
+	e.Orch.SharedFolder = e.sharedFolder
+}
+
 // sharedFolder is session.open fs: the project's folder and the user's shared folder, when the
 // user has a ready volume and the node reports it mounted.
 func (e *Engine) sharedFolder(ctx context.Context, q core.DB, userID, nodeID, projectID string) (*protocol.SessionOpenFs, error) {

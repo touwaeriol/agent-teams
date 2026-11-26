@@ -68,6 +68,9 @@ func (a *API) registerUserFs(api huma.API) {
 
 func (a *API) fsView(ctx context.Context, userID string) (FsView, error) {
 	v := FsView{Configured: a.e.FS.Enabled(), ProjectDir: userfs.ProjectDir("{project_id}"), SharedDir: userfs.SharedDir}
+	if a.e.FS == nil {
+		return v, nil
+	}
 	vol, err := a.e.FS.Get(ctx, userID)
 	if userfs.IsNotFound(err) {
 		return v, nil

@@ -3739,6 +3739,16 @@ export interface components {
             /** Format: int64 */
             slots: number;
         };
+        NodeFsView: {
+            error: string;
+            /**
+             * @description daemon: the node mounts it itself; external: mounted for it (Docker volume plugin)
+             * @enum {string}
+             */
+            mode: "daemon" | "external";
+            /** @description mounting, mounted, unmounted, error; empty before the first report */
+            state: string;
+        };
         NodeLog: {
             /** Format: date-time */
             created_at: string;
@@ -3877,6 +3887,8 @@ export interface components {
             };
             /** @description hello.features has self_update (the last hello while offline) */
             self_update: boolean;
+            /** @description Shared-folder support and mount state; absent when the daemon cannot use it */
+            shared_folder?: components["schemas"]["NodeFsView"];
             /** Format: date-time */
             since: string | null;
             update_available: boolean;

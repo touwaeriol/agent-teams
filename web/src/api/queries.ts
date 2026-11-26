@@ -72,6 +72,7 @@ export const keys = {
   gitRepos: ["git-repos"] as const,
   gitCredentials: ["git-credentials"] as const,
   servers: ["servers"] as const,
+  sharedFolder: ["shared-folder"] as const,
   serverAudit: (id: string, f: AuditFilter = {}) => ["servers", id, "audit", f] as const,
   projectServers: (pid: string) => ["p", pid, "servers"] as const,
   projectServerAudit: (pid: string, f: AuditFilter = {}) => ["p", pid, "server-audit", f] as const,
@@ -339,6 +340,13 @@ export const useDeliverableFiles = (id: Arg, version: Arg<number> = 0, enabled: 
 
 export const useDeliverableComments = (id: Arg) =>
   useKeyed(() => keys.deliverableComments(val(id)), () => unwrap(client.GET("/api/deliverables/{id}/comments", path({ id: val(id) }))), { enabled: has(id) });
+
+export const useSharedFolder = () =>
+  useQuery({
+    queryKey: keys.sharedFolder,
+    queryFn: () => unwrap(client.GET("/api/storage/fs")),
+    refetchInterval: (q) => (q.state.data?.volume?.state === "provisioning" || q.state.data?.volume?.state === "deleting" ? 2000 : false),
+  });
 
 export const useServers = () => useQuery({ queryKey: keys.servers, queryFn: () => list(client.GET("/api/servers")) as Promise<ServerView[]> });
 

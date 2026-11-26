@@ -56,6 +56,29 @@ type NodeView struct {
 	// CLIs are the runtime CLIs as the daemon last reported them (empty for an older daemon).
 	CLIs    []store.NodeRuntime        `json:"clis" doc:"Install and login state of each runtime CLI as last reported (node.runtimes), ordered by runtime; empty when the daemon never reported"`
 	Upgrade *platform.NodeUpgradeState `json:"upgrade,omitempty" doc:"Last update asked of the node since the console started"`
+	// SharedFolder: the daemon can use the user's shared folder (fs_mount / fs_external) and how it last reported it.
+	SharedFolder *NodeFsView `json:"shared_folder,omitempty" doc:"Shared-folder support and mount state; absent when the daemon cannot use it"`
+}
+
+// NodeFsView is a node's shared-folder state (fs.status).
+type NodeFsView struct {
+	Mode  string `json:"mode" enum:"daemon,external" doc:"daemon: the node mounts it itself; external: mounted for it (Docker volume plugin)"`
+	State string `json:"state" doc:"mounting, mounted, unmounted, error; empty before the first report"`
+	Error string `json:"error"`
+}
+
+func nodeFs(features []string, raw json.RawMessage) *NodeFsView {
+	v := &NodeFsView{Mode: "daemon"}
+	switch {
+	case slices.Contains(features, "fs_external"):
+		v.Mode = "external"
+	case !slices.Contains(features, "fs_mount"):
+		return nil
+	}
+	var st struct{ State, Error string }
+	_ = json.Unmarshal(raw, &st)
+	v.State, v.Error = st.State, st.Error
+	return v
 }
 
 // lastHello is the part of the stored hello used while a node is offline.
@@ -84,6 +107,7 @@ func (s *Server) nodeView(n store.Node, latest string, clis []store.NodeRuntime)
 	v.UsageSupported = slices.Contains(features, "usage")
 	v.SelfUpdate = slices.Contains(features, "self_update")
 	v.RuntimeStatus = slices.Contains(features, "runtime_status")
+	v.SharedFolder = nodeFs(features, n.FsStatus)
 	v.CLIs = withReady(clis, time.Now())
 	v.LatestVersion, v.Upgrade = latest, live.Upgrade
 	v.UpdateAvailable = live.Online && latest != "" && v.Version != latest

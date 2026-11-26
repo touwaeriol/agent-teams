@@ -21,13 +21,14 @@ type Node struct {
 	Labels            []string `gorm:"serializer:jsonb"`
 	LastHello         json.RawMessage
 	LastSeenAt        *time.Time
+	FsStatus          json.RawMessage `gorm:"->"` // shared-folder mount state the daemon last reported (fs.status)
 }
 
 // TableName maps Node to at_nodes.
 func (Node) TableName() string { return "at_nodes" }
 
 const nodeCols = `id, user_id, name, created_at, max_active_sessions, park_after_s, isolated, isolation, labels,
-	last_hello, last_seen_at`
+	last_hello, last_seen_at, fs_status`
 
 func (s *Store) nodes(ctx context.Context) *gorm.DB { return s.g(ctx).Model(&Node{}).Select(nodeCols) }
 

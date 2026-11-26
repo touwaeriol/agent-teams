@@ -122,10 +122,7 @@ func New(d Deps) (*Engine, error) {
 	e.Orch.Rules = e.Approvals.Rules
 	e.Orch.ChatAnswers = e.Tools.NoteChatReply
 	e.Tools.Reviews = e.Approvals
-	if e.FS = d.FS; e.FS != nil {
-		e.FS.OnChange = e.pushFS
-		e.Orch.SharedFolder = e.sharedFolder
-	}
+	e.UseSharedFolder(d.FS)
 	gw.SetHandler(&router{e: e})
 	return e, nil
 }
