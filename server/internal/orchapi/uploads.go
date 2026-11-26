@@ -2,11 +2,8 @@ package orchapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -18,7 +15,6 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
-	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -34,20 +30,17 @@ const (
 
 // UploadCreate is POST /api/projects/{pid}/uploads.
 type UploadCreate struct {
-	Kind string `json:"kind" enum:"attachment,shared" doc:"attachment: a file for a message (not counted in the project's quota); shared: a shared file"`
-	Name string `json:"name" minLength:"1" maxLength:"300" doc:"File name (an attachment shows it; a shared file uses it as its path when path is not given)"`
+	Kind string `json:"kind" enum:"attachment" doc:"attachment: a file for a message"`
+	Name string `json:"name" minLength:"1" maxLength:"300" doc:"File name, shown with the attachment"`
 	Size int64  `json:"size" minimum:"0" doc:"Exact size in bytes (at most 200 MB: more answers 413 file_too_large); the object must have it at completion"`
-	Path string `json:"path,omitempty" maxLength:"255" doc:"Shared files: the target path (default: name)"`
-	// Overwrite is a pointer so that "not given" keeps the page's old behaviour (overwrite).
-	Overwrite *bool `json:"overwrite,omitempty" doc:"Shared files: replace a file at the path (default true); false answers 409 file_exists"`
 }
 
 // UploadSession is an upload in flight: PUT each part (part_size bytes, the last one shorter) to
 // the URLs of POST …/parts, then POST …/complete with the ETags.
 type UploadSession struct {
-	UploadID  string    `json:"upload_id" doc:"img_… for an attachment (also its id), up_… for a shared file"`
-	Kind      string    `json:"kind" enum:"attachment,shared"`
-	ID        string    `json:"id" doc:"The attachment id, or the shared file's object id"`
+	UploadID  string    `json:"upload_id" doc:"img_…, also the attachment's id"`
+	Kind      string    `json:"kind" enum:"attachment"`
+	ID        string    `json:"id" doc:"The attachment id"`
 	PartSize  int64     `json:"part_size" doc:"Bytes per part (16 MB)"`
 	Parts     int32     `json:"parts" doc:"Number of parts"`
 	ExpiresAt time.Time `json:"expires_at" doc:"Unfinished uploads are dropped after this"`
@@ -92,9 +85,8 @@ type UploadComplete struct {
 
 // UploadDone is a finished upload.
 type UploadDone struct {
-	Kind       string              `json:"kind" enum:"attachment,shared"`
-	Attachment *AttachmentView     `json:"attachment,omitempty"`
-	SharedFile *UploadedSharedFile `json:"shared_file,omitempty"`
+	Kind       string          `json:"kind" enum:"attachment"`
+	Attachment *AttachmentView `json:"attachment,omitempty"`
 }
 
 type uploadCompleteInput struct {
@@ -113,12 +105,12 @@ type uploadAbortInput struct {
 func (a *API) registerUploads(api huma.API, r gin.IRoutes) {
 	t := "uploads"
 	huma.Register(api, op("create-upload", "POST", "/api/projects/{pid}/uploads", t, status(201),
-		summary("Start a presigned upload of an attachment (any type, at most 200 MB) or a shared file (at most 200 MB, project quota 5 GB)")),
+		summary("Start a presigned upload of an attachment (any type, at most 200 MB)")),
 		a.createUpload)
 	huma.Register(api, op("upload-part-urls", "POST", "/api/projects/{pid}/uploads/{upload_id}/parts", t,
 		summary("Presigned PUT URLs for parts of an upload (1 hour)")), a.uploadParts)
 	huma.Register(api, op("complete-upload", "POST", "/api/projects/{pid}/uploads/{upload_id}/complete", t,
-		summary("Finish an upload: the object's size is checked, an attachment's type sniffed, a shared file put at its path")),
+		summary("Finish an upload: the object's size is checked and its type sniffed")),
 		a.completeUpload)
 	huma.Register(api, op("abort-upload", "DELETE", "/api/projects/{pid}/uploads/{upload_id}", t, status(204),
 		summary("Cancel an upload in flight")), a.abortUpload)
@@ -135,30 +127,26 @@ func (a *API) registerUploads(api huma.API, r gin.IRoutes) {
 		summary("Cancel an upload without a project")), a.abortUserUpload)
 	if a.e == nil {
 		r.GET("/nodes/attachments/:id/url", offline)
-		r.POST("/nodes/uploads", offline)
 		return
 	}
 	r.GET("/nodes/attachments/:id/url", a.nodeAttachmentURL)
-	r.POST("/nodes/uploads", a.nodeUpload)
 }
 
-// uploadFail maps the upload errors of both kinds.
+// uploadFail maps the upload errors.
 func uploadFail(err error) error {
 	switch {
-	case errors.Is(err, core.ErrUploadIncomplete), errors.Is(err, sharedfiles.ErrIncomplete):
+	case errors.Is(err, core.ErrUploadIncomplete):
 		return httpapi.Fail(http.StatusConflict, "upload_incomplete", err.Error())
-	case errors.Is(err, core.ErrUploadSize), errors.Is(err, sharedfiles.ErrSizeMismatch):
+	case errors.Is(err, core.ErrUploadSize):
 		return httpapi.Fail(http.StatusUnprocessableEntity, "size_mismatch", err.Error())
-	case errors.Is(err, sharedfiles.ErrChecksum):
-		return httpapi.Fail(http.StatusUnprocessableEntity, "checksum_mismatch", err.Error())
 	case errors.Is(err, core.ErrAttachmentTooLarge):
 		return httpapi.Fail(http.StatusRequestEntityTooLarge, "file_too_large", err.Error())
-	case errors.Is(err, sharedfiles.ErrExists):
-		return httpapi.Fail(http.StatusConflict, "file_exists", "这个路径已经有共享文件了；要覆盖请选择覆盖")
-	case errors.Is(err, sharedfiles.ErrUploadNotFound), errors.Is(err, core.ErrNotFound):
+	case errors.Is(err, core.ErrNotFound):
 		return httpapi.Fail(http.StatusNotFound, "not_found", "没有这个上传（已完成、已取消或超过 24 小时已清理），请重新上传")
+	case errors.Is(err, blobstore.ErrNotConfigured):
+		return httpapi.Fail(http.StatusServiceUnavailable, "storage_unavailable", "文件存储未配置")
 	}
-	return fail(sharedFail(err), "没有这个上传")
+	return fail(err, "没有这个上传")
 }
 
 func (a *API) createUpload(ctx context.Context, in *uploadCreateInput) (*uploadCreateOutput, error) {
@@ -172,36 +160,7 @@ func (a *API) createUpload(ctx context.Context, in *uploadCreateInput) (*uploadC
 	}
 	out := UploadSession{Kind: in.Body.Kind, PartSize: blobstore.PartSize, Parts: blobstore.PartCount(in.Body.Size),
 		ExpiresAt: time.Now().Add(uploadKeep)}
-	if in.Body.Kind == "attachment" {
-		return a.beginAttachment(ctx, p.ID, u.ID, name, in.Body.Size, out)
-	}
-	target := in.Body.Path
-	if target == "" {
-		target = name
-	}
-	overwrite := in.Body.Overwrite == nil || *in.Body.Overwrite
-	up, err := a.beginShared(ctx, u.ID, p.ID, sharedfiles.BeginRequest{Path: target, Size: in.Body.Size,
-		Overwrite: overwrite, Multipart: true, By: sharedfiles.Uploader{Name: sharedfiles.UserName}})
-	if err != nil {
-		return nil, uploadFail(err)
-	}
-	out.UploadID, out.ID = up.ID, up.ObjectID
-	return &uploadCreateOutput{Body: out}, nil
-}
-
-// beginShared opens a shared-file upload of a project owned by ownerID, within the owner's
-// limit on uploads in flight (core.CheckUploadsInFlight).
-func (a *API) beginShared(ctx context.Context, ownerID, projectID string, r sharedfiles.BeginRequest) (sharedfiles.Upload, error) {
-	var up sharedfiles.Upload
-	err := a.e.Core.InTx(ctx, func(tx *core.Tx) error {
-		if err := core.CheckUploadsInFlight(ctx, tx, ownerID, r.Size); err != nil {
-			return err
-		}
-		var err error
-		up, err = sharedfiles.BeginUpload(ctx, tx, a.e.Core.Blobs, projectID, r)
-		return err
-	})
-	return up, err
+	return a.beginAttachment(ctx, p.ID, u.ID, name, in.Body.Size, out)
 }
 
 func (a *API) beginAttachment(ctx context.Context, pid, uid, name string, size int64, out UploadSession) (*uploadCreateOutput, error) {
@@ -213,27 +172,16 @@ func (a *API) beginAttachment(ctx context.Context, pid, uid, name string, size i
 	return &uploadCreateOutput{Body: out}, nil
 }
 
-// inFlight is an upload's object, its S3 upload id and its declared size; owner.ProjectID "" = an
-// attachment without a project (no shared-file uploads there).
+// inFlight is an attachment upload's object, its S3 upload id and its declared size.
 func (a *API) inFlight(ctx context.Context, owner core.AttachmentOwner, id string) (key, uploadID string, size int64, err error) {
-	if core.IsAttachmentUpload(id) {
-		att, upID, err := core.UploadingAttachment(ctx, a.e.Core.Pool, owner, id)
-		if err != nil {
-			return "", "", 0, err
-		}
-		return *att.StorageKey, upID, int64(att.Size), nil
-	}
-	if owner.ProjectID == "" {
+	if !core.IsAttachmentUpload(id) {
 		return "", "", 0, core.ErrNotFound
 	}
-	up, err := sharedfiles.GetUpload(ctx, a.e.Core.Pool, owner.ProjectID, id)
+	att, upID, err := core.UploadingAttachment(ctx, a.e.Core.Pool, owner, id)
 	if err != nil {
 		return "", "", 0, err
 	}
-	if up.S3UploadID == nil {
-		return "", "", 0, sharedfiles.ErrUploadNotFound // a node's single PUT
-	}
-	return up.StorageKey, *up.S3UploadID, up.Size, nil
+	return *att.StorageKey, upID, int64(att.Size), nil
 }
 
 func (a *API) uploadParts(ctx context.Context, in *uploadPartsInput) (*uploadPartsOutput, error) {
@@ -270,27 +218,7 @@ func (a *API) completeUpload(ctx context.Context, in *uploadCompleteInput) (*upl
 	if err != nil {
 		return nil, err
 	}
-	if core.IsAttachmentUpload(in.UploadID) {
-		return a.completeAttachment(ctx, core.OwnerOfProject(p.ID), in.UploadID, in.Body.Parts)
-	}
-	var done UploadedSharedFile
-	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error {
-		f, overwritten, err := sharedfiles.FinalizeUpload(ctx, tx, a.e.Core.Blobs, p.ID, in.UploadID,
-			sharedfiles.FinalizeOptions{Parts: in.Body.Parts})
-		if err != nil {
-			return err
-		}
-		done = UploadedSharedFile{SharedFile: f, Overwritten: overwritten}
-		return tx.EmitSharedFile(ctx, p.ID, sharedfiles.UserName, "write", f.Path)
-	})
-	if errors.Is(err, sharedfiles.ErrExists) || errors.Is(err, sharedfiles.ErrQuota) || errors.Is(err, sharedfiles.ErrInvalidPath) {
-		// Refused for good: cancel it now, so it does not hold the quota for a day.
-		_ = sharedfiles.AbortUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, p.ID, in.UploadID)
-	}
-	if err != nil {
-		return nil, uploadFail(err)
-	}
-	return &uploadCompleteOutput{Body: UploadDone{Kind: "shared", SharedFile: &done}}, nil
+	return a.completeAttachment(ctx, core.OwnerOfProject(p.ID), in.UploadID, in.Body.Parts)
 }
 
 func (a *API) completeAttachment(ctx context.Context, owner core.AttachmentOwner, id string, parts []blobstore.Part) (*uploadCompleteOutput, error) {
@@ -307,12 +235,10 @@ func (a *API) abortUpload(ctx context.Context, in *uploadAbortInput) (*struct{},
 	if err != nil {
 		return nil, err
 	}
-	if core.IsAttachmentUpload(in.UploadID) {
-		err = core.AbortAttachmentUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, core.OwnerOfProject(p.ID), in.UploadID)
-	} else {
-		err = sharedfiles.AbortUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, p.ID, in.UploadID)
+	if !core.IsAttachmentUpload(in.UploadID) {
+		return nil, uploadFail(core.ErrNotFound)
 	}
-	return nil, uploadFail(err)
+	return nil, uploadFail(core.AbortAttachmentUpload(ctx, a.e.Core.Pool, a.e.Core.Blobs, core.OwnerOfProject(p.ID), in.UploadID))
 }
 
 type userUploadCreateInput struct {
@@ -339,7 +265,7 @@ func (a *API) createUserUpload(ctx context.Context, in *userUploadCreateInput) (
 		return nil, err
 	}
 	if in.Body.Kind != "attachment" {
-		return nil, httpapi.Invalid("kind", "没有项目时只能上传附件（kind=attachment）；共享文件要传到项目里")
+		return nil, httpapi.Invalid("kind", "只能上传附件（kind=attachment）")
 	}
 	name := uploadName(in.Body.Name)
 	if name == "" || name == "." || name == "/" {
@@ -494,95 +420,4 @@ func (a *API) nodeAttachmentURL(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, out)
-}
-
-// NodeUploadRequest is POST /nodes/uploads (design §4.3): a daemon asks for a presigned PUT before
-// it calls write_shared_file with upload: {upload_id}.
-// The daemon (node/src/toolhost/transfer.ts UploadRequest) sends the target shared path as name;
-// path is accepted as well (name wins when both are given, design §4.3). call_id and content_type are informative
-// (the type comes from the path).
-type NodeUploadRequest struct {
-	SessionID   string `json:"session_id"`
-	CallID      string `json:"call_id,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Path        string `json:"path,omitempty"`
-	Size        int64  `json:"size"`
-	SHA256      string `json:"sha256"`
-	ContentType string `json:"content_type,omitempty"`
-}
-
-// NodeUpload is the answer: PUT the file to url with exactly these headers before expires_at.
-type NodeUpload struct {
-	UploadID  string            `json:"upload_id"`
-	URL       string            `json:"url"`
-	Headers   map[string]string `json:"headers"`
-	ExpiresAt time.Time         `json:"expires_at"`
-}
-
-func validSHA256(s string) bool {
-	if len(s) != 64 {
-		return false
-	}
-	for _, c := range s {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-func (a *API) nodeUpload(c *gin.Context) {
-	ctx := c.Request.Context()
-	node, ok := a.nodeAuth(c)
-	if !ok {
-		return
-	}
-	var in NodeUploadRequest
-	if err := json.NewDecoder(io.LimitReader(c.Request.Body, 64<<10)).Decode(&in); err != nil {
-		nodeError(c, http.StatusBadRequest, "bad_request", "请求不是合法的 JSON")
-		return
-	}
-	if in.Name != "" {
-		in.Path = in.Name
-	}
-	if in.Path == "" {
-		nodeError(c, http.StatusUnprocessableEntity, "validation", "缺少目标路径（name）")
-		return
-	}
-	in.SHA256 = strings.ToLower(in.SHA256)
-	if !validSHA256(in.SHA256) {
-		nodeError(c, http.StatusUnprocessableEntity, "validation", "sha256 要是 64 位十六进制")
-		return
-	}
-	sc, err := core.SessionContextOf(ctx, a.e.Core.Pool, in.SessionID)
-	if err != nil || sc.Session.NodeID == nil || *sc.Session.NodeID != node.ID || sc.OwnerID != node.UserID || sc.Session.State == "closed" {
-		// Not 404: the daemon reads 404 as "an older console without this route" and falls back.
-		nodeError(c, http.StatusConflict, "session_not_on_node", "这个会话不在这个节点上（可能已经关闭或换了节点），不能申请上传")
-		return
-	}
-	emp := sc.Employee
-	up, err := a.beginShared(ctx, sc.OwnerID, emp.ProjectID, sharedfiles.BeginRequest{Path: in.Path, Size: in.Size,
-		SHA256: in.SHA256, Overwrite: true, By: sharedfiles.Uploader{Name: emp.Name, EmployeeID: emp.ID, ThreadID: emp.WorkThreadID()}})
-	if err == nil {
-		var u string
-		var headers map[string]string
-		if u, headers, err = a.e.Core.Blobs.PresignPut(ctx, up.StorageKey, sharedfiles.UploadTTL, up.Size, up.ContentType); err == nil {
-			c.Header("Cache-Control", "no-store")
-			c.JSON(http.StatusCreated, NodeUpload{UploadID: up.ID, URL: u, Headers: headers, ExpiresAt: time.Now().Add(sharedfiles.UploadTTL)})
-			return
-		}
-		// No URL: the upload just begun would hold the project's quota until blobgc expires it.
-		if e := sharedfiles.AbortUpload(context.WithoutCancel(ctx), a.e.Core.Pool, a.e.Core.Blobs, emp.ProjectID, up.ID); e != nil {
-			slog.Warn("drop a node upload without a URL", "upload", up.ID, "err", e)
-		}
-	}
-	var apiErr *httpapi.APIError
-	if errors.As(uploadFail(err), &apiErr) {
-		if apiErr.Status == http.StatusNotFound { // see above: never 404 on this route
-			apiErr.Status, apiErr.Code = http.StatusConflict, "project_not_found"
-		}
-		nodeError(c, apiErr.Status, apiErr.Code, apiErr.Detail)
-		return
-	}
-	nodeError(c, http.StatusInternalServerError, "internal", "internal error")
 }

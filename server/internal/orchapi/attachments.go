@@ -13,11 +13,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/gin-gonic/gin"
 
-	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
-	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 )
 
 // AttachmentBody is POST /api/projects/{pid}/attachments: one image, PDF or text file for a message.
@@ -70,8 +68,8 @@ func (a *API) registerAttachments(api huma.API, r gin.IRoutes) {
 			}
 		}), a.attachmentFile)
 	huma.Register(api, op("save-attachment-shared", "POST", "/api/attachments/{id}/save-shared", t,
-		summary("Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired; 404 for one still uploading or not yet in a project)")),
-		a.saveAttachmentShared)
+		summary("Keep an attachment in its project's files (409 file_exists unless overwrite, 409 folder_unavailable without a shared folder, 410 attachment_expired; 404 for one still uploading or not yet in a project)")),
+		a.saveAttachmentFile)
 	if a.e == nil {
 		r.GET("/nodes/attachments/:id", offline)
 		return
@@ -164,8 +162,8 @@ func (a *API) nodeAttachment(c *gin.Context) {
 
 // SaveSharedBody is POST /api/attachments/{id}/save-shared.
 type SaveSharedBody struct {
-	Path      string `json:"path" minLength:"1" maxLength:"255" doc:"Shared-file path to save it at"`
-	Overwrite bool   `json:"overwrite,omitempty" doc:"Replace a shared file at the path (default false: 409 file_exists)"`
+	Path      string `json:"path" minLength:"1" maxLength:"1024" doc:"Where to save it, relative to the project's folder"`
+	Overwrite bool   `json:"overwrite,omitempty" doc:"Replace a file at the path (default false: 409 file_exists)"`
 }
 
 type saveSharedInput struct {
@@ -173,43 +171,4 @@ type saveSharedInput struct {
 	Body SaveSharedBody
 }
 
-type saveSharedOutput struct{ Body UploadedSharedFile }
-
-// saveAttachmentShared copies an attachment of one of the caller's projects into that project's
-// shared files (the page's "存为共享文件"); like save_attachment, it is a use of the attachment.
-func (a *API) saveAttachmentShared(ctx context.Context, in *saveSharedInput) (*saveSharedOutput, error) {
-	u, err := a.user(ctx)
-	if err != nil {
-		return nil, err
-	}
-	p, err := sharedfiles.CleanPath(in.Body.Path)
-	if err != nil {
-		return nil, sharedFail(err)
-	}
-	att, err := core.AttachmentOfUser(ctx, a.e.Core.Pool, u.ID, in.ID)
-	if err == nil && att.ProjectID == "" {
-		err = core.ErrNotFound // not sent yet: no project to keep it in
-	}
-	if err != nil {
-		return nil, fail(err, "没有这个附件")
-	}
-	// Refused early without copying when the answer is already known; Adopt checks again.
-	if err := sharedfiles.CheckSpace(ctx, a.e.Core.Pool, att.ProjectID, p, int64(att.Size), in.Body.Overwrite); err != nil {
-		return nil, uploadFail(err)
-	}
-	if err := core.TouchAttachments(ctx, a.e.Core.Pool, att.ProjectID, []string{att.ID}, a.e.Core.AttachmentTTL); err != nil {
-		return nil, err
-	}
-	f, overwritten, err := a.e.Core.SaveAttachmentShared(ctx, u.ID, att, p, sharedfiles.Uploader{Name: sharedfiles.UserName}, in.Body.Overwrite)
-	if errors.Is(err, blobstore.ErrNotFound) {
-		// The object went between the check and the copy: the retention just ran out.
-		err = core.ErrAttachmentExpired
-	}
-	if errors.Is(err, core.ErrNotFound) || errors.Is(err, core.ErrAttachmentExpired) {
-		return nil, fail(err, "没有这个附件")
-	}
-	if err != nil {
-		return nil, uploadFail(err)
-	}
-	return &saveSharedOutput{Body: UploadedSharedFile{SharedFile: f, Overwritten: overwritten}}, nil
-}
+type saveSharedOutput struct{ Body FileEntry }

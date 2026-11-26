@@ -60,16 +60,6 @@ func Reserve(ctx context.Context, q store.DB, key string) error {
 	return err
 }
 
-// RedeleteLater queues key for deletion ReserveDelay from now (an earlier queued time is moved
-// back), in q's transaction. For the key of a node's single presigned PUT that was refused or
-// cancelled: the caller deletes the object at once, but the URL stays valid for its TTL
-// (sharedfiles.UploadTTL < ReserveDelay), and a replayed PUT would leave an object no row points at.
-func RedeleteLater(ctx context.Context, q store.DB, key string) error {
-	_, err := store.Exec(ctx, q, `INSERT INTO at_blob_deletions (key, next_at) VALUES ($1, now() + make_interval(secs => $2))
-		ON CONFLICT (key) DO UPDATE SET next_at = GREATEST(at_blob_deletions.next_at, EXCLUDED.next_at)`, key, ReserveDelay.Seconds())
-	return err
-}
-
 // referencedSQL tells whether a row still points at an object key ($1; $2 = its project id).
 const referencedSQL = `SELECT EXISTS (SELECT 1 FROM at_attachments WHERE project_id = $2 AND storage_key = $1)
 	OR EXISTS (SELECT 1 FROM at_shared_files WHERE project_id = $2 AND storage_key = $1)
@@ -378,43 +368,6 @@ func (w *Worker) hashes(ctx context.Context, st *Stats) error {
 		}
 		w.done(r.ID)
 		if _, err := store.Exec(ctx, w.DB, `UPDATE at_attachments SET sha256 = $2 WHERE id = $1 AND sha256 IS NULL`, r.ID, sum); err != nil {
-			return err
-		}
-		st.Hashed++
-	}
-	type shared struct {
-		ProjectID, Path, Key string
-		Size                 int64
-		Declared             *string
-	}
-	var files []shared
-	if err := store.Raw(ctx, w.DB, `SELECT project_id, path, storage_key AS key, size, declared_sha256 AS declared FROM at_shared_files
-		WHERE sha256 IS NULL AND state = 'ready' AND storage_key IS NOT NULL AND NOT (storage_key = ANY($2)) ORDER BY updated_at LIMIT $1`,
-		w.batch(), waiting).Scan(&files).Error; err != nil {
-		return err
-	}
-	for _, f := range files {
-		sum, n, err := w.sum(ctx, f.Key)
-		bad := err == nil && (n != f.Size || (f.Declared != nil && *f.Declared != "" && *f.Declared != sum))
-		if err != nil && !errors.Is(err, blobstore.ErrNotFound) {
-			st.HashFailed++
-			w.log().Warn("hash shared file", "path", f.Path, "err", err)
-			w.later(f.Key)
-			continue
-		}
-		w.done(f.Key)
-		if bad || err != nil {
-			st.HashFailed++
-			w.log().Warn("shared file does not match its upload", "project", f.ProjectID, "path", f.Path, "size", n, "want", f.Size)
-			// The key guards against a newer upload of the same path having replaced the row.
-			if _, err := store.Exec(ctx, w.DB, `UPDATE at_shared_files SET state = 'failed' WHERE project_id = $1 AND path = $2
-				AND storage_key = $3`, f.ProjectID, f.Path, f.Key); err != nil {
-				return err
-			}
-			continue
-		}
-		if _, err := store.Exec(ctx, w.DB, `UPDATE at_shared_files SET sha256 = $4 WHERE project_id = $1 AND path = $2
-			AND storage_key = $3 AND sha256 IS NULL`, f.ProjectID, f.Path, f.Key, sum); err != nil {
 			return err
 		}
 		st.Hashed++

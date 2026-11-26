@@ -32,10 +32,6 @@
 "list_deliverables":[{},{"thread":1,"kind":"design"}],
 "read_deliverable":[{"deliverable_id":"dl_01JD3V"},{"deliverable_id":"dl_01JD3V","version":2}],
 "publish_file":[{"path":"design/index.html","kind":"design","title":"Login page"},{"path":"docs/spec.md","kind":"doc","title":"Spec","deliverable_id":"dl_01JD3V"}],
-"list_shared_files":[{},{"prefix":"data/"}],
-"read_shared_file":[{"path":"data/sample.csv"},{"path":"notes.md"},{"path":"a b/c d.txt"},{"path":"a/b/c/d/e/f/g/h.txt"},{"path":"中文 目录/报告 v2.md"}],
-"write_shared_file":[{"file":"out/report.csv"},{"file":".shared/data/sample.csv"},{"file":"x.json","path":"exports/2026-11/x.json"}],
-"delete_shared_file":[{"path":"data/sample.csv"}],
 "publish_deliverable":[{"kind":"doc","title":"Design notes","url":"https://example.com/doc"}],
 "complete_task":[{"task_id":"t8","summary":"Done, tests pass.","artifacts":["web/src/PlanList.tsx"]},{"task_id":"t9","summary":"Cannot reproduce.","status":"failed"}],
 "push_branch":[{}],
@@ -50,8 +46,7 @@
 "open_subthread":[{"title":"Research caching","brief":"Compare Valkey and in-process caching; report a recommendation."},{"title":"API client","brief":"Build the client on my branch.","repos":[{"repo":"acme/app","base":"thread/12-login"}],"roles":["dev"]},{"title":"Research caching","brief":"Compare Valkey and in-process caching; report a recommendation.","attachments":["img_01jd3v0000000000000000att1"]}],
 "close_subthread":[{"no":13},{"no":13,"reason":"Result received."}],
 "message_coordinator":[{"text":"Thread #14 changes the same API; please tell its lead to wait for my PR."},{"text":"Thread #14 changes the same API; please tell its lead to wait for my PR.","attachments":["img_01jd3v0000000000000000att1"]}],
-"read_attachment":[{"id":"img_01jd3v0000000000000000att1"}],
-"save_attachment":[{"id":"img_01jd3v0000000000000000att1","path":"inputs/spec.pdf"},{"id":"img_01jd3v0000000000000000att1","path":"中文/报告.pdf","overwrite":true}]
+"read_attachment":[{"id":"img_01jd3v0000000000000000att1"}]
 },
 "invalid": {
 "open_thread":[{"title":"x"}],
@@ -65,17 +60,12 @@
 "publish_deliverable":[{"kind":"doc","title":"x","url":"not a url"}],
 "read_deliverable":[{},{"deliverable_id":"42"},{"deliverable_id":"dl_1","version":0}],
 "list_deliverables":[{"thread":0}],
-"list_shared_files":[{"prefix":"/etc"},{"prefix":"a\\b"},{"other":1}],
-"read_shared_file":[{},{"path":""},{"path":"/etc/passwd"},{"path":"../x"},{"path":"a/../b"},{"path":"a/./b"},{"path":"a//b"},{"path":"a/"},{"path":".shared/x"},{"path":".agent-shared/x"},{"path":" a"},{"path":"a "},{"path":"a/ b"},{"path":"a /b"},{"path":"ab"},{"path":"ab"},{"path":"a b"},{"path":"a b"},{"path":"x","inline":true},{"path":".env"},{"path":"a\\b"},{"path":"a\u0000b"},{"path":"a\nb"},{"path":"a/b/c/d/e/f/g/h/i.txt"},{"path":"x","extra":1}],
-"write_shared_file":[{},{"path":"x"},{"file":""},{"file":"a.txt","path":"../a.txt"},{"file":"a.txt","path":"C:\\a.txt"}],
-"delete_shared_file":[{},{"path":"../x"},{"path":"x","force":true}],
 "reply_to":[{"question_id":"ap_1","answer":"x"}],
 "review_permission":[{"request_id":"q5","decision":"allow_always","reason":"x"},{"request_id":"q5","decision":"allow"}],
 "open_subthread":[{"title":"No brief"}],
 "close_subthread":[{}],
 "message_coordinator":[{"text":""}],
 "send_message":[{"to":"dev-2","text":"x","attachments":["sf_1"]},{"to":"dev-2","text":"x","attachments":["img_0","img_1","img_2","img_3","img_4","img_5","img_6","img_7","img_8","img_9","img_10","img_11","img_12","img_13","img_14","img_15","img_16","img_17","img_18","img_19","img_20"]},{"to":"dev-2","text":"x","attachments":"img_1"}],
-"read_attachment":[{},{"id":"x_1"},{"id":"img_01jd3v0000000000000000att1","extra":1}],
-"save_attachment":[{"id":"img_01jd3v0000000000000000att1"},{"id":"img_01jd3v0000000000000000att1","path":"../x"},{"id":"img_01jd3v0000000000000000att1","path":"a","overwrite":"yes"},{"path":"a"}]
+"read_attachment":[{},{"id":"x_1"},{"id":"img_01jd3v0000000000000000att1","extra":1}]
 }
 }

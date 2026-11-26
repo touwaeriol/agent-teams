@@ -12,17 +12,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
-	protocol "github.com/touwaeriol/agent-teams/protocol"
-
-	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/engine"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
-	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -268,7 +263,7 @@ func TestPresignedAttachments(t *testing.T) {
 	}
 
 	// Limits and abort.
-	for _, kind := range []string{"attachment", "shared"} {
+	for _, kind := range []string{"attachment"} {
 		if code, raw := b.do("POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": kind, "name": "big", "size": 200<<20 + 1}); code != 413 ||
 			!strings.Contains(string(raw), "file_too_large") || !strings.Contains(string(raw), "200 MB") {
 			t.Fatalf("%s over 200 MB = %d %s", kind, code, raw)
@@ -302,167 +297,6 @@ func TestPresignedAttachments(t *testing.T) {
 	}
 }
 
-// TestPresignedSharedFiles: a shared file uploaded in parts appears at its path only when it
-// completes, overwrite=false refuses an existing path, uploads in flight count towards the 5 GB
-// quota (Chinese message), the download is a 302; a node's presigned PUT is checked against its
-// declared size and sha256 (a mismatch drops it).
-func TestPresignedSharedFiles(t *testing.T) {
-	tm := startTeam(t)
-	w, b, pid := tm.w, tm.b, tm.projectID
-	ctx := context.Background()
-	body := bytes.Repeat([]byte("shared!"), 3000)
-	var up orchapi.UploadSession
-	b.must(201, "POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "shared", "name": "big.bin", "path": "data/big.bin", "size": len(body)}, &up)
-	if !strings.HasPrefix(up.UploadID, "up_") || !strings.HasPrefix(up.ID, "sf_") || up.Parts != 1 {
-		t.Fatalf("session %+v", up)
-	}
-	var page orchapi.SharedFileList
-	b.must(200, "GET", "/api/projects/"+pid+"/shared-files", nil, &page)
-	if len(page.Files) != 0 || page.Limits.ProjectBytes != 5<<30 || page.Limits.FileBytes != 200<<20 {
-		t.Fatalf("listed before completion or old limits: %+v", page)
-	}
-	var done orchapi.UploadDone
-	b.must(200, "POST", "/api/projects/"+pid+"/uploads/"+up.UploadID+"/complete", map[string]any{"parts": b.putParts(pid, up, body)}, &done)
-	if done.SharedFile == nil || done.SharedFile.Path != "data/big.bin" || done.SharedFile.Size != int64(len(body)) || done.SharedFile.Overwritten {
-		t.Fatalf("done %+v", done.SharedFile)
-	}
-	resp, _ := b.redirect("/api/projects/" + pid + "/shared-files/download?path=data/big.bin")
-	if resp.StatusCode != 302 {
-		t.Fatalf("shared download %d", resp.StatusCode)
-	}
-	if obj, raw := fetchURL(t, resp.Header.Get("Location")); !bytes.Equal(raw, body) || !strings.HasPrefix(obj.Header.Get("Content-Disposition"), "attachment;") {
-		t.Fatalf("shared object %v", obj.Header)
-	}
-	if code, raw := b.do("POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "shared", "name": "big.bin", "path": "data/big.bin",
-		"size": 3, "overwrite": false}); code != 409 || !strings.Contains(string(raw), "file_exists") {
-		t.Fatalf("overwrite=false = %d %s", code, raw)
-	}
-	// overwrite=false holds at completion too: the path got a file while this upload was running.
-	var late orchapi.UploadSession
-	b.must(201, "POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "shared", "name": "late.txt", "size": 4, "overwrite": false}, &late)
-	latePart := b.putParts(pid, late, []byte("late"))
-	b.upload(pid, map[string]any{"kind": "shared", "name": "late.txt"}, []byte("first"))
-	if code, raw := b.do("POST", "/api/projects/"+pid+"/uploads/"+late.UploadID+"/complete", map[string]any{"parts": latePart}); code != 409 ||
-		!strings.Contains(string(raw), "file_exists") {
-		t.Fatalf("overwrite=false at completion = %d %s", code, raw)
-	}
-	if _, err := sharedfiles.GetUpload(ctx, w.db.Pool, pid, late.UploadID); !errors.Is(err, sharedfiles.ErrUploadNotFound) {
-		t.Fatalf("refused upload kept: %v", err)
-	}
-	if _, got, _ := sharedfiles.Load(ctx, w.db.Pool, w.e.Core.Blobs, pid, "late.txt"); string(got) != "first" {
-		t.Fatalf("late.txt = %q", got)
-	}
-
-	// Overwrite (the default): the old object is queued for deletion.
-	again := b.upload(pid, map[string]any{"kind": "shared", "name": "big.bin", "path": "data/big.bin"}, []byte("v2")).SharedFile
-	if again == nil || !again.Overwritten || again.Size != 2 {
-		t.Fatalf("overwrite %+v", again)
-	}
-
-	// Quota: stored files of almost 5 GB leave no room (uploads in flight count too, but a user
-	// cannot have that much in flight: core.MaxUploadBytesInFlight).
-	if _, err := store.Exec(ctx, w.db.Pool, `INSERT INTO at_shared_files (project_id, path, content_type, size, uploaded_by, storage_key, object_id)
-		VALUES ($1, 'huge.bin', 'application/octet-stream', $2, 'user', 'k', 'sf_huge')`, pid, int64(5<<30)-10); err != nil {
-		t.Fatal(err)
-	}
-	if code, raw := b.do("POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "shared", "name": "more.bin", "size": 100}); code != 409 ||
-		!strings.Contains(string(raw), "quota_exceeded") || !strings.Contains(string(raw), "5.0 GB") {
-		t.Fatalf("quota = %d %s", code, raw)
-	}
-	// Attachments do not count.
-	b.must(201, "POST", "/api/projects/"+pid+"/uploads", map[string]any{"kind": "attachment", "name": "a.bin", "size": 100}, nil)
-	_, _ = store.Exec(ctx, w.db.Pool, `DELETE FROM at_shared_files WHERE project_id = $1 AND path = 'huge.bin'`, pid)
-
-	// A node's presigned PUT for write_shared_file.
-	out := []byte("node output")
-	ask := map[string]any{"session_id": tm.dev.session, "path": "out/r.txt", "size": len(out), "sha256": hexSum(out)}
-	if code, _ := nodeCall(t, w, "POST", "/nodes/uploads", "", ask); code != 401 {
-		t.Fatalf("no token = %d", code)
-	}
-	intruder := w.signUp("intruder@example.com")
-	var other nodeCreated
-	intruder.must(201, "POST", "/api/nodes", map[string]string{"name": "theirs"}, &other)
-	if code, _ := nodeCall(t, w, "POST", "/nodes/uploads", other.Token, ask); code != 409 {
-		t.Fatalf("session of another node = %d", code)
-	}
-	put := func(ask map[string]any, data []byte) orchapi.NodeUpload {
-		t.Helper()
-		code, raw := nodeCall(t, w, "POST", "/nodes/uploads", tm.token, ask)
-		var nu orchapi.NodeUpload
-		if code != 201 || json.Unmarshal(raw, &nu) != nil || nu.URL == "" {
-			t.Fatalf("node upload %d %s", code, raw)
-		}
-		req, _ := http.NewRequest("PUT", nu.URL, bytes.NewReader(data))
-		for k, v := range nu.Headers {
-			req.Header.Set(k, v)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil || resp.StatusCode != 200 {
-			t.Fatalf("put %v %v", resp, err)
-		}
-		resp.Body.Close()
-		return nu
-	}
-	nu := put(ask, out)
-	var f sharedfiles.SharedFile
-	err := w.e.Core.InTx(ctx, func(tx *core.Tx) error {
-		var err error
-		f, _, err = sharedfiles.FinalizeUpload(ctx, tx, w.e.Core.Blobs, pid, nu.UploadID, sharedfiles.FinalizeOptions{})
-		return err
-	})
-	if err != nil || f.Path != "out/r.txt" || f.SHA256 != hexSum(out) || f.UploadedBy != "dev-1" {
-		t.Fatalf("finalize %+v %v", f, err)
-	}
-	// Replaying the presigned PUT after registration changes nothing: the file lives at another key.
-	replay, _ := http.NewRequest("PUT", nu.URL, bytes.NewReader([]byte("NODE OUTPUT")))
-	for k, v := range nu.Headers {
-		replay.Header.Set(k, v)
-	}
-	if r, err := http.DefaultClient.Do(replay); err == nil {
-		r.Body.Close()
-	}
-	if _, got, err := sharedfiles.Load(ctx, w.db.Pool, w.e.Core.Blobs, pid, "out/r.txt"); err != nil || !bytes.Equal(got, out) {
-		t.Fatalf("replayed PUT changed the file: %q %v", got, err)
-	}
-	if f.SHA256 != hexSum(out) || strings.Contains(nu.URL, f.Path) {
-		t.Fatalf("file %+v", f)
-	}
-	// The uploaded key goes once its URL has expired.
-	gc := &blobgc.Worker{DB: w.db.Pool, Blobs: w.e.Core.Blobs, Now: func() time.Time { return time.Now().Add(blobgc.ReserveDelay + time.Minute) }}
-	if _, err := gc.RunOnce(ctx); err != nil {
-		t.Fatal(err)
-	}
-	var upKey string
-	_ = store.QueryRow(ctx, w.db.Pool, `SELECT storage_key FROM at_shared_files WHERE project_id = $1 AND path = 'out/r.txt'`, pid).Scan(&upKey)
-	if _, got, err := sharedfiles.Load(ctx, w.db.Pool, w.e.Core.Blobs, pid, "out/r.txt"); err != nil || !bytes.Equal(got, out) || upKey == "" {
-		t.Fatalf("registered object deleted by gc: %v", err)
-	}
-
-	// Changed after hashing: the declared sha256 does not match, the upload is dropped.
-	bad := put(map[string]any{"session_id": tm.dev.session, "path": "out/r.txt", "size": len(out), "sha256": hexSum([]byte("other bytes"))}, out)
-	err = w.e.Core.InTx(ctx, func(tx *core.Tx) error {
-		_, _, err := sharedfiles.FinalizeUpload(ctx, tx, w.e.Core.Blobs, pid, bad.UploadID, sharedfiles.FinalizeOptions{})
-		return err
-	})
-	if !errors.Is(err, sharedfiles.ErrChecksum) {
-		t.Fatalf("checksum mismatch: %v", err)
-	}
-	if _, err := sharedfiles.GetUpload(ctx, w.db.Pool, pid, bad.UploadID); !errors.Is(err, sharedfiles.ErrUploadNotFound) {
-		t.Fatalf("bad upload kept: %v", err)
-	}
-	var data []byte
-	if _, data, err = sharedfiles.Load(ctx, w.db.Pool, w.e.Core.Blobs, pid, "out/r.txt"); err != nil || !bytes.Equal(data, out) {
-		t.Fatalf("file replaced by the bad upload: %q %v", data, err)
-	}
-	// Wrong size: dropped as well.
-	short := put(map[string]any{"session_id": tm.dev.session, "path": "out/s.txt", "size": 4, "sha256": hexSum([]byte("abcd"))}, []byte("abcd"))
-	_, _ = store.Exec(ctx, w.db.Pool, `UPDATE at_shared_uploads SET size = 5 WHERE id = $1`, short.UploadID)
-	_, _, err = sharedfiles.FinalizeUpload(ctx, w.db.Pool, w.e.Core.Blobs, pid, short.UploadID, sharedfiles.FinalizeOptions{})
-	if !errors.Is(err, sharedfiles.ErrSizeMismatch) {
-		t.Fatalf("size mismatch: %v", err)
-	}
-}
-
 // TestUploadsWithoutStorage: with no object store configured the upload routes answer 503
 // storage_unavailable.
 func TestUploadsWithoutStorage(t *testing.T) {
@@ -470,7 +304,7 @@ func TestUploadsWithoutStorage(t *testing.T) {
 	b := w.signUp("nostore@example.com")
 	var p struct{ ID string }
 	b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &p)
-	for _, kind := range []string{"attachment", "shared"} {
+	for _, kind := range []string{"attachment"} {
 		if code, raw := b.do("POST", "/api/projects/"+p.ID+"/uploads", map[string]any{"kind": kind, "name": "a.bin", "size": 1}); code != 503 ||
 			!strings.Contains(string(raw), "storage_unavailable") {
 			t.Fatalf("%s without storage = %d %s", kind, code, raw)
@@ -478,227 +312,16 @@ func TestUploadsWithoutStorage(t *testing.T) {
 	}
 }
 
-// TestWriteSharedFileS3: a daemon with presigned uploads asks POST /nodes/uploads, PUTs the file
-// and calls write_shared_file with upload storage s3: the file is registered (sha256 checked);
-// a PUT of other bytes than declared, another employee's upload id and an unknown one are refused.
-func TestWriteSharedFileS3(t *testing.T) {
-	st := startSFTeam(t)
-	w := st.w
-	ask := func(path string, declared []byte, sent []byte) string {
-		t.Helper()
-		// The daemon's body (node/src/toolhost/transfer.ts UploadRequest): the target path is name.
-		code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "call_id": "tc_x",
-			"name": path, "size": len(declared), "sha256": hexSum(declared), "content_type": "text/csv"})
-		var nu orchapi.NodeUpload
-		if code != 201 || json.Unmarshal(raw, &nu) != nil {
-			t.Fatalf("node upload %d %s", code, raw)
-		}
-		req, _ := http.NewRequest("PUT", nu.URL, bytes.NewReader(sent))
-		for k, v := range nu.Headers {
-			req.Header.Set(k, v)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil || resp.StatusCode != 200 {
-			t.Fatalf("put %v %v", resp, err)
-		}
-		resp.Body.Close()
-		return nu.UploadID
-	}
-	call := func(a *fakeAgent, uploadID, path string, body []byte) protocol.ToolResult {
-		t.Helper()
-		callID := fmt.Sprintf("tc_s3_%d", time.Now().UnixNano())
-		gen := protocol.OpenGen(a.gen)
-		raw, _ := json.Marshal(map[string]any{"file": path})
-		a.send(protocol.TypeToolCall, protocol.ToolCall{CallID: protocol.CallID(callID), SessionID: protocol.SessionID(a.session), OpenGen: &gen,
-			Tool: "write_shared_file", Args: raw, Upload: &protocol.ToolUpload{UploadID: protocol.UploadID(uploadID), Storage: protocol.ToolUploadStorageS3,
-				Files: []protocol.UploadFile{{Path: path, Size: len(body), SHA256: hexSum(body), ContentType: "x/ignored"}}}})
-		return a.result(callID)
-	}
-	body := []byte("id,value\n1,2\n")
-	if code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "size": 1,
-		"sha256": hexSum([]byte("x"))}); code != 422 {
-		t.Fatalf("no target path = %d %s", code, raw)
-	}
-	res := call(st.dev, ask("out/s3.csv", body, body), "out/s3.csv", body)
-	if !res.Ok {
-		t.Fatalf("s3 write refused: %s", text(res))
-	}
-	var wrote protocol.WriteSharedFileResult
-	_ = json.Unmarshal(*res.Structured, &wrote)
-	if wrote.Path != "out/s3.csv" || wrote.Size != len(body) || wrote.SHA256 != hexSum(body) {
-		t.Fatalf("write result %+v", wrote)
-	}
-	f, data, err := sharedfiles.Load(w.ctx, w.db.Pool, w.e.Core.Blobs, st.projectID, "out/s3.csv")
-	if err != nil || !bytes.Equal(data, body) || f.UploadedBy != "dev-1" {
-		t.Fatalf("stored %+v %q %v", f, data, err)
-	}
-
-	// The file changed between hashing and the PUT: refused, the old file stays.
-	changed := []byte("id,value\n9,9\n")
-	changedID := ask("out/s3.csv", changed, []byte("id,value\n0,0\n"))
-	changedUp, err := sharedfiles.GetUpload(w.ctx, w.db.Pool, st.projectID, changedID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changedKey := changedUp.StorageKey
-	if res := call(st.dev, changedID, "out/s3.csv", changed); res.Ok ||
-		!strings.Contains(text(res), "sha256") {
-		t.Fatalf("checksum mismatch accepted: %s", text(res))
-	}
-	// Wrong size.
-	if res := call(st.dev, ask("out/short.csv", body, body[:5]), "out/short.csv", body); res.Ok || !strings.Contains(text(res), "大小") {
-		t.Fatalf("size mismatch accepted: %s", text(res))
-	}
-	if _, data, _ = sharedfiles.Load(w.ctx, w.db.Pool, w.e.Core.Blobs, st.projectID, "out/s3.csv"); !bytes.Equal(data, body) {
-		t.Fatalf("old file replaced: %q", data)
-	}
-	// Another employee cannot finish dev-1's upload; an unknown id is refused.
-	other := ask("out/other.csv", body, body)
-	if res := call(st.lead, other, "out/other.csv", body); res.Ok {
-		t.Fatalf("lead finished dev-1's upload: %s", text(res))
-	}
-	if _, err := sharedfiles.GetUpload(w.ctx, w.db.Pool, st.projectID, other); err != nil {
-		t.Fatalf("another employee's refusal dropped dev-1's upload: %v", err)
-	}
-	// Refused for the quota: the upload is cancelled at once (it no longer holds the quota).
-	big := ask("out/big.csv", body, body)
-	up, err := sharedfiles.GetUpload(w.ctx, w.db.Pool, st.projectID, big)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bigKey := up.StorageKey
-	if _, err := store.Exec(w.ctx, w.db.Pool, `INSERT INTO at_shared_uploads (id, project_id, path, object_id, storage_key, size, content_type, uploaded_by)
-		VALUES ('up_huge', $1, 'huge.bin', 'sf_huge', 'k', $2, 'application/octet-stream', 'user')`, st.projectID, int64(5<<30)-10); err != nil {
-		t.Fatal(err)
-	}
-	if res := call(st.dev, big, "out/big.csv", body); res.Ok || !strings.Contains(text(res), "5.0 GB") {
-		t.Fatalf("over quota accepted: %s", text(res))
-	}
-	if _, err := sharedfiles.GetUpload(w.ctx, w.db.Pool, st.projectID, big); !errors.Is(err, sharedfiles.ErrUploadNotFound) {
-		t.Fatalf("refused upload still held: %v", err)
-	}
-	// Its object went at once, and its key is queued once more for after the PUT URL expired
-	// (a replayed PUT would otherwise leave an object nothing points at).
-	expectRedelete(t, w, bigKey)
-	// The same for an upload dropped by its checks (the checksum one above).
-	expectRedelete(t, w, changedKey)
-	// A session of another node (or closed): 409, never 404 (the daemon reads 404 as an old console).
-	if code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokB, map[string]any{"session_id": st.dev.session, "name": "a.txt",
-		"size": 1, "sha256": hexSum([]byte("x"))}); code != 409 || !strings.Contains(string(raw), "session_not_on_node") {
-		t.Fatalf("session on another node = %d %s", code, raw)
-	}
-	if res := call(st.dev, "up_00000000000000000000000000", "out/x.csv", body); res.Ok {
-		t.Fatalf("unknown upload accepted: %s", text(res))
-	}
-}
-
-// expectRedelete: key's object is gone and the key is queued for deletion again after the node's
-// presigned PUT has expired (blobgc.RedeleteLater).
-func expectRedelete(t *testing.T, w *world, key string) {
-	t.Helper()
-	if _, err := w.e.Core.Blobs.Head(w.ctx, key); err == nil {
-		t.Fatalf("object %s still there", key)
-	}
-	var later bool
-	if err := store.QueryRow(w.ctx, w.db.Pool, `SELECT next_at > now() + make_interval(secs => $2) FROM at_blob_deletions WHERE key = $1`,
-		key, sharedfiles.UploadTTL.Seconds()).Scan(&later); err != nil || !later {
-		t.Fatalf("key %s not queued after the URL expires: %v %v", key, later, err)
-	}
-}
-
-// failingPresign is a store whose PresignPut fails (storage misconfigured, say).
-type failingPresign struct{ blobstore.Store }
-
-func (failingPresign) PresignPut(context.Context, string, time.Duration, int64, string) (string, map[string]string, error) {
-	return "", nil, errors.New("presign failed")
-}
-
-// TestNodeUploadPresignFails: POST /nodes/uploads that cannot sign the PUT drops the upload it
-// began, so it does not hold the project's quota.
-func TestNodeUploadPresignFails(t *testing.T) {
-	st := startSFTeam(t)
-	w := st.w
-	real := w.e.Core.Blobs
-	w.e.Core.Blobs = failingPresign{real}
-	t.Cleanup(func() { w.e.Core.Blobs = real })
-	code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "name": "out/a.csv",
-		"size": 3, "sha256": hexSum([]byte("abc"))})
-	if code < 500 {
-		t.Fatalf("presign failure = %d %s", code, raw)
-	}
-	var n int
-	if err := store.QueryRow(w.ctx, w.db.Pool, `SELECT count(*) FROM at_shared_uploads WHERE project_id = $1`, st.projectID).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("uploads left: %d %v", n, err)
-	}
-}
-
-// blockingOpen is a store whose Open waits until release is closed (a slow read of a big object).
-type blockingOpen struct {
-	blobstore.Store
-	release chan struct{}
-}
-
-func (b blockingOpen) Open(ctx context.Context, key string) (io.ReadCloser, error) {
-	<-b.release
-	return b.Store.Open(ctx, key)
-}
-
-// TestWriteSharedFileS3FinishesAfterTheCall: finishing a presigned write_shared_file (copy and
-// sha256 of up to 200 MB) happens after the call's transaction, so the node's other messages are
-// handled meanwhile (a link blocked for long misses its pings and is closed).
-func TestWriteSharedFileS3FinishesAfterTheCall(t *testing.T) {
-	st := startSFTeam(t)
-	w := st.w
-	body := []byte("slow,file\n1,2\n")
-	code, raw := nodeCall(t, w, "POST", "/nodes/uploads", st.tokA, map[string]any{"session_id": st.dev.session, "name": "out/slow.csv",
-		"size": len(body), "sha256": hexSum(body)})
-	var nu orchapi.NodeUpload
-	if code != 201 || json.Unmarshal(raw, &nu) != nil {
-		t.Fatalf("node upload %d %s", code, raw)
-	}
-	req, _ := http.NewRequest("PUT", nu.URL, bytes.NewReader(body))
-	for k, v := range nu.Headers {
-		req.Header.Set(k, v)
-	}
-	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != 200 {
-		t.Fatalf("put %v %v", resp, err)
-	}
-	real := w.e.Core.Blobs
-	slow := blockingOpen{Store: real, release: make(chan struct{})}
-	w.e.Core.Blobs = slow
-	t.Cleanup(func() { w.e.Core.Blobs = real })
-
-	gen := protocol.OpenGen(st.dev.gen)
-	slowID := fmt.Sprintf("tc_slow_%d", time.Now().UnixNano())
-	args, _ := json.Marshal(map[string]any{"file": "out/slow.csv"})
-	st.dev.send(protocol.TypeToolCall, protocol.ToolCall{CallID: protocol.CallID(slowID), SessionID: protocol.SessionID(st.dev.session), OpenGen: &gen,
-		Tool: "write_shared_file", Args: args, Upload: &protocol.ToolUpload{UploadID: protocol.UploadID(nu.UploadID), Storage: protocol.ToolUploadStorageS3,
-			Files: []protocol.UploadFile{{Path: "out/slow.csv", Size: len(body), SHA256: hexSum(body), ContentType: "text/csv"}}}})
-	// While the object is being read, the same node's next call is answered.
-	if res := st.dev.call("list_shared_files", map[string]any{}); !res.Ok {
-		t.Fatalf("list_shared_files while finishing: %s", text(res))
-	}
-	close(slow.release)
-	if res := st.dev.result(slowID); !res.Ok || !strings.Contains(text(res), "out/slow.csv") {
-		t.Fatalf("slow write: %s", text(res))
-	}
-	if _, data, err := sharedfiles.Load(w.ctx, w.db.Pool, real, st.projectID, "out/slow.csv"); err != nil || !bytes.Equal(data, body) {
-		t.Fatalf("stored %q %v", data, err)
-	}
-}
-
-// TestUploadsInFlightLimit: a user's uploads in flight (attachments and shared files together)
-// are capped; the next begin gets 429 too_many_uploads (#62 F2).
+// TestUploadsInFlightLimit: a user's uploads in flight are capped; the next begin gets 429 too_many_uploads (#62 F2).
 func TestUploadsInFlightLimit(t *testing.T) {
 	w := newWorldWith(t, nil, nil)
 	b := w.signUp("busy@example.com")
 	var p struct{ ID string }
 	b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &p)
 	for i := 0; i < core.MaxUploadsInFlight; i++ {
-		kind := []string{"attachment", "shared"}[i%2]
-		b.must(201, "POST", "/api/projects/"+p.ID+"/uploads", map[string]any{"kind": kind, "name": fmt.Sprintf("f%d.bin", i), "size": 10}, nil)
+		b.must(201, "POST", "/api/projects/"+p.ID+"/uploads", map[string]any{"kind": "attachment", "name": fmt.Sprintf("f%d.bin", i), "size": 10}, nil)
 	}
-	for _, kind := range []string{"attachment", "shared"} {
+	for _, kind := range []string{"attachment"} {
 		if code, raw := b.do("POST", "/api/projects/"+p.ID+"/uploads", map[string]any{"kind": kind, "name": "more.bin", "size": 10}); code != 429 ||
 			!strings.Contains(string(raw), "too_many_uploads") {
 			t.Fatalf("%s over the limit = %d %s", kind, code, raw)
@@ -728,7 +351,7 @@ func TestNodeRoutesAuthStatus(t *testing.T) {
 		_ = json.NewDecoder(resp.Body).Decode(&body)
 		return resp, body.Code
 	}
-	routes := [][2]string{{"GET", "/nodes/attachments/img_x/url"}, {"POST", "/nodes/uploads"}}
+	routes := [][2]string{{"GET", "/nodes/attachments/img_x/url"}}
 	for _, r := range routes {
 		if resp, code := call(r[0], r[1], "wrong", "203.0.113.20"); resp.StatusCode != http.StatusUnauthorized || code != "unauthorized" {
 			t.Fatalf("%s wrong token: %d %q", r[1], resp.StatusCode, code)

@@ -17,9 +17,9 @@ import (
 
 	"gorm.io/gorm/clause"
 
+	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
-	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 )
 
 // Attachment limits (api.md §3.4): what Claude accepts per image or PDF, a text file's size
@@ -350,8 +350,8 @@ func DetectType(name string, head []byte, size int64) string {
 	if size <= MaxTextBytes && IsTextName(name) && bytes.IndexByte(head, 0) < 0 && validPrefix(head, size) {
 		return TextType
 	}
-	// The shared files' extension table (fixed in code, not the host's mime.types).
-	return sharedfiles.ContentType(name)
+	// The extension table (fixed in code, not the host's mime.types).
+	return artifacts.FileType(name)
 }
 
 // validPrefix: head is UTF-8, allowing a rune cut at its end when the file goes on.

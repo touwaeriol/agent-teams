@@ -36,16 +36,23 @@ func (f *fsFakes) Files(_ context.Context, volume, _, _ string) (userfs.Files, e
 }
 func (f *fsFakes) Close(string) {}
 
-// TestSharedFolderReachesNodesAndSessions: switching the folder on sends the user's mounting node
-// fs.mount on the live link only (never the outbox), the node's fs.status shows on the node page,
-// sessions opened there carry the folders, and deleting the folder sends fs.unmount.
-func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
-	w := newWorldWith(t, nil, nil)
+// useFolder gives the world shared folders whose volumes are local directories.
+func useFolder(t *testing.T, w *world) *fsFakes {
+	t.Helper()
 	fakes := &fsFakes{root: t.TempDir()}
 	cfg := userfs.Config{AdminURL: "postgres://admin@db/at", MetaHost: "db.example:5432", MetaSSLMode: "verify-full", S3Endpoint: "https://s3.example",
 		Bucket: "jfs", AdminAccessKey: "ak", AdminSecretKey: "sk", CapacityGB: 20, ClientVersion: userfs.DefaultClientVersion,
 		ClientBase: userfs.DefaultClientBase, Assets: userfs.DefaultAssets}
 	w.e.UseSharedFolder(userfs.New(cfg, w.db.Pool, testVault(t), fakes, fsIAM{}, fakes, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	return fakes
+}
+
+// TestSharedFolderReachesNodesAndSessions: switching the folder on sends the user's mounting node
+// fs.mount on the live link only (never the outbox), the node's fs.status shows on the node page,
+// sessions opened there carry the folders, and deleting the folder sends fs.unmount.
+func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
+	w := newWorldWith(t, nil, nil)
+	fakes := useFolder(t, w)
 
 	tm := &team{w: w, b: w.signUp("fs@example.com")}
 	var node nodeCreated

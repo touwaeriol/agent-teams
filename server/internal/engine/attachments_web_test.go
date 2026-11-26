@@ -1,7 +1,6 @@
 package engine_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -12,11 +11,10 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
 	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
-	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// The page's own attachment features (#58 D6): saving one as a shared file, attachments of a new
+// The page's own attachment features (#58 D6): attachments of a new
 // plain session (uploaded before its project exists) and of comments on deliverables.
 
 func countRows(t *testing.T, w *world, q string, args ...any) int {
@@ -41,77 +39,6 @@ func (b *browser) userUpload(name string, body []byte) core.Attachment {
 	return done.Attachment.Attachment
 }
 
-// TestSaveAttachmentShared: POST /api/attachments/{id}/save-shared copies an attachment into the
-// project's shared files (the bytes, the uploader "user", a use of the attachment); an existing
-// path is 409 file_exists unless overwrite, the quota 409 quota_exceeded with the usage, an
-// expired attachment 410; other users, attachments without a project and bad paths are refused.
-func TestSaveAttachmentShared(t *testing.T) {
-	tm := startTeam(t)
-	w, b, pid := tm.w, tm.b, tm.projectID
-	ctx := context.Background()
-	body := []byte("# 会议纪要\n第一条\n")
-	att := b.upload(pid, map[string]any{"kind": "attachment", "name": "纪要.md"}, body).Attachment
-	_, _ = store.Exec(ctx, w.db.Pool, `UPDATE at_attachments SET expires_at = now() + interval '1 minute' WHERE id = $1`, att.ID)
-
-	var saved orchapi.UploadedSharedFile
-	b.must(200, "POST", "/api/attachments/"+att.ID+"/save-shared", map[string]any{"path": "docs/纪要.md"}, &saved)
-	if saved.Path != "docs/纪要.md" || saved.Size != int64(len(body)) || saved.Overwritten || saved.UploadedBy != sharedfiles.UserName {
-		t.Fatalf("saved %+v", saved)
-	}
-	if tm.expiresIn(t, att.ID).Hours() < 23 {
-		t.Fatal("saving did not push the retention")
-	}
-	resp, _ := b.redirect("/api/projects/" + pid + "/shared-files/download?path=docs/纪要.md")
-	if _, raw := fetchURL(t, resp.Header.Get("Location")); !bytes.Equal(raw, body) {
-		t.Fatalf("shared copy %q", raw)
-	}
-
-	// Same path: 409 file_exists, unless overwrite.
-	if code, raw := b.do("POST", "/api/attachments/"+att.ID+"/save-shared", map[string]any{"path": "docs/纪要.md"}); code != 409 ||
-		!strings.Contains(string(raw), "file_exists") {
-		t.Fatalf("existing path = %d %s", code, raw)
-	}
-	b.must(200, "POST", "/api/attachments/"+att.ID+"/save-shared", map[string]any{"path": "docs/纪要.md", "overwrite": true}, &saved)
-	if !saved.Overwritten {
-		t.Fatalf("overwrite %+v", saved)
-	}
-	if code, _ := b.do("POST", "/api/attachments/"+att.ID+"/save-shared", map[string]any{"path": "../x"}); code != 422 {
-		t.Fatalf("bad path = %d", code)
-	}
-
-	// The quota: a project nearly full refuses, saying how much is used.
-	if _, err := store.Exec(ctx, w.db.Pool, `INSERT INTO at_shared_files (project_id, path, content_type, size, uploaded_by, storage_key, object_id, state)
-		VALUES ($1, 'huge.bin', 'application/octet-stream', $2, 'user', 'projects/'||$1||'/shared/sf_huge', 'sf_huge', 'ready')`,
-		pid, sharedfiles.MaxProjectBytes-5); err != nil {
-		t.Fatal(err)
-	}
-	if code, raw := b.do("POST", "/api/attachments/"+att.ID+"/save-shared", map[string]any{"path": "more.md"}); code != 409 ||
-		!strings.Contains(string(raw), "quota_exceeded") || !strings.Contains(string(raw), "已用") {
-		t.Fatalf("over quota = %d %s", code, raw)
-	}
-	_, _ = store.Exec(ctx, w.db.Pool, `DELETE FROM at_shared_files WHERE project_id = $1 AND path = 'huge.bin'`, pid)
-
-	// Only the owner; an attachment not yet in a project has nowhere to go.
-	intruder := w.signUp("intruder@example.com")
-	if code, _ := intruder.do("POST", "/api/attachments/"+att.ID+"/save-shared", map[string]any{"path": "x.md"}); code != 404 {
-		t.Fatalf("intruder = %d", code)
-	}
-	loose := b.userUpload("loose.txt", []byte("hi"))
-	if code, _ := b.do("POST", "/api/attachments/"+loose.ID+"/save-shared", map[string]any{"path": "loose.txt"}); code != 404 {
-		t.Fatalf("attachment without a project = %d", code)
-	}
-
-	// Expired: 410, nothing written.
-	_, _ = store.Exec(ctx, w.db.Pool, `UPDATE at_attachments SET state = 'expired', storage_key = NULL WHERE id = $1`, att.ID)
-	if code, raw := b.do("POST", "/api/attachments/"+att.ID+"/save-shared", map[string]any{"path": "late.md"}); code != 410 ||
-		!strings.Contains(string(raw), "attachment_expired") {
-		t.Fatalf("expired = %d %s", code, raw)
-	}
-	if countRows(t, w, `SELECT count(*) FROM at_shared_files WHERE project_id = $1`, pid) != 1 {
-		t.Fatal("shared files after the refusals")
-	}
-}
-
 // TestSessionAttachments: attachments uploaded without a project (POST /api/uploads…, kind
 // attachment only, the user's alone) join the new plain session's project when POST /api/sessions
 // names them, and its first message brings them (small text files inlined, everything as files to
@@ -128,7 +55,7 @@ func TestSessionAttachments(t *testing.T) {
 	ctx := context.Background()
 
 	if code, raw := b.do("POST", "/api/uploads", map[string]any{"kind": "shared", "name": "a.txt", "size": 2}); code != 422 {
-		t.Fatalf("shared without a project = %d %s", code, raw)
+		t.Fatalf("kind shared = %d %s", code, raw)
 	}
 	png := b.userUpload("shot.png", onePixelPNG)
 	md := b.userUpload("spec.md", []byte("登录页要有记住我"))

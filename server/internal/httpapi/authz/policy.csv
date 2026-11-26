@@ -49,7 +49,6 @@ p, node-token, /nodes/moves/:id, GET
 p, node-token, /nodes/moves/:id, PUT
 p, node-token, /nodes/v2/connect, GET
 p, node-token, /nodes/ssh, GET
-p, node-token, /nodes/uploads, POST
 
 # Signed-in users: their own account, projects, threads, libraries and nodes.
 p, user, /api/attachments/:id, GET
@@ -148,10 +147,11 @@ p, user, /api/projects/:pid/search, GET
 p, user, /api/projects/:pid/server-audit, GET
 p, user, /api/projects/:pid/servers, GET
 p, user, /api/projects/:pid/servers, PUT
-p, user, /api/projects/:pid/shared-files, DELETE
-p, user, /api/projects/:pid/shared-files, GET
-p, user, /api/projects/:pid/shared-files, POST
-p, user, /api/projects/:pid/shared-files/download, GET
+p, user, /api/projects/:pid/files, DELETE
+p, user, /api/projects/:pid/files, GET
+p, user, /api/projects/:pid/files, POST
+p, user, /api/projects/:pid/files/download, GET
+p, user, /api/projects/:pid/files/folders, POST
 p, user, /api/projects/:pid/threads, GET
 p, user, /api/projects/:pid/threads, POST
 p, user, /api/projects/:pid/usage, GET

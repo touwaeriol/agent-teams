@@ -25,7 +25,6 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
-	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -43,9 +42,6 @@ type Result struct {
 	Later func(ctx context.Context) Result
 	// Download lists the files read_deliverable queued as file.download frames before this result.
 	Download *protocol.ToolDownload
-	// SharedDownload is the file read_shared_file queued as file.download frames before this result
-	// (or, attachments_v2, its presigned URL).
-	SharedDownload *protocol.ToolSharedDownload
 	// AttachmentDownload is read_attachment's file for the daemon to download (#58).
 	AttachmentDownload *protocol.ToolAttachmentDownload
 	// EndsTask: the call ended the caller's task (complete_task); the daemon drops its task anchor
@@ -66,7 +62,7 @@ type call struct {
 	callID string
 	tool   string
 	args   json.RawMessage
-	upload *protocol.ToolUpload // publish_file, write_shared_file: files the daemon sent as file.chunk
+	upload *protocol.ToolUpload // publish_file: files the daemon sent as file.chunk
 }
 
 func (c *call) emp() core.Employee { return c.sc.Employee }
@@ -132,9 +128,7 @@ func (s *Service) table() map[string]handler {
 		protocol.ToolMessageCoordinator: s.messageCoordinator,
 		protocol.ToolScheduleCreate:     s.scheduleCreate, protocol.ToolScheduleList: s.scheduleList,
 		protocol.ToolScheduleUpdate: s.scheduleUpdate, protocol.ToolScheduleCancel: s.scheduleCancel,
-		protocol.ToolListSharedFiles: s.listSharedFiles, protocol.ToolReadSharedFile: s.readSharedFile,
-		protocol.ToolWriteSharedFile: s.writeSharedFile, protocol.ToolDeleteSharedFile: s.deleteSharedFile,
-		protocol.ToolReadAttachment: s.readAttachment, protocol.ToolSaveAttachment: s.saveAttachment,
+		protocol.ToolReadAttachment: s.readAttachment,
 	}
 }
 
@@ -208,22 +202,20 @@ func (s *Service) duplicate(ctx context.Context, tx *core.Tx, m *protocol.ToolCa
 	var stored Result
 	var wire storedResult
 	_ = json.Unmarshal(result, &wire)
-	stored = Result{OK: wire.OK, Text: wire.Text, Structured: wire.Structured, AttachmentDownload: wire.AttachmentDownload,
-		SharedDownload: wire.SharedDownload}
+	stored = Result{OK: wire.OK, Text: wire.Text, Structured: wire.Structured, AttachmentDownload: wire.AttachmentDownload}
 	if err := s.resign(ctx, tx, string(m.SessionID), &stored); err != nil {
 		return true, err
 	}
 	return true, s.sendResult(ctx, tx, string(m.SessionID), string(m.CallID), stored)
 }
 
-// resign gives a replayed result fresh presigned URLs: the stored ones (15 minutes) may have run
+// resign gives a replayed result a fresh presigned URL: the stored one (15 minutes) may have run
 // out by the time the daemon reconnects and repeats the call. The object is signed again only
-// while it is still the one the result describes (same attachment row with its object; the shared
-// file at that path with the same sha256); otherwise the stored URL is sent as is and the daemon
-// reports the failed download.
+// while it is still the one the result describes (same attachment row with its object); otherwise
+// the stored URL is sent as is and the daemon reports the failed download.
 func (s *Service) resign(ctx context.Context, tx *core.Tx, sessionID string, res *Result) error {
-	ad, sd := res.AttachmentDownload, res.SharedDownload
-	if (ad == nil || ad.URL == nil) && (sd == nil || len(sd.Files) != 1 || sd.Files[0].URL == nil) {
+	ad := res.AttachmentDownload
+	if ad == nil || ad.URL == nil {
 		return nil
 	}
 	sc, err := core.SessionContextOf(ctx, tx, sessionID)
@@ -240,7 +232,7 @@ func (s *Service) resign(ctx context.Context, tx *core.Tx, sessionID string, res
 		exp := time.Now().Add(AttachmentURLTTL).UTC()
 		return &url, &exp, nil
 	}
-	if ad != nil && ad.URL != nil {
+	{
 		list, err := core.ProjectAttachments(ctx, tx, pid, []string{ad.Attachment.ID})
 		if err != nil && !errors.Is(err, core.ErrNotFound) {
 			return err
@@ -252,23 +244,6 @@ func (s *Service) resign(ctx context.Context, tx *core.Tx, sessionID string, res
 			}
 			if fresh.URL != nil {
 				res.AttachmentDownload = &fresh
-			}
-		}
-	}
-	if sd != nil && len(sd.Files) == 1 && sd.Files[0].URL != nil {
-		f, err := sharedfiles.Stat(ctx, tx, pid, sd.Files[0].Path)
-		if err != nil && !errors.Is(err, sharedfiles.ErrNotFound) {
-			return err
-		}
-		if err == nil && f.StorageKey != nil && f.SHA256 == sd.Files[0].SHA256 {
-			file := sd.Files[0]
-			if file.URL, file.ExpiresAt, err = sign(*f.StorageKey); err != nil && !errors.Is(err, blobstore.ErrNotConfigured) {
-				return err
-			}
-			if file.URL != nil {
-				fresh := *sd
-				fresh.Files = []protocol.DownloadFile{file}
-				res.SharedDownload = &fresh
 			}
 		}
 	}
@@ -402,23 +377,11 @@ type storedResult struct {
 	Structured any    `json:"structured,omitempty"`
 	// AttachmentDownload is kept so a repeated call (daemon reconnect) gets the download again.
 	AttachmentDownload *protocol.ToolAttachmentDownload `json:"attachment_download,omitempty"`
-	// SharedDownload is kept only in its presigned form (read_shared_file on attachments_v2):
-	// chunked downloads are not sent again, so their result must not claim them.
-	SharedDownload *protocol.ToolSharedDownload `json:"shared_download,omitempty"`
-}
-
-// presignedOnly is a shared download worth storing for a repeated call (nil for chunked ones).
-func presignedOnly(d *protocol.ToolSharedDownload) *protocol.ToolSharedDownload {
-	if d == nil || d.Chunks != 0 || len(d.Files) == 0 || d.Files[0].URL == nil {
-		return nil
-	}
-	return d
 }
 
 // Complete finishes a call (also a waiting one) and sends tool.result.
 func (s *Service) Complete(ctx context.Context, tx *core.Tx, sessionID, callID string, res Result) error {
-	raw, _ := json.Marshal(storedResult{OK: res.OK, Text: res.Text, Structured: res.Structured, AttachmentDownload: res.AttachmentDownload,
-		SharedDownload: presignedOnly(res.SharedDownload)})
+	raw, _ := json.Marshal(storedResult{OK: res.OK, Text: res.Text, Structured: res.Structured, AttachmentDownload: res.AttachmentDownload})
 	st := "done"
 	if !res.OK {
 		st = "failed"
@@ -442,7 +405,7 @@ func (s *Service) sendResult(ctx context.Context, tx *core.Tx, sessionID, callID
 	}
 	body := protocol.ToolResult{SessionID: protocol.SessionID(sessionID), CallID: protocol.CallID(callID), Ok: res.OK,
 		Content: []protocol.ContentBlock{{Type: "text", Text: text}}, Download: res.Download,
-		SharedDownload: res.SharedDownload, AttachmentDownload: res.AttachmentDownload}
+		AttachmentDownload: res.AttachmentDownload}
 	if res.EndsTask {
 		none := ""
 		body.Anchor = &none

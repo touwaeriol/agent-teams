@@ -26,7 +26,6 @@ const (
 	EvNode        = "node"
 	EvLayout      = "layout"
 	EvSession     = "session"
-	EvSharedFile  = "shared_file"
 	// EvSessionControls: a session's permission mode, model or effort changed or a switch failed (#53).
 	EvSessionControls = "session_controls"
 	EvServer          = "server"  // an SSH connection to a remote server ended (remote-servers.md §9.4)
@@ -209,11 +208,4 @@ func OldestSeqSince(ctx context.Context, q DB, projectID string, since time.Time
 		UNION ALL SELECT min(seq) FROM at_status_events WHERE project_id = $1 AND created_at >= $2) x`,
 		projectID, since).Scan(&seq)
 	return seq, err
-}
-
-// EmitSharedFile records a shared_file event (api.md §1.1) after a shared file was written or
-// deleted, so the web page refreshes its list: payload {op: "write"|"delete", path, by}.
-func (tx *Tx) EmitSharedFile(ctx context.Context, projectID, by, op, path string) error {
-	_, err := tx.Emit(ctx, projectID, nil, EvSharedFile, by, map[string]any{"op": op, "path": path, "by": by})
-	return err
 }

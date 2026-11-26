@@ -6,20 +6,24 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 
 	"github.com/touwaeriol/agent-teams/server/internal/blobmigrate"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/config"
+	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-const storageUsage = `usage: atctl storage migrate|verify|purge-data|restore [--table attachments|shared|all] [--batch N] [--limit N] [--dry-run]
+const storageUsage = `usage: atctl storage migrate|verify|purge-data|restore|import-shared [--table attachments|shared|all] [--batch N] [--limit N] [--dry-run]
 
   migrate     copy bytes from the database (data column) to the object store and record the key (data is kept)
   verify      check every migrated row that still has its data: object size and sha256
   purge-data  verify each migrated row again and clear its data column when the object matches
   restore     rollback: copy objects back into data for rows whose data was cleared (<= 20 MB)
+  import-shared  copy the old project shared files into each owner's shared folder (projects/<pid>/),
+              switching the folder on where needed; files already there are skipped (needs AGENT_TEAMS_FS_*)
 
 Needs DATABASE_URL and AGENT_TEAMS_S3_*. Every step can be re-run and interrupted. Back up the
 database before migrate and before purge-data.`
@@ -67,6 +71,9 @@ func runStorage(ctx context.Context, args []string, getenv config.Getenv, out io
 		return err
 	}
 	defer db.Close()
+	if step == "import-shared" {
+		return importShared(ctx, getenv, db, bs, o.DryRun, out)
+	}
 	r := &blobmigrate.Runner{DB: db.Pool, Blobs: bs}
 	steps := map[string]func(context.Context, blobmigrate.Options) ([]blobmigrate.Report, error){
 		"migrate": r.Migrate, "verify": r.Verify, "purge-data": r.PurgeData, "restore": r.Restore,
@@ -95,4 +102,30 @@ func runStorage(ctx context.Context, args []string, getenv config.Getenv, out io
 		return fmt.Errorf("%d rows failed (listed above)", failed)
 	}
 	return nil
+}
+
+// importShared runs userfs.ImportSharedFiles with the console's configuration.
+func importShared(ctx context.Context, getenv config.Getenv, db *store.Store, bs blobstore.Store, dryRun bool, out io.Writer) error {
+	cfg, err := config.Load(getenv)
+	if err != nil {
+		return err
+	}
+	vault, err := credvault.New(cfg.SecretKeys...)
+	if err != nil {
+		return err
+	}
+	log := slog.New(slog.NewTextHandler(out, nil))
+	svc := sharedFolders(cfg.FS, db, vault, log)
+	if !svc.Enabled() {
+		return errors.New("the shared folder is not configured (AGENT_TEAMS_FS_*, AGENT_TEAMS_SECRET_KEYS)")
+	}
+	rep, err := svc.ImportSharedFiles(ctx, bs, dryRun, log)
+	fmt.Fprintf(out, "import-shared %s\n", rep)
+	for _, e := range rep.Errors {
+		fmt.Fprintf(out, "  %s\n", e)
+	}
+	if err == nil && rep.Failed > 0 {
+		err = fmt.Errorf("%d files failed (listed above)", rep.Failed)
+	}
+	return err
 }
