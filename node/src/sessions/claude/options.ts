@@ -24,6 +24,8 @@ export interface OptionInputs {
   context?: SessionOpen["context"];
   /** Platform text appended after system_append (DriverContext.systemExtra). */
   systemExtra?: string;
+  /** Directories outside cwd the file tools may use (the shared folder). */
+  additionalDirectories?: string[];
 }
 
 const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"];
@@ -33,6 +35,7 @@ export function buildClaudeOptions(i: OptionInputs): Options {
   const c = i.claude;
   return {
     cwd: i.cwd,
+    ...(i.additionalDirectories?.length ? { additionalDirectories: i.additionalDirectories } : {}),
     model: c.model,
     ...(c.effort ? { effort: c.effort as Options["effort"] } : {}),
     tools: c.tools,

@@ -35,6 +35,8 @@ export interface DriverContext {
   log: Logger;
   /** Platform text appended to the system prompt / developer instructions (e.g. remote servers). */
   systemExtra?: string;
+  /** Absolute directories outside the worktree the session may also edit (shared folder). */
+  extraDirs?: string[];
 }
 
 export interface StartResult {
