@@ -16,7 +16,8 @@ export const projectRoutes: RouteRecordRaw[] = [
   { path: "/projects/:pid/threads/:no/full", component: () => import("@/pages/ThreadPage.vue") },
   { path: "/projects/:pid/threads/:no/:tab", component: () => import("@/pages/ThreadRoute.vue") },
   { path: "/projects/:pid/deliverables", component: () => import("@/pages/Deliverables.vue") },
-  { path: "/projects/:pid/shared-files", component: () => import("@/pages/SharedFiles.vue") },
+  { path: "/projects/:pid/files", component: () => import("@/pages/ProjectFiles.vue") },
+  { path: "/projects/:pid/shared-files", redirect: (to) => `/projects/${String(to.params.pid)}/files` },
   { path: "/projects/:pid/settings", component: () => import("@/pages/Main.vue") },
   { path: "/projects/:pid/settings/:section", component: () => import("@/pages/Main.vue") },
   { path: "/sessions/new", component: () => import("@/pages/NewSession.vue") },
@@ -29,6 +30,7 @@ export const settingsRoutes: RouteRecordRaw[] = [
   { path: "/settings/nodes", component: () => import("@/pages/settings/Nodes.vue") },
   { path: "/settings/git", component: () => import("@/pages/settings/GitRepos.vue") },
   { path: "/settings/servers", component: () => import("@/pages/settings/Servers.vue") },
+  { path: "/settings/storage", component: () => import("@/pages/settings/SharedFolder.vue") },
   { path: "/settings/appearance", component: () => import("@/pages/settings/Appearance.vue") },
 ];
 

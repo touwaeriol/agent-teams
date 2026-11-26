@@ -357,3 +357,19 @@ export function updateView(n: Pick<NodeView, "online" | "version" | "latest_vers
   if (!n.self_update) return { ...none, line: `有新版本 ${n.latest_version}；这台节点要先在机器上重新运行一次安装命令（容器节点按新的 compose.yml 重建）才能一键更新`, tone: "warn" };
   return { ...none, offer: true, line: failLine, tone: failed ? "error" : "muted" };
 }
+
+/** The node's shared-folder line (共享文件夹); null when its daemon cannot use the folder. */
+export function sharedFolderLine(n: Pick<NodeView, "shared_folder" | "online">): { text: string; tone: "ok" | "warn" | "error" | "muted"; error?: string } | null {
+  const f = n.shared_folder;
+  if (!f) return null;
+  const how = f.mode === "external" ? "（Docker 卷）" : "";
+  if (!n.online) return { text: `共享文件夹${how}：离线`, tone: "muted" };
+  const STATES: Record<string, { text: string; tone: "ok" | "warn" | "error" | "muted" }> = {
+    mounted: { text: "已挂载", tone: "ok" },
+    mounting: { text: "挂载中", tone: "warn" },
+    unmounted: { text: "未挂载", tone: "muted" },
+    error: { text: "挂载失败", tone: "error" },
+  };
+  const s = STATES[f.state] ?? { text: "未开通或未上报", tone: "muted" as const };
+  return { text: `共享文件夹${how}：${s.text}`, tone: s.tone, ...(f.state === "error" && f.error ? { error: f.error } : {}) };
+}

@@ -2267,6 +2267,72 @@
         ],
         "type": "object"
       },
+      "FileEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "content_type": {
+            "type": "string"
+          },
+          "dir": {
+            "type": "boolean"
+          },
+          "mod_time": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "description": "Relative to the project's folder",
+            "type": "string"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "dir",
+          "size",
+          "mod_time"
+        ],
+        "type": "object"
+      },
+      "FilesUploaded": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "type": "object"
+      },
+      "FolderCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
       "ForwardInputBody": {
         "additionalProperties": false,
         "properties": {
@@ -2359,6 +2425,111 @@
           "created",
           "duplicate",
           "messages"
+        ],
+        "type": "object"
+      },
+      "FsDeleteInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "description": "The volume name, typed by the user: every file in it is deleted",
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "FsDockerVolume": {
+        "additionalProperties": false,
+        "properties": {
+          "compose": {
+            "description": "Compose fragment: the juicedata/juicefs volume and how the node service mounts it",
+            "type": "string"
+          },
+          "mount": {
+            "description": "Where the node container sees the folder (AGENT_TEAMS_FS_DIR)",
+            "type": "string"
+          },
+          "plugin": {
+            "description": "Host command installing the volume plugin (once per host)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "compose",
+          "plugin",
+          "mount"
+        ],
+        "type": "object"
+      },
+      "FsView": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "description": "The console has AGENT_TEAMS_FS_* (otherwise the folder cannot be switched on)",
+            "type": "boolean"
+          },
+          "project_dir": {
+            "description": "A project's folder inside the volume, with {project_id}",
+            "type": "string"
+          },
+          "shared_dir": {
+            "description": "The folder every project of the user shares",
+            "type": "string"
+          },
+          "volume": {
+            "$ref": "#/components/schemas/FsVolumeView",
+            "description": "Absent until switched on"
+          }
+        },
+        "required": [
+          "configured",
+          "project_dir",
+          "shared_dir"
+        ],
+        "type": "object"
+      },
+      "FsVolumeView": {
+        "additionalProperties": false,
+        "properties": {
+          "capacity_gb": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "provisioning",
+              "ready",
+              "error",
+              "deleting"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "volume": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "volume",
+          "state",
+          "error",
+          "capacity_gb",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -3769,6 +3940,32 @@
         ],
         "type": "object"
       },
+      "NodeFsView": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "mode": {
+            "description": "daemon: the node mounts it itself; external: mounted for it (Docker volume plugin)",
+            "enum": [
+              "daemon",
+              "external"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "description": "mounting, mounted, unmounted, error; empty before the first report",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "state",
+          "error"
+        ],
+        "type": "object"
+      },
       "NodeLog": {
         "additionalProperties": false,
         "properties": {
@@ -4175,6 +4372,10 @@
           "self_update": {
             "description": "hello.features has self_update (the last hello while offline)",
             "type": "boolean"
+          },
+          "shared_folder": {
+            "$ref": "#/components/schemas/NodeFsView",
+            "description": "Shared-folder support and mount state; absent when the daemon cannot use it"
           },
           "since": {
             "format": "date-time",
@@ -4667,6 +4868,38 @@
           "thread_no",
           "cost_usd",
           "tokens"
+        ],
+        "type": "object"
+      },
+      "ProjectFiles": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "description": "The user's shared folder is ready (otherwise entries is empty and reason says why)",
+            "type": "boolean"
+          },
+          "dir": {
+            "description": "The folder listed, relative to the project's folder (\"\" = the project's folder)",
+            "type": "string"
+          },
+          "entries": {
+            "description": "Folders first, then files, by name",
+            "items": {
+              "$ref": "#/components/schemas/FileEntry"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "dir",
+          "entries"
         ],
         "type": "object"
       },
@@ -6220,12 +6453,12 @@
         "additionalProperties": false,
         "properties": {
           "overwrite": {
-            "description": "Replace a shared file at the path (default false: 409 file_exists)",
+            "description": "Replace a file at the path (default false: 409 file_exists)",
             "type": "boolean"
           },
           "path": {
-            "description": "Shared-file path to save it at",
-            "maxLength": 255,
+            "description": "Where to save it, relative to the project's folder",
+            "maxLength": 1024,
             "minLength": 1,
             "type": "string"
           }
@@ -7190,132 +7423,6 @@
         },
         "required": [
           "pr_url"
-        ],
-        "type": "object"
-      },
-      "SharedFile": {
-        "additionalProperties": false,
-        "properties": {
-          "content_type": {
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "sha256": {
-            "type": "string"
-          },
-          "size": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "uploaded_by": {
-            "description": "Employee name (dev-1) or user",
-            "type": "string"
-          },
-          "uploaded_by_thread_no": {
-            "description": "Thread the employee uploaded it from (shown as dev-1 #31)",
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "path",
-          "content_type",
-          "size",
-          "sha256",
-          "uploaded_by",
-          "created_at",
-          "updated_at"
-        ],
-        "type": "object"
-      },
-      "SharedFileLimits": {
-        "additionalProperties": false,
-        "properties": {
-          "file_bytes": {
-            "description": "Largest single file",
-            "format": "int64",
-            "type": "integer"
-          },
-          "project_bytes": {
-            "description": "Total of all files of the project",
-            "format": "int64",
-            "type": "integer"
-          },
-          "project_files": {
-            "description": "Number of files of the project",
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "file_bytes",
-          "project_bytes",
-          "project_files"
-        ],
-        "type": "object"
-      },
-      "SharedFileList": {
-        "additionalProperties": false,
-        "properties": {
-          "file_count": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "files": {
-            "items": {
-              "$ref": "#/components/schemas/SharedFile"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "limits": {
-            "$ref": "#/components/schemas/SharedFileLimits"
-          },
-          "total_bytes": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "files",
-          "total_bytes",
-          "file_count",
-          "limits"
-        ],
-        "type": "object"
-      },
-      "SharedFileUpload": {
-        "additionalProperties": false,
-        "properties": {
-          "files": {
-            "items": {
-              "$ref": "#/components/schemas/UploadedSharedFile"
-            },
-            "type": [
-              "array",
-              "null"
-            ]
-          },
-          "total_bytes": {
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "files",
-          "total_bytes"
         ],
         "type": "object"
       },
@@ -8521,26 +8628,16 @@
         "additionalProperties": false,
         "properties": {
           "kind": {
-            "description": "attachment: a file for a message (not counted in the project's quota); shared: a shared file",
+            "description": "attachment: a file for a message",
             "enum": [
-              "attachment",
-              "shared"
+              "attachment"
             ],
             "type": "string"
           },
           "name": {
-            "description": "File name (an attachment shows it; a shared file uses it as its path when path is not given)",
+            "description": "File name, shown with the attachment",
             "maxLength": 300,
             "minLength": 1,
-            "type": "string"
-          },
-          "overwrite": {
-            "description": "Shared files: replace a file at the path (default true); false answers 409 file_exists",
-            "type": "boolean"
-          },
-          "path": {
-            "description": "Shared files: the target path (default: name)",
-            "maxLength": 255,
             "type": "string"
           },
           "size": {
@@ -8565,13 +8662,9 @@
           },
           "kind": {
             "enum": [
-              "attachment",
-              "shared"
+              "attachment"
             ],
             "type": "string"
-          },
-          "shared_file": {
-            "$ref": "#/components/schemas/UploadedSharedFile"
           }
         },
         "required": [
@@ -8634,13 +8727,12 @@
             "type": "string"
           },
           "id": {
-            "description": "The attachment id, or the shared file's object id",
+            "description": "The attachment id",
             "type": "string"
           },
           "kind": {
             "enum": [
-              "attachment",
-              "shared"
+              "attachment"
             ],
             "type": "string"
           },
@@ -8655,7 +8747,7 @@
             "type": "integer"
           },
           "upload_id": {
-            "description": "img_… for an attachment (also its id), up_… for a shared file",
+            "description": "img_…, also the attachment's id",
             "type": "string"
           }
         },
@@ -8666,56 +8758,6 @@
           "part_size",
           "parts",
           "expires_at"
-        ],
-        "type": "object"
-      },
-      "UploadedSharedFile": {
-        "additionalProperties": false,
-        "properties": {
-          "content_type": {
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "overwritten": {
-            "description": "A file with this path existed and was replaced",
-            "type": "boolean"
-          },
-          "path": {
-            "type": "string"
-          },
-          "sha256": {
-            "type": "string"
-          },
-          "size": {
-            "format": "int64",
-            "type": "integer"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "uploaded_by": {
-            "description": "Employee name (dev-1) or user",
-            "type": "string"
-          },
-          "uploaded_by_thread_no": {
-            "description": "Thread the employee uploaded it from (shown as dev-1 #31)",
-            "format": "int64",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "overwritten",
-          "path",
-          "content_type",
-          "size",
-          "sha256",
-          "uploaded_by",
-          "created_at",
-          "updated_at"
         ],
         "type": "object"
       },
@@ -10501,7 +10543,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UploadedSharedFile"
+                  "$ref": "#/components/schemas/FileEntry"
                 }
               }
             },
@@ -10518,7 +10560,7 @@
             "description": "Error"
           }
         },
-        "summary": "Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired; 404 for one still uploading or not yet in a project)",
+        "summary": "Keep an attachment in its project's files (409 file_exists unless overwrite, 409 folder_unavailable without a shared folder, 410 attachment_expired; 404 for one still uploading or not yet in a project)",
         "tags": [
           "conversations"
         ]
@@ -14049,6 +14091,263 @@
         ]
       }
     },
+    "/api/projects/{pid}/files": {
+      "delete": {
+        "operationId": "delete-project-file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Relative to the project's folder, for example data/sample.csv",
+            "explode": false,
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "Relative to the project's folder, for example data/sample.csv",
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a file, or a folder with everything in it",
+        "tags": [
+          "files"
+        ]
+      },
+      "get": {
+        "operationId": "list-project-files",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Folder to list, relative to the project's folder",
+            "explode": false,
+            "in": "query",
+            "name": "dir",
+            "schema": {
+              "description": "Folder to list, relative to the project's folder",
+              "maxLength": 1024,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectFiles"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "A folder of the project's files (in the user's shared folder)",
+        "tags": [
+          "files"
+        ]
+      },
+      "post": {
+        "operationId": "upload-project-files",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "filename": {
+                    "contentMediaType": "application/octet-stream",
+                    "description": "filename of the file being uploaded",
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "name": {
+                    "description": "general purpose name for multipart form value",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilesUploaded"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Upload files into the project's files (multipart: file… parts; optional dir; optional path… per file, in order); a file with the same path is replaced",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/projects/{pid}/files/download": {
+      "get": {
+        "operationId": "download-project-file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Relative to the project's folder, for example data/sample.csv",
+            "explode": false,
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "description": "Relative to the project's folder, for example data/sample.csv",
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "The file"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Download one of the project's files (always as an attachment, never rendered)",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/projects/{pid}/files/folders": {
+      "post": {
+        "operationId": "create-project-folder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FolderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create a folder in the project's files",
+        "tags": [
+          "files"
+        ]
+      }
+    },
     "/api/projects/{pid}/library": {
       "post": {
         "operationId": "upload-library-file",
@@ -14958,251 +15257,6 @@
         ]
       }
     },
-    "/api/projects/{pid}/shared-files": {
-      "delete": {
-        "operationId": "delete-shared-file",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pid",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "type": "string"
-            }
-          },
-          {
-            "description": "Shared-files path, for example data/sample.csv",
-            "explode": false,
-            "in": "query",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "description": "Shared-files path, for example data/sample.csv",
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Delete one shared file",
-        "tags": [
-          "shared-files"
-        ]
-      },
-      "get": {
-        "operationId": "list-shared-files",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pid",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "type": "string"
-            }
-          },
-          {
-            "description": "Only paths starting with this text",
-            "explode": false,
-            "in": "query",
-            "name": "prefix",
-            "schema": {
-              "description": "Only paths starting with this text",
-              "maxLength": 255,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SharedFileList"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "The project's shared files (no content) with the total and the limits",
-        "tags": [
-          "shared-files"
-        ]
-      },
-      "post": {
-        "operationId": "upload-shared-files",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pid",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "properties": {
-                  "filename": {
-                    "contentMediaType": "application/octet-stream",
-                    "description": "filename of the file being uploaded",
-                    "format": "binary",
-                    "type": "string"
-                  },
-                  "name": {
-                    "description": "general purpose name for multipart form value",
-                    "type": "string"
-                  }
-                },
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SharedFileUpload"
-                }
-              }
-            },
-            "description": "Created"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Upload files to the project's shared files (multipart: file… parts; optional dir prefix; optional path… per file, in order); a file with the same path is overwritten",
-        "tags": [
-          "shared-files"
-        ]
-      }
-    },
-    "/api/projects/{pid}/shared-files/download": {
-      "get": {
-        "operationId": "download-shared-file",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pid",
-            "required": true,
-            "schema": {
-              "maxLength": 64,
-              "type": "string"
-            }
-          },
-          {
-            "description": "Shared-files path, for example data/sample.csv",
-            "explode": false,
-            "in": "query",
-            "name": "path",
-            "required": true,
-            "schema": {
-              "description": "Shared-files path, for example data/sample.csv",
-              "maxLength": 255,
-              "minLength": 1,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/octet-stream": {}
-            },
-            "description": "The file",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Content-Disposition": {
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Content-Security-Policy": {
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Content-Type": {
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Location": {
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "X-Content-Type-Options": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "302": {
-            "description": "Redirect to the object store",
-            "headers": {
-              "Location": {
-                "description": "Presigned URL",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Download one shared file (always as an attachment, never rendered): 302 to a presigned URL valid 5 minutes, or the bytes for files from before #58",
-        "tags": [
-          "shared-files"
-        ]
-      }
-    },
     "/api/projects/{pid}/threads": {
       "get": {
         "operationId": "list-threads",
@@ -15378,7 +15432,7 @@
             "description": "Error"
           }
         },
-        "summary": "Start a presigned upload of an attachment (any type, at most 200 MB) or a shared file (at most 200 MB, project quota 5 GB)",
+        "summary": "Start a presigned upload of an attachment (any type, at most 200 MB)",
         "tags": [
           "uploads"
         ]
@@ -15483,7 +15537,7 @@
             "description": "Error"
           }
         },
-        "summary": "Finish an upload: the object's size is checked, an attachment's type sniffed, a shared file put at its path",
+        "summary": "Finish an upload: the object's size is checked and its type sniffed",
         "tags": [
           "uploads"
         ]
@@ -16692,6 +16746,129 @@
         "summary": "Delete an uploaded skill and remove it from the roles",
         "tags": [
           "team"
+        ]
+      }
+    },
+    "/api/storage/fs": {
+      "delete": {
+        "operationId": "delete-shared-folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FsDeleteInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete the shared folder and every file in it",
+        "tags": [
+          "storage"
+        ]
+      },
+      "get": {
+        "operationId": "get-shared-folder",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "My shared folder (JuiceFS volume)",
+        "tags": [
+          "storage"
+        ]
+      },
+      "post": {
+        "operationId": "enable-shared-folder",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Switch the shared folder on (or retry a failed provisioning)",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/storage/fs/docker-volume": {
+      "post": {
+        "operationId": "shared-folder-docker-volume",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsDockerVolume"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Compose volume for a Docker node (carries the metadata password)",
+        "tags": [
+          "storage"
         ]
       }
     },

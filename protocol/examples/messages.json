@@ -1237,65 +1237,6 @@
   },
   {
     "v": 2,
-    "type": "tool.call",
-    "id": "n_01JD3V00000000000000000SH1",
-    "seq": 2006,
-    "ts": "2026-11-14T12:02:05Z",
-    "body": {
-      "call_id": "tc_01JG",
-      "session_id": "s_01JD",
-      "open_gen": 1,
-      "tool": "write_shared_file",
-      "args": {
-        "file": "out/sample.csv",
-        "path": "data/sample.csv"
-      },
-      "upload": {
-        "upload_id": "up_01JD3V00000000000000SH",
-        "chunks": 1,
-        "files": [
-          {
-            "path": "data/sample.csv",
-            "size": 8,
-            "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
-            "content_type": "text/csv; charset=utf-8"
-          }
-        ]
-      }
-    }
-  },
-  {
-    "v": 2,
-    "type": "tool.call",
-    "id": "n_01JD3V00000000000000000SH9",
-    "seq": 2006,
-    "ts": "2026-11-14T12:02:05Z",
-    "body": {
-      "call_id": "tc_01JS",
-      "session_id": "s_01JD",
-      "open_gen": 1,
-      "tool": "write_shared_file",
-      "args": {
-        "file": "out/big.zip",
-        "path": "data/big.zip"
-      },
-      "upload": {
-        "upload_id": "up_01JD3V00000000000000S3",
-        "storage": "s3",
-        "chunks": 0,
-        "files": [
-          {
-            "path": "data/big.zip",
-            "size": 157286400,
-            "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
-            "content_type": "application/zip"
-          }
-        ]
-      }
-    }
-  },
-  {
-    "v": 2,
     "type": "file.download",
     "id": "c_01JD3V00000000000000000SH2",
     "seq": 996,
@@ -1306,78 +1247,6 @@
       "download_id": "dn_01jd3v000000000000000000sh",
       "index": 0,
       "data": "YSxiCjEsMgo="
-    }
-  },
-  {
-    "v": 2,
-    "type": "tool.result",
-    "id": "c_01JD3V00000000000000000SH3",
-    "seq": 997,
-    "ts": "2026-11-14T12:02:06Z",
-    "body": {
-      "session_id": "s_01JD",
-      "call_id": "tc_01JH",
-      "ok": true,
-      "content": [
-        {
-          "type": "text",
-          "text": "fetched data/sample.csv"
-        }
-      ],
-      "structured": {
-        "path": "data/sample.csv",
-        "size": 8,
-        "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
-        "local_path": ".shared/data/sample.csv"
-      },
-      "shared_download": {
-        "download_id": "dn_01jd3v000000000000000000sh",
-        "chunks": 1,
-        "files": [
-          {
-            "path": "data/sample.csv",
-            "size": 8,
-            "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b"
-          }
-        ]
-      }
-    }
-  },
-  {
-    "v": 2,
-    "type": "tool.result",
-    "id": "c_01JD3V00000000000000000SH8",
-    "seq": 997,
-    "ts": "2026-11-14T12:02:06Z",
-    "body": {
-      "session_id": "s_01JD",
-      "call_id": "tc_01JT",
-      "ok": true,
-      "content": [
-        {
-          "type": "text",
-          "text": "fetched data/sample.csv"
-        }
-      ],
-      "structured": {
-        "path": "data/sample.csv",
-        "size": 8,
-        "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
-        "local_path": ".shared/data/sample.csv"
-      },
-      "shared_download": {
-        "download_id": "dn_01jd3v000000000000000000sh",
-        "chunks": 0,
-        "files": [
-          {
-            "path": "data/sample.csv",
-            "size": 8,
-            "sha256": "9f0b1e5c0b3c2c0e7d1fa1b7bc7f0b4b8f8a5e3e1c4d1f0e2a3b4c5d6e7f8a9b",
-            "url": "https://rustfs.example/agent-teams/projects/7a1c/shared/x?X-Amz-Signature=abc",
-            "expires_at": "2026-11-14T12:17:06Z"
-          }
-        ]
-      }
     }
   },
   {
@@ -1872,6 +1741,50 @@
     "body": {
       "ref_id": "c_01JD3V000000000000000000Q",
       "code": "bad_schema"
+    }
+  },
+  {
+    "v": 2,
+    "type": "fs.mount",
+    "id": "c_01JD3V0000000000000000F01",
+    "ts": "2026-11-26T12:00:00.000Z",
+    "body": {
+      "volume": "at-01jd3v0000",
+      "generation": 1,
+      "meta_url": "postgres://jfs_01jd3v0000@db.example.net:15432/agent_teams?sslmode=verify-full&search_path=jfs_01jd3v0000",
+      "meta_password": "secret",
+      "client": {
+        "version": "1.4.2",
+        "assets": [
+          {
+            "platform": "linux-amd64",
+            "url": "https://github.com/juicedata/juicefs/releases/download/v1.4.2/juicefs-1.4.2-linux-amd64.tar.gz",
+            "sha256": "79648a0a67145bf42ca4e8336578c13a5bbc9a0bd34df340b3b93dac1e975247"
+          }
+        ]
+      },
+      "cache_size_mb": 10240
+    }
+  },
+  {
+    "v": 2,
+    "type": "fs.unmount",
+    "id": "c_01JD3V0000000000000000F02",
+    "ts": "2026-11-26T12:00:00.000Z",
+    "body": {
+      "volume": "at-01jd3v0000"
+    }
+  },
+  {
+    "v": 2,
+    "type": "fs.status",
+    "id": "n_01JD3V0000000000000000F03",
+    "ts": "2026-11-26T12:00:01.000Z",
+    "body": {
+      "state": "mounted",
+      "mode": "daemon",
+      "volume": "at-01jd3v0000",
+      "generation": 1
     }
   }
 ]

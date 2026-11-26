@@ -3,6 +3,7 @@ package orchapi
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -213,7 +214,11 @@ func (a *API) deleteDeliverable(ctx context.Context, in *deliverableIDInput) (*s
 	if err != nil {
 		return nil, err
 	}
-	return nil, a.e.Core.InTx(ctx, func(tx *core.Tx) error {
+	remove, err := a.e.Core.Artifacts().Remover(ctx, d.ID)
+	if err != nil {
+		slog.Warn("deliverable folder not resolved; it stays in the shared folder", "deliverable_id", d.ID, "err", err)
+	}
+	err = a.e.Core.InTx(ctx, func(tx *core.Tx) error {
 		if err := core.DeleteDeliverable(ctx, tx, d.ID); err != nil {
 			return err
 		}
@@ -221,4 +226,11 @@ func (a *API) deleteDeliverable(ctx context.Context, in *deliverableIDInput) (*s
 			map[string]any{"deliverable": map[string]any{"id": d.ID}, "op": "delete"})
 		return err
 	})
+	if err != nil {
+		return nil, err
+	}
+	if err := remove(ctx); err != nil {
+		slog.Warn("deliverable folder not removed from the shared folder", "deliverable_id", d.ID, "err", err)
+	}
+	return nil, nil
 }

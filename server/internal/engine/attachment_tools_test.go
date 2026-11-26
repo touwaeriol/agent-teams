@@ -1,6 +1,8 @@
 package engine_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -9,12 +11,11 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
-	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // v2Features are the hello features of a daemon with attachments_v2 (#58).
-var v2Features = []string{"sessions", "git_worktree", "cred_helper", "file_download", "shared_files", "attachments_v2"}
+var v2Features = []string{"sessions", "git_worktree", "cred_helper", "file_download", "attachments_v2"}
 
 // attTeam is a project with a thread whose lead is up; the node has attachments_v2 when v2.
 func attTeam(t *testing.T, v2 bool) *team {
@@ -50,7 +51,7 @@ func putAttachment(t *testing.T, tm *team, projectID, name, typ string, data []b
 		t.Fatal(err)
 	}
 	a, err := core.InsertAttachment(tm.w.ctx, c.Pool, c.Blobs, c.AttachmentTTL, core.Attachment{ID: core.NewID("img"),
-		ProjectID: projectID, UserID: owner, Name: name, ContentType: typ, Size: len(data), SHA256: sharedfiles.Sum(data)}, data)
+		ProjectID: projectID, UserID: owner, Name: name, ContentType: typ, Size: len(data), SHA256: sum256(data)}, data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,11 +314,9 @@ func TestSubthreadAndRelayAttachments(t *testing.T) {
 	}
 }
 
-// TestReadAndSaveAttachment: read_attachment answers with a presigned download (never the
-// content) on attachments_v2 daemons and is refused on older ones; save_attachment copies the
-// attachment into the shared files, refuses an existing path without overwrite, replaces it with
-// overwrite and respects the project quota.
-func TestReadAndSaveAttachment(t *testing.T) {
+// TestReadAttachment: read_attachment answers with a presigned download (never the content)
+// on attachments_v2 daemons.
+func TestReadAttachment(t *testing.T) {
 	tm := attTeam(t, true)
 	zip := putAttachment(t, tm, tm.projectID, "data.zip", "application/zip", []byte("PK\x03\x04 payload"))
 	r := tm.lead.mustCall("read_attachment", map[string]any{"id": zip.ID})
@@ -331,35 +330,6 @@ func TestReadAndSaveAttachment(t *testing.T) {
 	if out.LocalPath == "" || string(out.ID) != zip.ID {
 		t.Fatalf("read_attachment structured %+v", out)
 	}
-
-	r = tm.lead.mustCall("save_attachment", map[string]any{"id": zip.ID, "path": "inputs/data.zip"})
-	var saved protocol.SaveAttachmentResult
-	_ = json.Unmarshal(*r.Structured, &saved)
-	if saved.Path != "inputs/data.zip" || saved.Size != zip.Size || saved.Overwritten {
-		t.Fatalf("save_attachment %+v", saved)
-	}
-	c := tm.w.e.Core
-	f, data, err := sharedfiles.Load(tm.w.ctx, c.Pool, c.Blobs, tm.projectID, "inputs/data.zip")
-	if err != nil || string(data) != "PK\x03\x04 payload" || f.UploadedBy != "lead-1" {
-		t.Fatalf("shared file %+v %q %v", f, data, err)
-	}
-	r = tm.lead.call("save_attachment", map[string]any{"id": zip.ID, "path": "inputs/data.zip"})
-	if r.Ok || !strings.Contains(text(r), "已经存在") || !strings.Contains(text(r), "overwrite") {
-		t.Fatalf("save over existing: ok=%v %q", r.Ok, text(r))
-	}
-	r = tm.lead.mustCall("save_attachment", map[string]any{"id": zip.ID, "path": "inputs/data.zip", "overwrite": true})
-	_ = json.Unmarshal(*r.Structured, &saved)
-	if !saved.Overwritten {
-		t.Fatalf("overwrite %+v", saved)
-	}
-
-	tm.sql(t, `INSERT INTO at_shared_files (project_id, path, content_type, size, uploaded_by, storage_key, object_id, state)
-		VALUES ($1, 'big.bin', 'application/octet-stream', $2, 'user', 'projects/x/shared/sf_big', 'sf_big', 'ready')`,
-		tm.projectID, sharedfiles.MaxProjectBytes-8)
-	r = tm.lead.call("save_attachment", map[string]any{"id": zip.ID, "path": "inputs/again.zip"})
-	if r.Ok || !strings.Contains(text(r), "合计不能超过") {
-		t.Fatalf("over quota: ok=%v %q", r.Ok, text(r))
-	}
 }
 
 // TestReadAttachmentOldDaemon: a daemon without attachments_v2 cannot download attachments.
@@ -372,52 +342,11 @@ func TestReadAttachmentOldDaemon(t *testing.T) {
 	}
 }
 
-// TestReadSharedFilePresigned: on an attachments_v2 daemon read_shared_file answers with a
-// presigned URL (no file.download frames); before the sha256 is known it asks to retry later.
-func TestReadSharedFilePresigned(t *testing.T) {
-	tm := attTeam(t, true)
-	c := tm.w.e.Core
-	if _, _, err := sharedfiles.Put(tm.w.ctx, c.Pool, c.Blobs, tm.projectID, "docs/a.md", []byte("hello"), sharedfiles.Uploader{Name: "user"}); err != nil {
-		t.Fatal(err)
-	}
-	r := tm.lead.mustCall("read_shared_file", map[string]any{"path": "docs/a.md"})
-	sd := r.SharedDownload
-	if sd == nil || sd.Chunks != 0 || len(sd.Files) != 1 || sd.Files[0].URL == nil || sd.Files[0].SHA256 != sharedfiles.Sum([]byte("hello")) {
-		t.Fatalf("shared download %+v", sd)
-	}
-	expectNone(t, tm.n, protocol.TypeFileDownload, 200*time.Millisecond, func(nodetest.Frame) bool { return true })
-
-	// The finished call keeps the presigned download, so a repeated call (its result command
-	// retired) gets the same one back.
-	var stored []byte
-	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT result FROM at_tool_calls WHERE session_id = $1 AND tool = 'read_shared_file'
-		ORDER BY created_at DESC LIMIT 1`, tm.lead.session).Scan(&stored); err != nil {
-		t.Fatal(err)
-	}
-	var kept struct {
-		SharedDownload *protocol.ToolSharedDownload `json:"shared_download"`
-	}
-	_ = json.Unmarshal(stored, &kept)
-	if kept.SharedDownload == nil || kept.SharedDownload.Files[0].URL == nil || *kept.SharedDownload.Files[0].URL != *sd.Files[0].URL {
-		t.Fatalf("stored result %s", stored)
-	}
-	tm.sql(t, `UPDATE at_shared_files SET sha256 = NULL WHERE project_id = $1 AND path = 'docs/a.md'`, tm.projectID)
-	r = tm.lead.call("read_shared_file", map[string]any{"path": "docs/a.md"})
-	if r.Ok || !strings.Contains(text(r), "请稍后再试") {
-		t.Fatalf("unhashed: ok=%v %q", r.Ok, text(r))
-	}
-}
-
-// TestRepeatedDownloadCallsResign: a repeated read_shared_file / read_attachment (the daemon
-// reconnected and sent the call again) answers from the stored result, but with freshly signed
-// URLs: the stored ones may have expired. A shared file replaced since keeps the stored URL (the
-// daemon then reports the failed download instead of getting other bytes).
+// TestRepeatedDownloadCallsResign: a repeated read_attachment (the daemon reconnected and sent
+// the call again) answers from the stored result, but with a freshly signed URL: the stored one
+// may have expired.
 func TestRepeatedDownloadCallsResign(t *testing.T) {
 	tm := attTeam(t, true)
-	c := tm.w.e.Core
-	if _, _, err := sharedfiles.Put(tm.w.ctx, c.Pool, c.Blobs, tm.projectID, "docs/a.md", []byte("hello"), sharedfiles.Uploader{Name: "user"}); err != nil {
-		t.Fatal(err)
-	}
 	zip := putAttachment(t, tm, tm.projectID, "data.zip", "application/zip", []byte("PK\x03\x04 payload"))
 	stale := "http://stale.invalid/expired"
 	retire := func(callID string) {
@@ -441,33 +370,12 @@ func TestRepeatedDownloadCallsResign(t *testing.T) {
 		retire(callID)
 	}
 
-	first := repeat("read_shared_file", "tc_rs_1", map[string]any{"path": "docs/a.md"})
-	if !first.Ok || first.SharedDownload == nil || first.SharedDownload.Files[0].URL == nil {
-		t.Fatalf("first read %+v", first)
-	}
-	age("tc_rs_1", "{shared_download,files,0,url}")
-	again := repeat("read_shared_file", "tc_rs_1", map[string]any{"path": "docs/a.md"})
-	f := again.SharedDownload.Files[0]
-	if !again.Ok || f.URL == nil || *f.URL == stale || !strings.HasPrefix(*f.URL, "http") || f.ExpiresAt == nil ||
-		f.SHA256 != sharedfiles.Sum([]byte("hello")) || again.SharedDownload.DownloadID != first.SharedDownload.DownloadID {
-		t.Fatalf("repeated read_shared_file not re-signed %+v", again.SharedDownload)
-	}
-
-	// Replaced since: the stored URL goes out as is.
-	if _, _, err := sharedfiles.Put(tm.w.ctx, c.Pool, c.Blobs, tm.projectID, "docs/a.md", []byte("changed"), sharedfiles.Uploader{Name: "user"}); err != nil {
-		t.Fatal(err)
-	}
-	retire("tc_rs_1")
-	if r := repeat("read_shared_file", "tc_rs_1", map[string]any{"path": "docs/a.md"}); *r.SharedDownload.Files[0].URL != stale {
-		t.Fatalf("replaced file re-signed %+v", r.SharedDownload.Files[0])
-	}
-
-	first = repeat("read_attachment", "tc_ra_1", map[string]any{"id": zip.ID})
+	first := repeat("read_attachment", "tc_ra_1", map[string]any{"id": zip.ID})
 	if !first.Ok || first.AttachmentDownload == nil || first.AttachmentDownload.URL == nil {
 		t.Fatalf("first read_attachment %+v", first)
 	}
 	age("tc_ra_1", "{attachment_download,url}")
-	again = repeat("read_attachment", "tc_ra_1", map[string]any{"id": zip.ID})
+	again := repeat("read_attachment", "tc_ra_1", map[string]any{"id": zip.ID})
 	if d := again.AttachmentDownload; d == nil || d.URL == nil || *d.URL == stale || !strings.HasPrefix(*d.URL, "http") || d.Attachment.ID != zip.ID {
 		t.Fatalf("repeated read_attachment not re-signed %+v", d)
 	}
@@ -506,4 +414,9 @@ func TestReplyToAttachments(t *testing.T) {
 	if !res.Ok || !strings.Contains(text(res), pdf.ID) || !strings.Contains(text(res), "read_attachment") {
 		t.Fatalf("ask_lead answer %q", text(res))
 	}
+}
+
+func sum256(b []byte) string {
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])
 }

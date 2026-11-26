@@ -89,6 +89,32 @@
       ]
     },
     {
+      "type": "fs.mount",
+      "name": "FsMount",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": [
+        "volume",
+        "generation"
+      ]
+    },
+    {
+      "type": "fs.status",
+      "name": "FsStatus",
+      "direction": "node_to_console",
+      "reliable": false,
+      "key": []
+    },
+    {
+      "type": "fs.unmount",
+      "name": "FsUnmount",
+      "direction": "console_to_node",
+      "reliable": false,
+      "key": [
+        "volume"
+      ]
+    },
+    {
       "type": "git.cleanup",
       "name": "GitCleanup",
       "direction": "console_to_node",
@@ -907,40 +933,6 @@
       }
     },
     {
-      "name": "delete_shared_file",
-      "input": "DeleteSharedFileInput",
-      "result": "DeleteSharedFileResult",
-      "tiers": [
-        "coordinator",
-        "lead",
-        "member"
-      ],
-      "blocking": [],
-      "requires": null,
-      "description": "Delete one of the project's shared files for everyone (copies already fetched into working directories stay). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project.",
-      "input_schema": {
-        "description": "Delete one of the project's shared files for everyone (copies already fetched into working directories stay). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project.",
-        "type": "object",
-        "required": [
-          "path"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "path": {
-            "description": "Path of a file in the project's shared files: relative, '/'-separated, 1 to 8 segments, at most 255 bytes in UTF-8 (the schema can only check 255 characters; the server's byte check is authoritative). No segment may be empty, '.', '..', start with '.' (so no hidden files and nothing under .shared or .agent-*) or start or end with a space; no backslash, control characters (C0, DEL, C1), U+2028/U+2029 or leading '/'.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255,
-            "pattern": "^[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?(?:/[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?){0,7}$",
-            "examples": [
-              "data/sample.csv",
-              "notes.md"
-            ]
-          }
-        }
-      }
-    },
-    {
       "name": "enqueue_merge",
       "input": "EnqueueMergeInput",
       "result": "EnqueueMergeResult",
@@ -1111,33 +1103,6 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 32
-          }
-        }
-      }
-    },
-    {
-      "name": "list_shared_files",
-      "input": "ListSharedFilesInput",
-      "result": "ListSharedFilesResult",
-      "tiers": [
-        "coordinator",
-        "lead",
-        "member"
-      ],
-      "blocking": [],
-      "requires": null,
-      "description": "List the project's shared files (path, size, type, checksum, who uploaded it and when), sorted by path, with the project's total size and limit. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project. Fetch one with read_shared_file, add or replace one with write_shared_file.",
-      "input_schema": {
-        "description": "List the project's shared files (path, size, type, checksum, who uploaded it and when), sorted by path, with the project's total size and limit. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project. Fetch one with read_shared_file, add or replace one with write_shared_file.",
-        "type": "object",
-        "required": [],
-        "additionalProperties": false,
-        "properties": {
-          "prefix": {
-            "description": "Only paths starting with this text (for example data/ or data/2026-).",
-            "type": "string",
-            "maxLength": 255,
-            "pattern": "^([^/\\\\\\x00-\\x1f\\x7f][^\\\\\\x00-\\x1f\\x7f]*)?$"
           }
         }
       }
@@ -1791,40 +1756,6 @@
       }
     },
     {
-      "name": "read_shared_file",
-      "input": "ReadSharedFileInput",
-      "result": "ReadSharedFileResult",
-      "tiers": [
-        "coordinator",
-        "lead",
-        "member"
-      ],
-      "blocking": [],
-      "requires": null,
-      "description": "Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 200 MB per file, 5 GB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).",
-      "input_schema": {
-        "description": "Download one of the project's shared files to .shared/<path> in your working directory (the folder is git-ignored) and return that local path; the result never contains the file's content, so read it with your file tools. Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. An existing local copy at the same path is overwritten. Limits: 200 MB per file, 5 GB per project. To change the shared file, edit the local copy and call write_shared_file(file=.shared/<path>).",
-        "type": "object",
-        "required": [
-          "path"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "path": {
-            "description": "Path in the shared files, for example data/sample.csv (see list_shared_files).",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255,
-            "pattern": "^[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?(?:/[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?){0,7}$",
-            "examples": [
-              "data/sample.csv",
-              "notes.md"
-            ]
-          }
-        }
-      }
-    },
-    {
       "name": "remember",
       "input": "RememberInput",
       "result": null,
@@ -1985,51 +1916,6 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 500
-          }
-        }
-      }
-    },
-    {
-      "name": "save_attachment",
-      "input": "SaveAttachmentInput",
-      "result": "SaveAttachmentResult",
-      "tiers": [
-        "coordinator",
-        "lead",
-        "member"
-      ],
-      "blocking": [],
-      "requires": null,
-      "description": "Save an attachment (img_… id from a message's attachment block) as one of the project's shared files at path, so every session and user of the project can find it later with list_shared_files/read_shared_file. The platform copies it without it passing through your working directory. Refused when a shared file already has this path unless overwrite is true. Same rules as write_shared_file: no secrets; limits 200 MB per file, 5 GB per project.",
-      "input_schema": {
-        "description": "Save an attachment (img_… id from a message's attachment block) as one of the project's shared files at path, so every session and user of the project can find it later with list_shared_files/read_shared_file. The platform copies it without it passing through your working directory. Refused when a shared file already has this path unless overwrite is true. Same rules as write_shared_file: no secrets; limits 200 MB per file, 5 GB per project.",
-        "type": "object",
-        "required": [
-          "id",
-          "path"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "description": "Attachment id (img_…), as listed in a message's [附件]/[Attachments] block.",
-            "type": "string",
-            "pattern": "^img_[0-9A-Za-z]{1,60}$"
-          },
-          "path": {
-            "description": "Target path in the shared files, for example inputs/spec.pdf.",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255,
-            "pattern": "^[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?(?:/[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?){0,7}$",
-            "examples": [
-              "data/sample.csv",
-              "notes.md"
-            ]
-          },
-          "overwrite": {
-            "description": "Replace an existing shared file with this path.",
-            "type": "boolean",
-            "default": false
           }
         }
       }
@@ -2434,46 +2320,6 @@
           "task_id": {
             "type": "string",
             "pattern": "^t[0-9]+$"
-          }
-        }
-      }
-    },
-    {
-      "name": "write_shared_file",
-      "input": "WriteSharedFileInput",
-      "result": "WriteSharedFileResult",
-      "tiers": [
-        "coordinator",
-        "lead",
-        "member"
-      ],
-      "blocking": [],
-      "requires": null,
-      "description": "Upload one file from your working directory to the project's shared files (store data, samples, exports other sessions or users need; not deliverables, use publish_file for those). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project.",
-      "input_schema": {
-        "description": "Upload one file from your working directory to the project's shared files (store data, samples, exports other sessions or users need; not deliverables, use publish_file for those). Shared files belong to the project: every session (coordinator, leads, members of all threads) and every user of the project can see, overwrite and delete them; they are stored by the platform, never in git. Do not put secrets (keys, passwords, tokens, credentials) in shared files. A file with the same path is overwritten. Limits: 200 MB per file, 5 GB per project.",
-        "type": "object",
-        "required": [
-          "file"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "file": {
-            "description": "A single file inside your working directory, relative to it (directories are refused).",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 500
-          },
-          "path": {
-            "description": "Target path in the shared files. Default: file normalised to a relative path, with a leading .shared/ removed (so a file fetched with read_shared_file goes back to the same path).",
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 255,
-            "pattern": "^[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?(?:/[^. /\\\\\\x00-\\x1f\\x7f-\\x9f  ](?:[^/\\\\\\x00-\\x1f\\x7f-\\x9f  ]*[^ /\\\\\\x00-\\x1f\\x7f-\\x9f  ])?){0,7}$",
-            "examples": [
-              "data/sample.csv",
-              "notes.md"
-            ]
           }
         }
       }

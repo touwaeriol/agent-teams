@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import bundle from "../../../protocol/gen/bundle.schema.json" with { type: "json" };
 import type { ToolUpload, UploadFile } from "../protocol.js";
 import { newId } from "../util/ids.js";
 import { isInside } from "../util/paths.js";
@@ -11,19 +10,8 @@ import { isInside } from "../util/paths.js";
 export const MAX_BYTES = 5 * 1024 * 1024;
 export const MAX_FILES = 64;
 export const CHUNK_BYTES = 1024 * 1024;
-/** Per-file limit of write_shared_file / read_shared_file (the console checks it again). */
-export const MAX_SHARED_BYTES = 200 * 1024 * 1024;
-/** …when the bytes travel as file.chunk / file.download frames (consoles without presigned transfers). */
-export const MAX_CHUNKED_SHARED_BYTES = 20 * 1024 * 1024;
 /** UploadFile.content_type is at most 100 characters (tool.call.json). */
 export const MAX_CONTENT_TYPE = 100;
-/** Folder (relative to the session's working directory) shared files are fetched into; write_shared_file strips it from a default path. */
-export const SHARED_DIR = ".shared";
-/** SharedPath of the tool contract (tools/common.json), taken from the generated bundle so it never drifts. */
-const SHARED_PATH = new RegExp((bundle as unknown as { $defs: { SharedPath: { pattern: string } } }).$defs.SharedPath.pattern);
-const MAX_SHARED_PATH_BYTES = 255;
-const SHARED_PATH_RULES = "relative, '/'-separated, 1 to 8 parts, at most 255 bytes; no part empty, starting with a dot or starting/ending with a space; no backslash or control characters";
-
 /** Allowed extensions and the type they are served with (same list as the console). */
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8", ".md": "text/markdown; charset=utf-8",
@@ -58,69 +46,20 @@ export function validFilePath(path: string): boolean {
   return path.length > 0 && path.length <= 300 && !!contentType(path) && path.split("/").every((part) => NAME.test(part));
 }
 
-/** A stored shared-files path (tools/common.json#SharedPath). */
-export function validSharedPath(path: string): boolean {
-  return path.length > 0 && Buffer.byteLength(path, "utf8") <= MAX_SHARED_PATH_BYTES && SHARED_PATH.test(path);
-}
-
 /**
  * Reads what publish_file points at: one file, or a directory with index.html (a small site).
- * The path must stay inside the employee's working directory after resolving symlinks; hidden
- * files, node_modules and symlinks inside a directory are skipped.
+ * The path must stay inside the employee's working directory, or one of `extraRoots` (the session's
+ * shared-folder directories, reached through .project-files / .user-files), after resolving
+ * symlinks; hidden files, node_modules and symlinks inside a directory are skipped.
  */
-export async function prepareUpload(cwd: string, rawPath: unknown): Promise<PreparedUpload> {
-  const { real: abs } = await resolveInside(cwd, rawPath, "publish_file only publishes files inside your working directory");
+export async function prepareUpload(cwd: string, rawPath: unknown, extraRoots: string[] = []): Promise<PreparedUpload> {
+  const { real: abs } = await resolveInside(cwd, rawPath, "publish_file only publishes files inside your working directory or the shared folder", extraRoots);
   const st = await lstat(abs);
   if (!st.isDirectory() && !st.isFile()) throw new UploadError(`${String(rawPath)}: not a regular file`);
   const picked = st.isDirectory() ? await walkSite(abs) : [checkFile({ path: basename(abs), abs })];
   checkSize((await Promise.all(picked.map((p) => lstat(p.abs)))).reduce((n, s) => n + s.size, 0), MAX_BYTES);
   const bodies = await readAll(picked, MAX_BYTES);
   return buildUpload(picked.map((p, i) => ({ path: p.path, body: bodies[i]!, contentType: contentType(p.path)! })));
-}
-
-/** The file write_shared_file points at, checked but not read. */
-export interface SharedSource {
-  /** Real path of the file. */
-  real: string;
-  /** Target shared path. */
-  target: string;
-  size: number;
-  contentType: string;
-}
-
-/**
- * Resolves the single file write_shared_file points at (args.file): a regular file inside the working
- * directory after resolving symlinks (directories are refused), any type, at most `max` bytes.
- * The target path is args.path, or args.file normalised to a path relative to the working directory
- * with a leading .shared/ removed (a file fetched with read_shared_file goes back to the same path).
- */
-export async function resolveSharedUpload(cwd: string, rawFile: unknown, rawTarget: unknown, max = MAX_SHARED_BYTES): Promise<SharedSource> {
-  if (rawTarget !== undefined && rawTarget !== null && (typeof rawTarget !== "string" || !validSharedPath(rawTarget))) {
-    throw new UploadError(`path ${JSON.stringify(rawTarget)} is not a valid shared path (${SHARED_PATH_RULES})`);
-  }
-  const { real, rel } = await resolveInside(cwd, rawFile, "write_shared_file only uploads files inside your working directory");
-  const st = await lstat(real);
-  if (st.isDirectory()) throw new UploadError(`${String(rawFile)} is a directory; write_shared_file uploads one file`);
-  if (!st.isFile()) throw new UploadError(`${String(rawFile)}: not a regular file`);
-  checkSize(st.size, max);
-  const target = typeof rawTarget === "string" ? rawTarget : defaultSharedPath(rel);
-  if (!validSharedPath(target)) {
-    throw new UploadError(`the default shared path ${JSON.stringify(target)} (derived from file) is not valid (${SHARED_PATH_RULES}); pass path to choose a target`);
-  }
-  return { real, target, size: st.size, contentType: (contentType(target) ?? "application/octet-stream").slice(0, MAX_CONTENT_TYPE) };
-}
-
-/** write_shared_file as file.chunk frames (consoles without POST /nodes/uploads): the file read into memory, at most `max` bytes. */
-export async function prepareSharedUpload(cwd: string, rawFile: unknown, rawTarget: unknown, max = MAX_CHUNKED_SHARED_BYTES): Promise<PreparedUpload> {
-  const src = await resolveSharedUpload(cwd, rawFile, rawTarget, max);
-  const [body] = await readAll([{ path: String(rawFile), abs: src.real }], max);
-  return buildUpload([{ path: src.target, body: body!, contentType: src.contentType }]);
-}
-
-/** The default target of write_shared_file: the file's path relative to cwd, without a leading .shared/. */
-export function defaultSharedPath(rel: string): string {
-  const parts = rel.split("/");
-  return (parts[0] === SHARED_DIR && parts.length > 1 ? parts.slice(1) : parts).join("/");
 }
 
 /** The upload frame and its base64 chunks for files read into memory (all files concatenated, CHUNK_BYTES each). */
@@ -131,18 +70,19 @@ function buildUpload(entries: { path: string; body: Buffer; contentType: string 
 }
 
 /**
- * Resolves a path given by the employee: it must exist and stay inside the working directory after
- * resolving symlinks. Returns the real path and the normalised '/'-separated path relative to cwd
+ * Resolves a path given by the employee: it must exist and stay inside the working directory (or one
+ * of extraRoots) after resolving symlinks. Returns the real path and the normalised '/'-separated path relative to cwd
  * (lexical when the given path is inside cwd, so a symlink keeps its own name).
  */
-async function resolveInside(cwd: string, rawPath: unknown, outside: string): Promise<{ real: string; rel: string }> {
+async function resolveInside(cwd: string, rawPath: unknown, outside: string, extraRoots: string[] = []): Promise<{ real: string; rel: string }> {
   if (typeof rawPath !== "string" || !rawPath.trim() || rawPath.includes("\0")) throw new UploadError("path is required");
   const root = await realpath(cwd);
   const wanted = isAbsolute(rawPath) ? resolve(rawPath) : resolve(cwd, rawPath);
   const real = await realpath(wanted).catch(() => {
     throw new UploadError(`no such file: ${rawPath}`);
   });
-  if (!isInside(root, real) || real === root) throw new UploadError(outside);
+  const roots = [root, ...(await Promise.all(extraRoots.map((r) => realpath(r).catch(() => null))))];
+  if (!roots.some((r) => r && isInside(r, real) && real !== r)) throw new UploadError(outside);
   const lexical = relative(resolve(cwd), wanted);
   const rel = lexical && isInside(resolve(cwd), wanted) ? lexical : relative(root, real);
   return { real, rel: rel.split(sep).join("/") };

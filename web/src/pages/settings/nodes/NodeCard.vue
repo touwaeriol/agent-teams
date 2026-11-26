@@ -15,7 +15,7 @@ import { nodeSlots } from "@/components/shell/nodes";
 import { toast } from "@/lib/toast";
 import NodeSessions from "./NodeSessions.vue";
 import NodeSettings from "./NodeSettings.vue";
-import { accountView, cliRows, hoverIntent, needsUsageRefresh, recheckState, refreshCooldown, nodeMeta, runtimeInfos, slotPct, updateView, usageView, withNode, withNodeUsage, type CliTone, type UsageView } from "./nodes";
+import { accountView, cliRows, hoverIntent, needsUsageRefresh, recheckState, refreshCooldown, nodeMeta, runtimeInfos, sharedFolderLine, slotPct, updateView, usageView, withNode, withNodeUsage, type CliTone, type UsageView } from "./nodes";
 
 const props = defineProps<{ node: NodeView }>();
 const emit = defineEmits<{ token: [enrollment: Enrollment] }>();
@@ -72,6 +72,7 @@ onBeforeUnmount(hover.leave);
 const rotate = useAction(() => nodeActions.rotate(props.node.id), { invalidate: [keys.nodes], onSuccess: (e) => emit("token", e) });
 const remove = useAction(() => nodeActions.remove(props.node.id), { invalidate: [keys.nodes], success: "节点已移除" });
 const update = computed(() => updateView(props.node));
+const fsLine = computed(() => sharedFolderLine(props.node));
 const UPDATE_TONE = { muted: "text-muted-foreground", ok: "text-[hsl(var(--ok))]", warn: "text-[hsl(var(--warn))]", error: "text-destructive" } as const;
 const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.upgrade(props.node.id, mode), { invalidate: [keys.nodes] });
 </script>
@@ -122,6 +123,12 @@ const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.
       <span :class="UPDATE_TONE[update.tone]">{{ update.line }}</span>
       <el-button v-if="update.canNow" size="small" link type="primary" :disabled="upgrade.isPending.value" @click="upgrade.mutate('now')">立即更新</el-button>
       <el-button v-if="update.canCancel" size="small" link :disabled="upgrade.isPending.value" @click="upgrade.mutate('cancel')">取消</el-button>
+    </div>
+    <div v-if="fsLine" class="text-[13px]" data-fs-line>
+      <el-tooltip v-if="fsLine.error" :content="fsLine.error" placement="bottom-start" :show-after="200">
+        <span class="cursor-help underline decoration-dotted" :class="UPDATE_TONE[fsLine.tone]">{{ fsLine.text }}</span>
+      </el-tooltip>
+      <span v-else :class="UPDATE_TONE[fsLine.tone]">{{ fsLine.text }}</span>
     </div>
     <div class="flex flex-col gap-1.5">
       <span class="flex justify-between text-xs text-muted-foreground">

@@ -42,7 +42,7 @@ func (a *API) registerFiles(api huma.API, r gin.IRoutes) {
 		r.HEAD(artifacts.Prefix+"*path", offline)
 		return
 	}
-	a.files = artifacts.NewServer(a.e.Core.Pool, artifacts.NewSigner(a.fileKeys()), a.artifactOrigin, originOf(a.publicURL), slog.Default())
+	a.files = artifacts.NewServer(a.e.Core.Artifacts, artifacts.NewSigner(a.fileKeys()), a.artifactOrigin, originOf(a.publicURL), slog.Default())
 	r.GET(artifacts.Prefix+"*path", gin.WrapH(a.files))
 	r.HEAD(artifacts.Prefix+"*path", gin.WrapH(a.files))
 }

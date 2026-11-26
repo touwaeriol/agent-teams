@@ -1,7 +1,8 @@
 // Ported from web/src/__tests__/chrome.test.ts (sidePanelOf now lives in pages/main/logic.ts).
 import { describe, expect, it } from "vitest";
 import type { DeliverableView } from "@/api/views";
-import { fileIcon, isImageDeliverable, isLibraryDeliverable, LIBRARY_ACCEPT, formatBytes, formatDateTime, libraryColumns, nextSort, ownerLabel, sortLibrary, typeLabel, uploadProblem } from "@/lib/library";
+import { fileIcon, isImageDeliverable, isLibraryDeliverable, LIBRARY_ACCEPT, formatDateTime, libraryColumns, nextSort, ownerLabel, sortLibrary, typeLabel, uploadProblem } from "@/lib/library";
+import { formatBytes } from "@/lib/bytes";
 import { colorIcon, iconLook } from "@/lib/projectIcon";
 import { fillDays, formatTokens, formatUSD, INSTRUCTIONS_MAX, modelLabel, sectionOf, worktreeChoice } from "@/lib/projectSettings";
 import { describeCron, describeSchedule, looksLikeCron, presetOf, scheduleCreator, scheduleTarget } from "@/lib/schedules";
@@ -22,11 +23,11 @@ describe("project icon", () => {
 
 describe("library", () => {
   it("formats sizes in decimal units", () => {
-    expect(formatBytes(undefined)).toBe("—");
-    expect(formatBytes(512)).toBe("512 B");
-    expect(formatBytes(9400)).toBe("9.4 kB");
-    expect(formatBytes(208_600)).toBe("209 kB");
-    expect(formatBytes(8_900_000)).toBe("8.9 MB");
+    expect(formatBytes(undefined, "decimal")).toBe("—");
+    expect(formatBytes(512, "decimal")).toBe("512 B");
+    expect(formatBytes(9400, "decimal")).toBe("9.4 kB");
+    expect(formatBytes(208_600, "decimal")).toBe("209 kB");
+    expect(formatBytes(8_900_000, "decimal")).toBe("8.9 MB");
   });
   it("labels types and owners", () => {
     expect(typeLabel(item("a", { kind: "design", detail: { hosted: true, entry: "06-nodes.png" } }))).toBe("PNG");

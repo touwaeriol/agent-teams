@@ -289,3 +289,9 @@ func GitCredAAD(userID, credID, kind, host, username string) []byte {
 func GitHostKeyMACData(repoID, host, hostKey string) []byte {
 	return fields("at-git-hostkey:v1", repoID, host, hostKey)
 }
+
+// UserFsAAD is the AAD of a user's shared-folder secrets (at_user_fs.secrets): user, volume and
+// credential generation, so a row's secrets never open for another user, volume or generation.
+func UserFsAAD(userID, volume string, generation int) []byte {
+	return fields("user-fs:v1", userID, volume, strconv.Itoa(generation))
+}

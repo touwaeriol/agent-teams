@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/api/client";
 import { directUploader, STORAGE_FALLBACK_NOTE } from "@/components/app/attachments";
 import { pickImages } from "@/lib/images";
-import { uploadSharedFiles, UploadBatchError, uploadErrorText } from "@/lib/sharedFiles";
 import { toast } from "@/lib/toast";
 import { PartError, UploadCancelled, uploadFile, type PutPart, type UploadApi } from "@/lib/upload";
 
@@ -17,7 +16,7 @@ function fake(name: string, size: number, type = ""): File {
 }
 
 /** A fake console for one multipart flow: records every call. */
-function fakeApi(o: { partSize?: number; parts?: number; kind?: "attachment" | "shared"; create?: () => Promise<never> } = {}) {
+function fakeApi(o: { partSize?: number; parts?: number; create?: () => Promise<never> } = {}) {
   const calls: string[] = [];
   const partAsks: number[][] = [];
   let completed: { number: number; etag: string }[] = [];
@@ -37,9 +36,7 @@ function fakeApi(o: { partSize?: number; parts?: number; kind?: "attachment" | "
     complete: vi.fn(async (_id, parts) => {
       completed = parts;
       calls.push("complete");
-      return o.kind === "shared"
-        ? { kind: "shared" as const, shared_file: { path: "data/a.bin", size: 1, content_type: "", sha256: "", overwritten: false, created_at: "", updated_at: "", uploaded_by: "user" } }
-        : { kind: "attachment" as const, attachment: { id: "img_up1", name: "a", content_type: "application/zip", size: 1, sha256: "", created_at: "", url: "" } };
+      return { kind: "attachment" as const, attachment: { id: "img_up1", name: "a", content_type: "application/zip", size: 1, sha256: "", created_at: "", url: "" } };
     }),
     abort: vi.fn(async () => void calls.push("abort")),
   };
@@ -196,49 +193,5 @@ describe("message attachments without object storage", () => {
     const fetch = vi.spyOn(globalThis, "fetch");
     await expect(directUploader(() => api)("p1", fake("a.zip", MB))).rejects.toThrow("附件不能超过 200 MB");
     expect(fetch).not.toHaveBeenCalled();
-  });
-});
-
-describe("shared files upload", () => {
-  it("uploads each file straight to storage at its path, overwriting, with progress over all bytes", async () => {
-    const { api } = fakeApi({ kind: "shared" });
-    const creates: string[] = [];
-    const put: PutPart = async (_u, body, onProgress) => (onProgress(body.size), "e");
-    const progress: number[] = [];
-    const res = await uploadSharedFiles("p1", [{ file: fake("a.bin", 3 * MB), path: "data/a.bin" }, { file: fake("b.bin", MB), path: "b.bin" }], (f) => progress.push(f), {
-      api: { ...api, create: (b) => (creates.push(`${b.kind} ${b.path} overwrite=${b.overwrite}`), api.create(b)) },
-      put,
-    });
-    expect(creates).toEqual(["shared data/a.bin overwrite=true", "shared b.bin overwrite=true"]);
-    expect(res.files).toHaveLength(2);
-    expect(progress.every((p, i) => i === 0 || p >= progress[i - 1]!)).toBe(true);
-    expect(progress.at(-1)).toBe(1);
-  });
-
-  it("names what was stored when a later file is refused (quota)", async () => {
-    const { api } = fakeApi({ kind: "shared" });
-    let n = 0;
-    const quota = new ApiError(409, "项目共享文件合计不能超过 5 GB（已用 4.9 GB）", "quota_exceeded");
-    const err = await uploadSharedFiles("p1", [{ file: fake("a.bin", MB), path: "a.bin" }, { file: fake("b.bin", MB), path: "b.bin" }], undefined, {
-      api: { ...api, create: (b) => (++n === 2 ? Promise.reject(quota) : api.create(b)) },
-      put: async () => "e",
-    }).catch((e) => e);
-    expect(err).toBeInstanceOf(UploadBatchError);
-    expect(uploadErrorText(err)).toBe("已上传 1 个文件，其余 1 个没有上传：项目共享文件合计不能超过 5 GB（已用 4.9 GB）");
-  });
-
-  it("shows the console's quota message as it is", () => {
-    expect(uploadErrorText(new ApiError(409, "项目共享文件已用 4.9 GB / 5 GB，这个文件 300 MB 放不下", "quota_exceeded"))).toBe("项目共享文件已用 4.9 GB / 5 GB，这个文件 300 MB 放不下");
-  });
-
-  it("falls back to the old form upload without object storage, refusing files over 20 MB", async () => {
-    const { api } = fakeApi({ create: () => Promise.reject(new ApiError(503, "no storage", "storage_unavailable")) });
-    const legacy = vi.fn(async () => ({ files: [{ path: "a.txt", size: 1, content_type: "", sha256: "", overwritten: false, created_at: "", updated_at: "", uploaded_by: "user" }], total_bytes: 1 }));
-    const res = await uploadSharedFiles("p1", [{ file: fake("a.txt", 1), path: "a.txt" }], undefined, { api, legacy });
-    expect(res.files?.map((f) => f.path)).toEqual(["a.txt"]);
-    expect(legacy).toHaveBeenCalledOnce();
-    const err = await uploadSharedFiles("p1", [{ file: fake("big.bin", 21 * MB), path: "big.bin" }], undefined, { api, legacy }).catch((e) => e);
-    expect(err).toBeInstanceOf(UploadBatchError);
-    expect(uploadErrorText(err)).toContain("文件存储暂时不可用，现在每个文件最多 20 MB（big.bin 超了）");
   });
 });

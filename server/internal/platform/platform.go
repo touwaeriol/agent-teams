@@ -140,6 +140,9 @@ type Hooks interface {
 	ProjectCreated(ctx context.Context, p store.Project, firstMessage string) error
 	// ProjectDeleting runs before the project's rows are deleted (close sessions, git.purge).
 	ProjectDeleting(ctx context.Context, userID, projectID string) error
+	// ProjectDeleted runs after the project's rows were deleted (best effort: remove its folder from
+	// the owner's shared folder); failures are logged, not returned.
+	ProjectDeleted(ctx context.Context, userID, projectID string)
 	// ProjectArchived runs after a project is archived (pause its threads, close its sessions).
 	ProjectArchived(ctx context.Context, userID, projectID string) error
 	// UserCutOff runs when a user is deactivated or deleted (close sessions, cancel waits).
@@ -264,6 +267,9 @@ func (NoHooks) ProjectCreated(context.Context, store.Project, string) error { re
 
 // ProjectDeleting implements Hooks.
 func (NoHooks) ProjectDeleting(context.Context, string, string) error { return nil }
+
+// ProjectDeleted implements Hooks.
+func (NoHooks) ProjectDeleted(context.Context, string, string) {}
 
 // ProjectArchived implements Hooks.
 func (NoHooks) ProjectArchived(context.Context, string, string) error { return nil }

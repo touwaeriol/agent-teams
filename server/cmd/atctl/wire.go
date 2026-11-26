@@ -14,6 +14,8 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
+	"github.com/touwaeriol/agent-teams/server/internal/store"
+	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
 
 // wire is the one place where the orchestration engines plug into the HTTP
@@ -38,15 +40,20 @@ func wire(d httpapi.Deps) (httpapi.Deps, func(context.Context), error) {
 	if err != nil {
 		return d, nil, err
 	}
+	fs := sharedFolders(d.Config.FS, d.Store, vault, d.Log)
 	e, err := engine.New(engine.Deps{Store: d.Store, KV: d.KV, GitHub: d.GitHub, Tokens: d.Tokens,
 		Box: auth.NewSecretBox(d.Config.SecretKeys...), Office: d.Office, Log: d.Log, Gateway: nodegw.Config{Validate: true},
-		Vault: vault, Relay: d.Relay, Blobs: blobs, AttachmentTTL: d.Config.AttachmentTTL})
+		Vault: vault, Relay: d.Relay, Blobs: blobs, AttachmentTTL: d.Config.AttachmentTTL, FS: fs})
 	if err != nil {
 		return d, nil, err
 	}
 	d.Nodes, d.Events, d.Hooks, d.SSH = e.Gateway, e.Events, e.Hooks(), e.SSHHooks()
 	d.Extensions = append(d.Extensions, orchapi.New(e, d.Office).WithOrigins(d.Config.ArtifactOrigin, d.Config.PublicURL).Register)
-	return d, e.Start, nil
+	start := func(ctx context.Context) {
+		e.Start(ctx)
+		go func() { <-ctx.Done(); fs.Close() }() // stop the juicefs gateways on shutdown
+	}
+	return d, start, nil
 }
 
 // openAPIDocument builds the server exactly as serve does, without I/O, and renders the document.
@@ -56,6 +63,32 @@ func openAPIDocument() ([]byte, error) {
 		return nil, err
 	}
 	return httpapi.New(d).OpenAPI()
+}
+
+// sharedFolders builds the user shared-folder service from AGENT_TEAMS_FS_* (nil when not set).
+func sharedFolders(c config.FS, st *store.Store, vault *credvault.Vault, log *slog.Logger) *userfs.Service {
+	if !c.Configured() {
+		return nil
+	}
+	version, base, assets := userfs.DefaultClientVersion, userfs.DefaultClientBase, userfs.DefaultAssets
+	if c.ClientVersion != "" {
+		version, assets = c.ClientVersion, nil
+		for platform, sum := range c.ClientSHA256 {
+			assets = append(assets, userfs.Asset{Platform: platform, SHA256: sum})
+		}
+	}
+	if c.ClientBase != "" {
+		base = c.ClientBase
+	}
+	cfg := userfs.Config{AdminURL: c.AdminURL, MetaHost: c.MetaHost, MetaSSLMode: c.MetaSSLMode, S3Endpoint: c.S3Endpoint, Bucket: c.Bucket,
+		AdminAccessKey: c.AdminAccessKey, AdminSecretKey: c.AdminSecretKey, CapacityGB: c.CapacityGB, JuiceFS: c.JuiceFS,
+		ClientVersion: version, ClientBase: base, Assets: assets}
+	if !vault.Ready() {
+		log.Warn("shared folder needs AGENT_TEAMS_SECRET_KEYS to seal its credentials: switched off")
+	}
+	return userfs.New(cfg, st.Pool, vault, &userfs.PGMeta{URL: c.AdminURL},
+		userfs.MinioIAM{Endpoint: c.S3Endpoint, AccessKey: c.AdminAccessKey, SecretKey: c.AdminSecretKey},
+		userfs.CLI{Bin: c.JuiceFS, Gateways: &userfs.Gateways{Bin: c.JuiceFS, Log: log}}, log)
 }
 
 // objectStore builds the attachments and shared-files store from AGENT_TEAMS_S3_* (#58): None when

@@ -6,7 +6,8 @@ import { saveView, storedView, typeName } from "@/components/app/deliverables/br
 import { closedNote, detailViewOf, reopenHint, typingLine } from "@/components/app/thread/detail";
 import { openPrMode, prLines, queueLines } from "@/components/app/threadviews/delivery";
 import { memberStatusLine } from "@/components/app/threadviews/members";
-import { fileUrl, formatBytes, frameSandbox, hasPicture, isHosted, markdownUrl, renderLabel } from "@/lib/artifacts";
+import { fileUrl, frameSandbox, hasPicture, isHosted, markdownUrl, renderLabel } from "@/lib/artifacts";
+import { formatBytes } from "@/lib/bytes";
 import { deliverableHref } from "@/lib/library";
 import { approvalText, pickedVersion, versionLabel, viewerSubtitle } from "@/pages/design/viewer";
 import { threadPath } from "@/pages/main/logic";
@@ -149,7 +150,7 @@ describe("library and viewer", () => {
     expect(md("img/a.png")).toBe("/files/dl_1.2.99.abc/img/a.png");
     expect(md("../../api/me")).toBe("");
     expect(md("javascript:alert(1)")).toBe("");
-    expect(formatBytes(2048)).toBe("2.0 KB");
+    expect(formatBytes(2048)).toBe("2 KB");
     expect(renderLabel("markdown")).toBe("Markdown 文档");
   });
   it("versions, subtitle and the approval message", () => {

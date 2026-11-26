@@ -31,6 +31,8 @@ export interface ManagerDeps {
   importMove?: (spec: SessionOpen, absCwd: string) => Promise<void>;
   /** Builds env/policy and the runtime driver for a session. */
   createDriver: (spec: SessionOpen, absCwd: string, sink: Session) => { driver: Driver; ctx: DriverContext };
+  /** The shared folder's attachments/ for a working directory linked to it (null: the local .attachments). */
+  attachmentDir?: (absCwd: string) => string | null;
   /** Downloads an attached image from the console (session.send images). */
   fetchImage?: ImageFetcher;
   /** The console over HTTP (session.send attachments: /nodes/attachments/{id}/url and the legacy download). */
@@ -40,7 +42,7 @@ export interface ManagerDeps {
   /** How often old .attachments/ copies are removed (default 1 h). */
   attachmentSweepMs?: number;
   /** Called when a session stops for good (unregister cred secrets, loopback routes). */
-  onSessionGone?: (sessionId: string) => void;
+  onSessionGone?: (sessionId: string, absCwd: string) => void;
   /** A session's turn ended (session.digest, move/live.ts). */
   onTurnEnd?: (s: { id: string; gen: number; spec: SessionOpen; absCwd: string }) => void;
   /** The console takes session.context (welcome.features has context_detail). */
@@ -149,6 +151,11 @@ export class SessionManager implements SessionHost {
   /** True when an active session works inside the path (git.purge guard). */
   busyUnder(abs: string): boolean {
     return [...this.sessions.values()].some((s) => s.driver && s.absCwd && isInside(abs, s.absCwd));
+  }
+
+  /** True when a session this node still knows works in exactly this directory. */
+  cwdInUse(abs: string): boolean {
+    return [...this.sessions.values()].some((s) => s.absCwd === abs);
   }
 
   // ---- commands ----
@@ -342,11 +349,12 @@ export class SessionManager implements SessionHost {
       for (const ref of body.attachments) outcomes.push({ ref, error: "这个节点无法下载附件" });
       return { legacy, outcomes };
     }
-    this.noteAttachmentDir(s.absCwd);
+    const into = this.d.attachmentDir?.(s.absCwd) ?? null;
+    if (!into) this.noteAttachmentDir(s.absCwd);
     for (const ref of body.attachments) {
       try {
         if (s.downloads.signal.aborted) throw new Error("下载已取消（会话已关闭）");
-        outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions, undefined, s.downloads.signal) });
+        outcomes.push({ ref, saved: await downloadAttachment(s.absCwd, ref, this.d.http, this.attachmentOptions, undefined, s.downloads.signal, into) });
       } catch (err) {
         this.d.log.warn({ session: s.id, attachment: ref.id, err: (err as Error).message }, "attachment download failed");
         outcomes.push({ ref, error: (err as Error).message, ...(err instanceof AttachmentExpired ? { expired: true } : {}) });
@@ -528,7 +536,7 @@ export class SessionManager implements SessionHost {
     if (body.forget) rmSync(this.recordPath(s.id), { force: true });
     else this.persist(s);
     removeImages(this.imageDir(s.id));
-    this.d.onSessionGone?.(s.id);
+    this.d.onSessionGone?.(s.id, s.absCwd);
     return [reply];
   }
 

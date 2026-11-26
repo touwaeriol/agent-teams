@@ -16,6 +16,7 @@ const ITEMS = [
   { to: "/settings/nodes", label: "节点", hint: "运行成员的机器" },
   { to: "/settings/git", label: "Git 仓库", hint: "GitHub 连接和其他 Git 仓库" },
   { to: "/settings/servers", label: "服务器", hint: "员工能访问的远程机器" },
+  { to: "/settings/storage", label: "共享文件夹", hint: "挂到每个节点上的持久目录" },
   { to: "/settings/appearance", label: "外观", hint: "亮色 / 暗色" },
 ];
 const name = computed(() => props.me.display_name || props.me.email.split("@")[0]);

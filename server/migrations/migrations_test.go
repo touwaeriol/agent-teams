@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 480 {
+	if migrations.Latest() != 490 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1672,7 +1672,7 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 480 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() {
 		t.Fatalf("version %d %v", v, err)
 	}
 	var got string
@@ -1963,8 +1963,8 @@ INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, s
 	}
 }
 
-// TestProjectRepoBaseMigration: 00480 gives each project repository a base branch, from a
-// standalone repository's saved default branch or a base 00070 wrote into the project context;
+// TestProjectRepoBaseMigration: 00480 gives each project repository a base branch, from a base
+// written into the project context or else a standalone repository's saved default branch;
 // a GitHub repository without one stays ” (the control plane fills it from GitHub).
 func TestProjectRepoBaseMigration(t *testing.T) {
 	db := open(t, testdb.URL(t))
@@ -1982,28 +1982,104 @@ INSERT INTO at_git_connections (id, user_id, name, token_secret) VALUES ('c1', '
 INSERT INTO at_git_repos (id, user_id, slug, url, transport, host, default_branch)
 	VALUES ('g1', 'u1', 'git.example.com/team/app', 'https://git.example.com/team/app.git', 'https', 'git.example.com', 'trunk');
 INSERT INTO at_projects (id, user_id, name, context) VALUES
-	('p1', 'u1', 'A', E'说明\n\n仓库 acme/web.app 的基准分支：develop\n其他'),
-	('p2', 'u1', 'B', '');
+	('p1', 'u1', 'A', E'说明\n\n仓库 acme/web.app 的基准分支：develop\n仓库 Acme/Docs 的基准分支: release/1.x。\n其他'),
+	('p2', 'u1', 'B', ''),
+	('p3', 'u1', 'C', '仓库 git.example.com/team/app 的基准分支：next');
 INSERT INTO at_project_repos (project_id, repo, git_connection_id, git_repo_id) VALUES
 	('p1', 'acme/web.app', 'c1', NULL),
+	('p1', 'acme/webXapp', 'c1', NULL),
+	('p1', 'acme/docs', 'c1', NULL),
 	('p1', 'acme/api', 'c1', NULL),
-	('p2', 'git.example.com/team/app', NULL, 'g1');`); err != nil {
+	('p2', 'git.example.com/team/app', NULL, 'g1'),
+	('p3', 'git.example.com/team/app', NULL, 'g1');`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.UpTo(ctx, 480); err != nil {
 		t.Fatal(err)
 	}
 	var got string
-	if err := db.QueryRow(`SELECT string_agg(repo || '=' || base_branch, ',' ORDER BY repo) FROM at_project_repos`).Scan(&got); err != nil {
+	if err := db.QueryRow(`SELECT string_agg(project_id || ':' || repo || '=' || base_branch, ',' ORDER BY project_id, repo) FROM at_project_repos`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
-	if want := "acme/api=,acme/web.app=develop,git.example.com/team/app=trunk"; got != want {
+	// Half-width colon, other case and a trailing full stop still match; "." in a slug is not a
+	// wildcard; the context wins over a standalone repository's default branch.
+	if want := "p1:acme/api=,p1:acme/docs=release/1.x,p1:acme/web.app=develop,p1:acme/webXapp=,p2:git.example.com/team/app=trunk,p3:git.example.com/team/app=next"; got != want {
 		t.Fatalf("bases %q, want %q", got, want)
 	}
 	if _, err := p.DownTo(ctx, 470); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.UpTo(ctx, 480); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUserFsMigration: 00490 adds at_user_fs (one volume per user, deleted with the user),
+// at_nodes.fs_status ({} by default) and deliverable files kept in a volume (no data, only then);
+// down drops them.
+func TestUserFsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 490); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb)
+	VALUES ('u1', 'at-u1', 'jfs_u1', 'jfs-u1', '{}', 20);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb, state)
+		VALUES ('u1', 'at-u2', 'jfs_u2', 'jfs-u2', '{}', 20, 'bogus')`); err == nil {
+		t.Fatal("bad state accepted")
+	}
+	var state string
+	if err := db.QueryRow(`SELECT state FROM at_user_fs WHERE user_id = 'u1'`).Scan(&state); err != nil || state != "provisioning" {
+		t.Fatalf("state %q %v", state, err)
+	}
+	var gen1, gen2 int64
+	if err := db.QueryRow(`SELECT generation FROM at_user_fs WHERE user_id = 'u1'`).Scan(&gen1); err != nil || gen1 < 1 {
+		t.Fatalf("generation %d %v", gen1, err)
+	}
+	if _, err := db.Exec(`DELETE FROM at_user_fs; INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb)
+	VALUES ('u1', 'at-u1', 'jfs_u1', 'jfs-u1', '{}', 20)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT generation FROM at_user_fs WHERE user_id = 'u1'`).Scan(&gen2); err != nil || gen2 <= gen1 {
+		t.Fatalf("re-created volume reuses generation: %d after %d %v", gen2, gen1, err)
+	}
+	if _, err := db.Exec(`DELETE FROM at_users WHERE id = 'u1'`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM at_user_fs`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("volume row not deleted with the user: %d %v", n, err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u2', 'b@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u2', 'p');
+INSERT INTO at_deliverables (id, project_id, kind, title) VALUES ('dl_1', 'p1', 'doc', 't');
+INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, size, sha256, data) VALUES ('dl_1', 1, 'a.md', 'text/markdown', 1, 'x', 'a');
+INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, size, sha256, in_volume) VALUES ('dl_1', 2, 'a.md', 'text/markdown', 1, 'x', true);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, size, sha256) VALUES ('dl_1', 3, 'a.md', 'text/markdown', 1, 'x')`); err == nil {
+		t.Fatal("file without data outside a volume accepted")
+	}
+	if _, err := p.DownTo(ctx, 480); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT fs_status FROM at_nodes`); err == nil {
+		t.Fatal("fs_status still there after down")
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM at_deliverable_files`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("deliverable files after down: %d %v", n, err)
+	}
+	if _, err := p.UpTo(ctx, 490); err != nil {
 		t.Fatal(err)
 	}
 }

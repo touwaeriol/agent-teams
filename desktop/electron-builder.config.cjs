@@ -27,6 +27,9 @@ module.exports = {
   // No spaces in file names: GitHub turns them into dots on upload, and then the URLs in
   // latest*.yml (written with the local names) would 404 for electron-updater.
   artifactName: "agent-teams-${version}-${os}-${arch}.${ext}",
+  // Read by updater.ts: an unsigned Mac build cannot install updates (Squirrel.Mac needs a
+  // signature), so it only points at the release page instead of downloading.
+  extraMetadata: { macSigned },
 
   // Flipped in the Electron binary at package time: the shipped app cannot be turned into a
   // plain Node runtime (ELECTRON_RUN_AS_NODE, NODE_OPTIONS, --inspect) or load code outside app.asar.

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { DeliverableView } from "@/api/views";
-import { fileIcon, formatBytes, ownerLabel, sizeOf, typeLabel } from "@/lib/library";
+import { fileIcon, ownerLabel, sizeOf, typeLabel } from "@/lib/library";
+import { formatBytes } from "@/lib/bytes";
 import { FILE_ICONS } from "../fileIcons";
 import ItemLink from "../ItemLink.vue";
 import ItemMenu from "./ItemMenu.vue";
@@ -18,7 +19,7 @@ defineProps<{ pid: string; items: DeliverableView[] }>();
         </span>
         <span class="flex flex-col gap-0.5 px-3 py-2">
           <span class="truncate pr-5 text-[13px] font-medium">{{ d.title }}</span>
-          <span class="truncate text-xs text-muted-foreground">{{ ownerLabel(d.published_by) }} · {{ formatBytes(sizeOf(d)) }}</span>
+          <span class="truncate text-xs text-muted-foreground">{{ ownerLabel(d.published_by) }} · {{ formatBytes(sizeOf(d), "decimal") }}</span>
         </span>
       </ItemLink>
       <span class="absolute bottom-2 right-1"><ItemMenu :item="d" :pid="pid" /></span>

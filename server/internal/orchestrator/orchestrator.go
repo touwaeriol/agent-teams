@@ -12,6 +12,7 @@ import (
 	"errors"
 	"log/slog"
 
+	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
@@ -75,6 +76,9 @@ type Orchestrator struct {
 	// calls are released and the returned note ("" = none) tells the employee to close the cards
 	// the message answers (close_question).
 	ChatAnswers func(ctx context.Context, tx *core.Tx, c core.Conversation, emp core.Employee, userID, content string) (string, error)
+	// SharedFolder is session.open fs for a session of the user's project on a node (nil or a nil
+	// result: no shared folder; set by the engine when the console has AGENT_TEAMS_FS_*).
+	SharedFolder func(ctx context.Context, q core.DB, userID, nodeID, projectID string) (*protocol.SessionOpenFs, error)
 }
 
 // New builds the orchestrator.

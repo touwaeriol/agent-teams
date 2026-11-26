@@ -18,13 +18,13 @@ const EXPECTED_TYPES = {
     "welcome", "session.open", "session.release", "session.send", "session.compact", "session.interrupt", "session.set_mode",
     "session.close", "session.watch", "approval.resolve", "tool.result", "file.download", "git.prepare", "git.status", "git.push",
     "git.cleanup", "git.purge", "cred.response", "node.config", "node.upgrade", "node.drain", "node.usage_refresh", "node.runtimes_refresh",
-    "ssh.cert_response", "ssh.servers_update", "session.export", "session.context_refresh",
+    "ssh.cert_response", "ssh.servers_update", "session.export", "session.context_refresh", "fs.mount", "fs.unmount",
   ],
   node_to_console: [
     "hello", "sessions.report", "session.opened", "session.delivered", "session.compacted", "session.interrupted", "session.mode_set", "session.closed",
     "session.event", "session.state", "stream.delta", "approval.request", "approval.ack", "approval.cancel",
     "tool.call", "tool.cancel", "file.chunk", "git.result", "cred.request", "node.stats", "node.usage", "node.runtimes", "node.upgrade_result", "log",
-    "ssh.cert_request", "session.exported", "session.digest", "session.context",
+    "ssh.cert_request", "session.exported", "session.digest", "session.context", "fs.status",
   ],
   both: ["ack", "error"],
 };
@@ -33,21 +33,20 @@ const EXPECTED_TYPES = {
 const EXPECTED_TOOLS = {
   coordinator: ["open_thread", "list_threads", "thread_status", "message_thread", "forward_to_thread", "ask_user", "close_question", "remember", "set_status",
     "schedule_create", "schedule_list", "schedule_update", "schedule_cancel",
-    "memory_list", "memory_read", "memory_write", "memory_delete", "list_deliverables",
-    "list_shared_files", "read_shared_file", "write_shared_file", "delete_shared_file", "read_attachment", "save_attachment"],
+    "memory_list", "memory_read", "memory_write", "memory_delete", "list_deliverables", "read_attachment"],
   lead: [
     "update_plan", "assign_task", "list_tasks", "cancel_task", "reply_to", "review_permission", "broadcast", "send_message", "ask_user", "close_question",
     "schedule_create", "schedule_list", "schedule_update", "schedule_cancel",
     "enqueue_merge", "open_pr", "finish", "publish_deliverable", "publish_file", "set_status", "tell_user",
     "memory_list", "memory_read", "memory_write", "memory_delete", "list_deliverables", "read_deliverable",
-    "list_shared_files", "read_shared_file", "write_shared_file", "delete_shared_file", "read_attachment", "save_attachment",
+    "read_attachment",
     "open_subthread", "close_subthread", "list_threads", "thread_status", "message_thread", "message_coordinator",
   ],
   member: [
     "complete_task", "push_branch", "report_progress", "ask_lead", "ask_user", "send_message", "read_messages",
     "list_team", "get_task", "request_review", "publish_deliverable", "publish_file", "set_status", "assign_subtask", "wait_task",
     "memory_list", "memory_read", "list_deliverables", "read_deliverable",
-    "list_shared_files", "read_shared_file", "write_shared_file", "delete_shared_file", "read_attachment", "save_attachment",
+    "read_attachment",
     "schedule_create", "schedule_list", "schedule_update", "schedule_cancel",
   ],
 };
@@ -82,7 +81,8 @@ test("message types and directions match protocol.md", () => {
 
 test("reliability matches protocol.md 2.1", () => {
   const unreliable = ["hello", "welcome", "ack", "error", "stream.delta", "log", "node.stats", "node.usage", "node.usage_refresh", "node.runtimes", "node.runtimes_refresh", "cred.request", "cred.response",
-    "ssh.cert_request", "ssh.cert_response", "session.digest", "session.context", "session.context_refresh"];
+    "ssh.cert_request", "ssh.cert_response", "session.digest", "session.context", "session.context_refresh",
+    "fs.mount", "fs.unmount", "fs.status"];
   for (const m of messageSchemas()) assert.equal(m.schema["x-reliable"], !unreliable.includes(m.type), m.type);
 });
 

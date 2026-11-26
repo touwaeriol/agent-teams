@@ -51,6 +51,15 @@ func (o *Orchestrator) DefaultBranch(ctx context.Context, r ghops.Repo) string {
 	return b
 }
 
+// upstreamDefault is the upstream's own default branch ("" when unknown), cached like DefaultBranch.
+func (o *Orchestrator) upstreamDefault(ctx context.Context, r ghops.Repo) string {
+	b, err := o.gh.UpstreamDefault(ctx, r)
+	if err != nil {
+		return ""
+	}
+	return b
+}
+
 // BaseFor is the branch a thread's work in a repository starts from and its pull request
 // targets: the base recorded for the thread (given by the lead or the coordinator, or the one
 // the thread branch was cut from), else the repository's default branch.
@@ -209,15 +218,16 @@ func (o *Orchestrator) WarmRepos(ctx context.Context, p store.Project) {
 	}
 }
 
-// backfillBase records the upstream's default branch as the base of a repository bound before
-// base branches were stored (00480), so that later thread starts read it from the project.
+// backfillBase warms the upstream default branch cache (protectedRefs reads it) and records it as
+// the base of a repository bound before base branches were stored (00480), so that later thread
+// starts read it from the project.
 func (o *Orchestrator) backfillBase(ctx context.Context, p store.Project, r ghops.Repo) {
-	if r.Base() != "" {
-		return
-	}
 	b, err := o.gh.UpstreamDefault(ctx, r)
 	if err != nil {
 		o.log.Warn("look up default branch", "project_id", p.ID, "repo", r.Slug, "err", err)
+		return
+	}
+	if r.Base() != "" {
 		return
 	}
 	if ok, err := store.SetProjectRepoBase(ctx, o.core.Pool.Gorm(ctx), p.ID, r.Slug, b); err != nil {

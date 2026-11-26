@@ -107,7 +107,11 @@ func (e *Engine) prTargets(ctx context.Context, t core.Thread, req PRRequest) ([
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, prTarget{repo: repo, base: orDefault(strings.TrimSpace(req.Base), e.orch.BaseFor(ctx, e.core.Pool, t, repo))})
+		base := orDefault(strings.TrimSpace(req.Base), e.orch.BaseFor(ctx, e.core.Pool, t, repo))
+		if base == "" {
+			return nil, fmt.Errorf("%s: %w", repo.Slug, ErrBaseUnknown)
+		}
+		out = append(out, prTarget{repo: repo, base: base})
 	}
 	return out, nil
 }

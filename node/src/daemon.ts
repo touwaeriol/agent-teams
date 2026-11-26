@@ -20,7 +20,7 @@ import { Outbox } from "./link/outbox.js";
 import { LiveDigest } from "./move/live.js";
 import { Mover } from "./move/mover.js";
 import { consoleTransfer, type MoveTransfer } from "./move/transfer.js";
-import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeRuntimesRefresh, NodeUsageRefresh, SessionClose, SshCertResponse, SshServersUpdate, SessionCompact, SessionContextRefresh, SessionExport, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
+import type { ApprovalResolve, ClaudeRuntime, CodexRuntime, CredResponse, FileDownload, Frame, GitCleanup, GitPrepare, GitPurge, GitPush, GitResult, GitStatus, Hello, NodeConfig, NodeUpgrade, NodeRuntimesRefresh, NodeUsageRefresh, SessionClose, FsMount, FsUnmount, SshCertResponse, SshServersUpdate, SessionCompact, SessionContextRefresh, SessionExport, SessionInterrupt, SessionOpen, SessionSend, SessionSetMode, SessionWatch, ToolResult, Welcome } from "./protocol.js";
 import { readClaudeAccount } from "./claude-account.js";
 import { readClaudeUsage, UsageReporter, type UsageSources } from "./usage.js";
 import type { QueryFn } from "./sessions/claude/driver.js";
@@ -42,6 +42,9 @@ import type { Logger } from "./util/log.js";
 import { absPath } from "./sessions/claude/options.js";
 import { consoleImageFetcher } from "./sessions/images.js";
 import { consoleHttp, type AttachmentOptions, type ConsoleHttp } from "./sessions/attachments.js";
+import { SharedFs, type SharedFsOptions } from "./fs/shared.js";
+import { linkSharedDirs, safeAttachmentDir, sharedAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs, type SharedDirs } from "./fs/session.js";
+import { EXIT_FS_LOST } from "./release.js";
 import { DAEMON_BUILD, DAEMON_RELEASE, DAEMON_VERSION, PROTOCOLS } from "./version.js";
 
 export interface DaemonOptions {
@@ -107,18 +110,24 @@ export interface DaemonOptions {
   liveDigestDelayMs?: number;
   /** .attachments/ download budget, disk reserve and retention (AGENT_TEAMS_ATTACHMENT_*; config.ts). */
   attachments?: Partial<AttachmentOptions>;
-  /** Tests: fetch used for attachment and shared-file transfers (default global fetch). */
+  /** Tests: fetch used for attachment downloads (default global fetch). */
   transferFetch?: typeof fetch;
   /** Updater overrides (tests): poll and confirm delays, fetch, npm. */
   updater?: Partial<Pick<UpdaterOptions, "pollMs" | "confirmAfterMs" | "fetchFn" | "npm" | "now">>;
+  /** AGENT_TEAMS_FS_DIR: the shared folder mounted by something else (fs_external). */
+  fsDir?: string;
+  /** Shared-folder overrides (tests): runner, fetch, fuse probe, platform. */
+  sharedFs?: Partial<Pick<SharedFsOptions, "run" | "fetchFn" | "fuse" | "platform" | "checkMs" | "mountWaitMs">>;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "shared_files", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "context_detail", "session_controls", "attachments_v2"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "context_detail", "session_controls", "attachments_v2"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
   readonly link: Link;
   readonly sessions: SessionManager;
+  /** Working directories linked to the shared folder → its directories (attachments go to the project's attachments/). */
+  private readonly linked = new Map<string, SharedDirs>();
   readonly git: GitJobs;
   private readonly outbox: Outbox;
   private readonly inbox: Inbox;
@@ -154,6 +163,7 @@ export class Daemon {
   /** session.digest after each turn: the console's handoff fallback (move/live.ts). */
   private readonly live: LiveDigest;
   private readonly ssh: SshHub;
+  readonly sharedFs: SharedFs;
   /** Real OpenSSH client found at start (null: remote servers cannot be used on this node). */
   private readonly sshClient: string | null;
 
@@ -172,13 +182,21 @@ export class Daemon {
     const send = (type: string, body: object) => this.link.send(type, body);
     this.approvals = new ApprovalBroker(send);
     this.http = consoleHttp(o.url, o.token, o.transferFetch);
-    this.tools = new ToolBroker(send, { http: this.http, attachments: () => this.sessions.attachmentOptions, noteAttachmentDir: (cwd) => this.sessions.noteAttachmentDir(cwd) });
+    this.tools = new ToolBroker(send, {
+      http: this.http, attachments: () => this.sessions.attachmentOptions, noteAttachmentDir: (cwd) => this.sessions.noteAttachmentDir(cwd),
+      attachmentDir: (cwd) => this.sharedAttachments(cwd),
+      sharedDirs: (cwd) => { const d = this.linked.get(cwd); return d ? [d.project, d.shared] : []; },
+    });
     this.creds = new CredBroker(send);
     this.platform = installPlatformFiles(o.platformDir, o.nodeCmd);
     const dataDir = dirname(o.platformDir);
     this.gh = new GhInstaller({ toolsDir: o.toolsDir ?? join(dataDir, "tools"), path: process.env.PATH ?? "", skip: [this.platform.binDir], ...o.gh });
     const realSsh = installSshWrappers(this.platform.binDir, o.sshPath ?? process.env.PATH ?? "");
     this.sshClient = sshClientVersion(realSsh.ssh);
+    this.sharedFs = new SharedFs({
+      dataDir, stateDir: o.stateDir, ...(o.fsDir ? { externalDir: o.fsDir } : {}), log: o.log.child({ c: "fs" }), send: (t, b) => this.link.send(t, b),
+      onExternalLost: () => o.onExit?.(EXIT_FS_LOST), ...o.sharedFs,
+    });
     this.ssh = new SshHub({
       baseDir: o.sshBaseDir ?? sshBaseDir(dataDir), proxySocket: sshSocketPath(o.runtimeDir), nodeCmd: o.nodeCmd,
       gatewayUrl: gatewayUrl(o.url), token: o.token, send, log: o.log,
@@ -216,7 +234,8 @@ export class Daemon {
       waitForJob: (id, ms) => this.git.waitFor(id, ms),
       importMove: (spec, absCwd) => this.mover.import(spec, absCwd),
       createDriver: (spec, cwd, sink) => this.createDriver(spec, cwd, sink),
-      onSessionGone: (id) => this.forgetSession(id),
+      attachmentDir: (cwd) => this.sharedAttachments(cwd),
+      onSessionGone: (id, absCwd) => this.forgetSession(id, absCwd),
       onTurnEnd: (s) => this.live.turnEnded(s),
       onDriverGone: (id) => this.ssh.drop(id),
       contextDetail: () => this.welcomeFeatures.has("context_detail"),
@@ -249,6 +268,7 @@ export class Daemon {
   async start(): Promise<void> {
     await this.credServer.start();
     await this.ssh.start();
+    this.sharedFs.start();
     await this.toolhost.start();
     if (this.o.probeRuntimes !== false) await this.probe();
     if (this.o.prefetchGh ?? this.o.probeRuntimes !== false) this.prefetchGh();
@@ -269,6 +289,7 @@ export class Daemon {
     this.hub.stop();
     await this.toolhost.stop();
     await this.ssh.stop();
+    this.sharedFs.stop();
     await this.credServer.stop();
   }
 
@@ -295,7 +316,7 @@ export class Daemon {
       root: resolve(this.o.root),
       capacity: { ...(this.o.maxActive ? { max_active_sessions: this.o.maxActive } : {}), cpus: cpus().length, mem_mb: Math.round(totalmem() / 1048576) },
       runtimes: this.runtimes.hello(),
-      features: this.o.selfUpdate ?? process.env.AGENT_TEAMS_LAUNCHER === "1" ? [...FEATURES, "self_update"] : FEATURES,
+      features: [...FEATURES, ...this.sharedFs.features(), ...(this.o.selfUpdate ?? process.env.AGENT_TEAMS_LAUNCHER === "1" ? ["self_update"] : [])],
       ...(this.sshClient ? { ssh_client: { version: this.sshClient } } : {}),
       isolated: false,
       isolation: this.isolation,
@@ -326,6 +347,7 @@ export class Daemon {
     this.statsTimer ??= setInterval(() => this.sendStats(), 30_000);
     if (this.monitorOn) void this.runtimeMonitor.hello();
     this.usage.kick();
+    this.sharedFs.report();
     this.updater.onConnected();
   }
 
@@ -380,6 +402,8 @@ export class Daemon {
       "tool.result": { run: async (b) => (this.toolResult(b as unknown as ToolResult), []) },
       "file.download": { run: async (b) => (this.tools.chunk(b as unknown as FileDownload), []) },
       "cred.response": { run: async (b) => (this.creds.resolve(b as unknown as CredResponse), []) },
+      "fs.mount": { run: async (b) => (void this.sharedFs.mount(b as unknown as FsMount), []) },
+      "fs.unmount": { run: async (b) => (void this.sharedFs.unmount(b as unknown as FsUnmount), []) },
       "ssh.cert_response": { run: async (b) => (this.ssh.resolve(b as unknown as SshCertResponse), []) },
       "ssh.servers_update": { lane: session, run: async (b) => (this.sshServersUpdate(b as unknown as SshServersUpdate), []) },
       "git.prepare": { run: (b) => this.gitReply(this.git.prepare(b as unknown as GitPrepare)) },
@@ -423,14 +447,54 @@ export class Daemon {
 
   // ---- session runtime construction ----
 
-  private createDriver(spec: SessionOpen, absCwd: string, sink: Session): { driver: Driver; ctx: DriverContext } {
+  private createDriver(open: SessionOpen, absCwd: string, sink: Session): { driver: Driver; ctx: DriverContext } {
+    const dirs = open.employee.tier === "coordinator" ? null : this.sharedFs.sessionDirs(open.fs);
+    const spec = dirs ? withSharedDirs(open, dirs) : open;
+    if (dirs) this.linkShared(absCwd, dirs);
+    else this.unlinkShared(absCwd);
     const runtime = this.runtimes.get(spec.runtime);
     const skills = runtime.nativeSkills ? materializeSkills(this.skillsRoot, spec) : null;
     const plugins = materializePlugins(this.pluginsRoot, spec);
-    const readable = [...(skills ? [skills.pluginDir] : []), ...plugins.map((p) => p.dir)];
-    const env = this.sessionEnv(spec);
-    const ctx: DriverContext = { spec, absCwd, env, ...(env.AT_SSH_CONFIG ? { systemExtra: sshPrompt((spec.ssh_servers ?? []).map((s) => s.name)) } : {}), policy: this.policy(spec, absCwd, readable), sink, log: this.o.log.child({ session: spec.session_id }) };
+    const readable = [...(skills ? [skills.pluginDir] : []), ...plugins.map((p) => p.dir), ...(dirs ? [dirs.project, dirs.shared] : [])];
+    const env: Record<string, string> = { ...this.sessionEnv(spec), ...(dirs ? { AGENT_TEAMS_PROJECT_DIR: dirs.project, AGENT_TEAMS_SHARED_DIR: dirs.shared } : {}) };
+    const extra = [env.AT_SSH_CONFIG ? sshPrompt((spec.ssh_servers ?? []).map((s) => s.name)) : "", dirs ? sharedFolderPrompt(dirs) : ""].filter(Boolean).join("\n\n");
+    const ctx: DriverContext = { spec, absCwd, env, ...(extra ? { systemExtra: extra } : {}), ...(dirs ? { extraDirs: [dirs.project, dirs.shared] } : {}), policy: this.policy(spec, absCwd, readable), sink, log: this.o.log.child({ session: spec.session_id }) };
     return { driver: runtime.createDriver(ctx, { skills, plugins }), ctx };
+  }
+
+  /** Links the working directory to the shared folder (.project-files, .user-files, .attachments). */
+  private linkShared(absCwd: string, dirs: SharedDirs): void {
+    try {
+      for (const p of linkSharedDirs(absCwd, dirs)) this.o.log.warn({ cwd: absCwd }, `shared folder: ${p}`);
+      this.linked.set(absCwd, dirs);
+    } catch (err) {
+      this.o.log.warn({ cwd: absCwd, err: (err as Error).message }, "shared folder: cannot link the working directory");
+    }
+  }
+
+  /** A session without the folder (off, not mounted, coordinator): stale links would send downloads to a dead or bare path. */
+  private unlinkShared(absCwd: string): void {
+    this.linked.delete(absCwd);
+    try {
+      unlinkSharedDirs(absCwd);
+    } catch (err) {
+      this.o.log.warn({ cwd: absCwd, err: (err as Error).message }, "shared folder: cannot remove the old links");
+    }
+  }
+
+  /**
+   * Where a linked working directory's attachments go: the project's attachments/, only while it is a
+   * real directory inside the mounted volume (an employee may have swapped in a symlink); else null
+   * (the local .attachments, which then refuses the link).
+   */
+  private sharedAttachments(absCwd: string): string | null {
+    const dirs = this.linked.get(absCwd);
+    const root = dirs ? this.sharedFs.root() : null;
+    if (!dirs || !root) return null;
+    const dir = sharedAttachmentDir(dirs);
+    if (safeAttachmentDir(dir, root)) return dir;
+    this.o.log.warn({ cwd: absCwd, dir }, "shared folder: attachments/ is not a real directory inside the volume; not downloading there");
+    return null;
   }
 
   private policy(spec: SessionOpen, absCwd: string, readable: string[]): ToolPolicy {
@@ -507,7 +571,8 @@ export class Daemon {
     return { ...gitCredentialEnv(this.o.nodeCmd, this.credServer.socketPath, spec.session_id, secret, spec.git_hosts ?? []), AT_GH_WRAPPER_DIR: this.platform.binDir };
   }
 
-  private forgetSession(id: string): void {
+  private forgetSession(id: string, absCwd: string): void {
+    if (!this.sessions.cwdInUse(absCwd)) this.linked.delete(absCwd);
     this.ssh.forget(id);
     this.credServer.unregister(id);
     this.toolhost.remove(id);

@@ -1,14 +1,14 @@
-// Actions on a sent attachment (#58): saving it as a shared file and finding out whether it expired.
+// Actions on a sent attachment (#58): saving it into the project's files and finding out whether it expired.
 // Lists already say which attachments expired (meta.attachments / comments / dispatch carry
 // expired: true); a probe is only made when an image fails to load.
 import { client, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
 import { attachmentUrl } from "./images";
 
-export type SavedSharedFile = components["schemas"]["UploadedSharedFile"];
+export type SavedFile = components["schemas"]["FileEntry"];
 
-/** Copies the attachment into the project's shared files at path (409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired). */
-export function saveAttachmentShared(id: string, path: string, overwrite = false): Promise<SavedSharedFile> {
+/** Copies the attachment into the project's files at path (409 file_exists unless overwrite, 409 folder_unavailable, 410 attachment_expired). */
+export function saveAttachmentShared(id: string, path: string, overwrite = false): Promise<SavedFile> {
   return unwrap(client.POST("/api/attachments/{id}/save-shared", { params: { path: { id } }, body: { path, overwrite } }));
 }
 

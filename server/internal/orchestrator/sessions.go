@@ -641,6 +641,11 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if open.SshServers, err = sshgw.SessionServers(ctx, o.store, tx, node.ID, sess.ID); err != nil {
 		return err
 	}
+	if o.SharedFolder != nil {
+		if open.Fs, err = o.SharedFolder(ctx, tx, env.project.UserID, node.ID, env.project.ID); err != nil {
+			return err
+		}
+	}
 	if err := o.addSkills(ctx, tx, env.project.UserID, env.emp, &open); err != nil {
 		return err
 	}
@@ -667,8 +672,9 @@ func setPermissionMode(ctx context.Context, tx *core.Tx, sessionID, mode string)
 	return tx.Gorm(ctx).Table("at_agent_sessions").Where("id = ?", sessionID).Update("permission_mode", mode).Error
 }
 
-// protectedRefs are the thread branch (not in a session, where it is the employee's own) and
-// the thread's base and default branch in every repository.
+// protectedRefs are the thread branch (not in a session, where it is the employee's own) and,
+// in every repository, the thread's base, the project's base and the upstream's default branch
+// (which differs from the base when the project works from, say, develop).
 func (o *Orchestrator) protectedRefs(ctx context.Context, q core.DB, env sessionEnv) []string {
 	refs := []string{}
 	if env.thread == nil {
@@ -678,7 +684,7 @@ func (o *Orchestrator) protectedRefs(ctx context.Context, q core.DB, env session
 		refs = append(refs, env.thread.Branch) // a session's employee pushes its own branch
 	}
 	for _, r := range env.repos {
-		for _, b := range []string{o.BaseFor(ctx, q, *env.thread, r), o.DefaultBranch(ctx, r)} {
+		for _, b := range []string{o.BaseFor(ctx, q, *env.thread, r), r.Base(), o.upstreamDefault(ctx, r)} {
 			if b != "" && !slices.Contains(refs, b) {
 				refs = append(refs, b)
 			}

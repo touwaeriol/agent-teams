@@ -2,7 +2,7 @@
 /** One plugin: name, latest version, 内置 / 已停用 badges, description, contents and upload time. */
 import { computed } from "vue";
 import type { PluginView } from "@/api/views";
-import { formatBytes } from "@/lib/artifacts";
+import { formatBytes } from "@/lib/bytes";
 import { contentsText } from "@/lib/plugins";
 import { timeAgo } from "@/lib/utils";
 

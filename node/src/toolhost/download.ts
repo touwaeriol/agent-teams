@@ -1,16 +1,14 @@
 import { constants } from "node:fs";
-import { createHash, randomBytes } from "node:crypto";
-import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, open, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { isInside } from "../util/paths.js";
-import type { ToolDownload, ToolSharedDownload } from "../protocol.js";
-import { MAX_BYTES, MAX_CHUNKED_SHARED_BYTES, MAX_FILES, MAX_SHARED_BYTES, SHARED_DIR, validFilePath, validSharedPath } from "./upload.js";
+import type { ToolDownload } from "../protocol.js";
+import { MAX_BYTES, MAX_FILES, validFilePath } from "./upload.js";
 
 /** Folder (relative to the session's working directory) read_deliverable writes into; git-ignored by its own .gitignore. */
 export const DOWNLOAD_DIR = ".agent-deliverables";
 const DELIVERABLE_ID = /^dl_[A-Za-z0-9]+$/;
 const GITIGNORE = "# Written by agent-teams read_deliverable; never committed.\n*\n";
-const SHARED_GITIGNORE = "*\n";
 
 export class DownloadError extends Error {}
 
@@ -50,68 +48,6 @@ export async function writeDownload(cwd: string, dl: ToolDownload, chunks: Reado
     await writeNew(join(dir, parts.at(-1)!), bodies[i]!, false);
   }
   return { abs: verDir, rel, files: dl.files.map((f) => f.path) };
-}
-
-export interface WrittenSharedFile {
-  /** Absolute path of the written file. */
-  abs: string;
-  /** The same path relative to the working directory (.shared/<path>). */
-  rel: string;
-  size: number;
-  sha256: string;
-}
-
-/**
- * Writes the file of a read_shared_file result to <cwd>/.shared/<path>. The shared path is checked
- * again (SharedPath: no dot segments, nothing absolute) and must stay inside .shared; size, chunk
- * count and checksum are verified before anything lands on disk. .shared and the folders under it
- * must be real directories (never symlinks); .shared holds a .gitignore ("*"). An existing file is
- * replaced through a temporary file and rename, so a symlink at the name is replaced, not followed.
- */
-export async function writeSharedDownload(cwd: string, sd: ToolSharedDownload, chunks: ReadonlyMap<number, string>): Promise<WrittenSharedFile> {
-  const f = checkShared(sd);
-  const [body] = splitFiles(sd, joinChunks(sd.chunks, chunks, MAX_CHUNKED_SHARED_BYTES, "read_shared_file"));
-  const t = await sharedTarget(cwd, f.path);
-  const tmp = join(t.dir, `.${t.name.slice(0, 40)}.${randomBytes(6).toString("hex")}.part`);
-  await writeNew(tmp, body!, false);
-  try {
-    const st = await lstat(t.target).catch(() => null);
-    if (st?.isDirectory()) throw new DownloadError(`${SHARED_DIR}/${f.path} exists and is a directory`);
-    await rename(tmp, t.target);
-  } catch (err) {
-    await rm(tmp, { force: true });
-    if (err instanceof DownloadError) throw err;
-    throw new DownloadError(`cannot write ${t.target}: ${(err as NodeJS.ErrnoException).code ?? (err as Error).message}`);
-  }
-  return { abs: t.target, rel: `${SHARED_DIR}/${f.path}`, size: f.size, sha256: f.sha256 };
-}
-
-/** The one file of a shared_download, checked (path rules, size limit). */
-export function checkShared(sd: ToolSharedDownload): ToolSharedDownload["files"][0] {
-  if (!Array.isArray(sd.files) || sd.files.length !== 1) throw new DownloadError("a shared download has exactly one file");
-  const f = sd.files[0];
-  if (typeof f.path !== "string" || !validSharedPath(f.path)) throw new DownloadError(`refusing shared path ${JSON.stringify(f.path)}`);
-  if (!Number.isInteger(f.size) || f.size < 0 || f.size > MAX_SHARED_BYTES) throw new DownloadError(`bad size of ${f.path}`);
-  return f;
-}
-
-/**
- * Where a shared file goes: <cwd>/.shared/<path>, the folders created as real directories (never
- * symlinks) and .shared holding a .gitignore ("*").
- */
-export async function sharedTarget(cwd: string, path: string): Promise<{ dir: string; name: string; target: string }> {
-  if (!cwd) throw new DownloadError("the session has no working directory");
-  const root = await realpath(cwd).catch(() => {
-    throw new DownloadError("the working directory is missing");
-  });
-  const top = await ensureDir(join(root, SHARED_DIR));
-  await writeNew(join(top, ".gitignore"), Buffer.from(SHARED_GITIGNORE), true);
-  const parts = path.split("/");
-  const target = join(top, ...parts);
-  if (!isInside(top, target) || target === top) throw new DownloadError(`refusing shared path ${JSON.stringify(path)}`);
-  let dir = top;
-  for (const part of parts.slice(0, -1)) dir = await ensureDir(join(dir, part));
-  return { dir, name: parts.at(-1)!, target };
 }
 
 function checkMeta(dl: ToolDownload): void {

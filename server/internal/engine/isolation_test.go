@@ -143,7 +143,7 @@ func queryFor(route string) string {
 	if strings.HasSuffix(route, "/office/replay") {
 		return "?from=2026-01-01T00:00:00Z&to=2026-01-02T00:00:00Z"
 	}
-	if strings.Contains(route, "/shared-files") {
+	if strings.Contains(route, "/projects/:pid/files") {
 		return "?path=data/a.csv"
 	}
 	return ""

@@ -57,8 +57,9 @@ export const deliverables = {
     unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version, ...attachmentsField(attachments) } })),
 };
 
-export const sharedFiles = {
-  remove: (pid: string, path: string) => unwrap(client.DELETE("/api/projects/{pid}/shared-files", { params: { path: { pid }, query: { path } } })),
+export const projectFiles = {
+  remove: (pid: string, path: string) => unwrap(client.DELETE("/api/projects/{pid}/files", { params: { path: { pid }, query: { path } } })),
+  mkdir: (pid: string, path: string) => unwrap(client.POST("/api/projects/{pid}/files/folders", { params: { path: { pid } }, body: { path } })),
 };
 
 export const schedules = {
@@ -139,6 +140,13 @@ export const servers = {
   resetHostKey: (id: string) => unwrap(client.POST("/api/servers/{id}/host-key/reset", { params: { path: { id } } })),
   setProjectServers: (pid: string, list: { server_id: string; roles: string[] }[]) =>
     unwrap(client.PUT("/api/projects/{pid}/servers", { params: { path: { pid } }, body: { servers: list } })) as Promise<ProjectServersView>,
+};
+
+/** The user's JuiceFS shared folder (one volume per user). */
+export const sharedFolder = {
+  enable: () => unwrap(client.POST("/api/storage/fs")),
+  remove: (confirm: string) => unwrap(client.DELETE("/api/storage/fs", { body: { confirm } })),
+  dockerVolume: () => unwrap(client.POST("/api/storage/fs/docker-volume")),
 };
 
 export const roles = {

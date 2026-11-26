@@ -12,15 +12,14 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
-	"github.com/touwaeriol/agent-teams/server/internal/sharedfiles"
 )
 
 // Attachments in tools (#58 design §6.3, §7): assign_task, send_message and the other messaging
 // tools take attachments=[img_…] and deliver them with the message; read_attachment downloads one
-// into the session's .attachments/; save_attachment keeps one as a shared file.
+// into the session's .attachments/ (with the shared folder, a link to the project's attachments/).
 
-// AttachmentURLTTL is how long the presigned GET a daemon gets for read_attachment or
-// read_shared_file stays valid (it downloads at once).
+// AttachmentURLTTL is how long the presigned GET a daemon gets for read_attachment stays valid
+// (it downloads at once).
 const AttachmentURLTTL = 15 * time.Minute
 
 // useAttachments checks a tool's attachments argument: every id an attachment of the caller's
@@ -141,80 +140,23 @@ func (s *Service) readAttachment(ctx context.Context, tx *core.Tx, c *call) (Res
 	return Result{OK: true, Text: text, Structured: out, AttachmentDownload: dl}, nil
 }
 
-// saveAttachment keeps an attachment as a shared file. The object is copied inside the store,
-// after the call's transaction (Later: no network work while the project row is locked); the
-// bytes never pass through the working directory. Rows from before #58 are written from their
-// data column.
-func (s *Service) saveAttachment(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
-	var in protocol.SaveAttachmentInput
-	if err := c.decode(&in); err != nil {
-		return Result{}, err
-	}
-	p, err := sharedfiles.CleanPath(string(in.Path))
-	if err != nil {
-		return Result{}, refuse("%s", err.Error())
-	}
-	bs := blobstore.Or(s.core.Blobs)
-	if !bs.Configured() {
-		return Result{}, refuse("平台的文件存储还没有配置，暂时存不了共享文件")
-	}
-	list, err := s.loadAttachments(ctx, tx, c, protocol.AttachmentIds{in.ID})
-	if err != nil {
-		return Result{}, err
-	}
-	a, pid := list[0], c.emp().ProjectID
-	if err := sharedfiles.CheckSpace(ctx, tx, pid, p, int64(a.Size), in.Overwrite); err != nil {
-		return Result{}, refuseShared(err, p)
-	}
-	by, owner := sharedUploader(c), c.sc.OwnerID
-	return Result{Later: func(ctx context.Context) Result { return s.copyAttachment(ctx, owner, p, a, by, in.Overwrite) }}, nil
-}
-
-// refuseShared explains a shared-file refusal to the model.
-func refuseShared(err error, p string) error {
-	switch {
-	case errors.Is(err, sharedfiles.ErrExists):
-		return refuse("共享文件 %s 已经存在：换一个路径，或者确认要替换时带 overwrite=true", p)
-	case errors.Is(err, sharedfiles.ErrInvalidPath), errors.Is(err, sharedfiles.ErrFileTooLarge), errors.Is(err, sharedfiles.ErrQuota):
-		return refuse("%s", err.Error())
-	}
-	return err
-}
-
-func (s *Service) copyAttachment(ctx context.Context, owner, p string, a core.Attachment, by sharedfiles.Uploader, overwrite bool) Result {
-	f, overwritten, err := s.core.SaveAttachmentShared(ctx, owner, a, p, by, overwrite)
-	if err != nil {
-		var ue userError
-		switch {
-		case errors.Is(err, blobstore.ErrNotFound) || errors.Is(err, core.ErrNotFound):
-			s.log.Warn("save_attachment copy", "attachment", a.ID, "err", err)
-			return failText("附件 %s 的文件已经不在存储里了（可能刚过期），存不了", a.ID)
-		case errors.Is(err, core.ErrAttachmentExpired):
-			return failText("%s", err.Error())
-		case errors.As(refuseShared(err, p), &ue):
-			return failText("%s", ue.msg)
-		}
-		s.log.Warn("save_attachment", "attachment", a.ID, "err", err)
-		return failText("存为共享文件失败：%v", err)
-	}
-	out := protocol.SaveAttachmentResult{ID: protocol.AttachmentID(a.ID), Path: protocol.SharedPath(f.Path), Size: int(f.Size),
-		Overwritten: overwritten}
-	if f.SHA256 != "" {
-		sum := f.SHA256
-		out.SHA256 = &sum
-	}
-	verb := "已存为"
-	if overwritten {
-		verb = "已覆盖"
-	}
-	return okJSON(fmt.Sprintf("%s共享文件 %s（附件 %s %s，%s）。项目里所有会话和用户都能用 list_shared_files / read_shared_file 取到它，"+
-		"附件过期后它也一直保留。%s", verb, f.Path, a.ID, a.Name, human(f.Size), noSecrets), out)
-}
-
 // carried tells the caller how many attachments went along (appended to a tool's result text).
 func carried(files []core.AttachmentRef) string {
 	if len(files) == 0 {
 		return ""
 	}
 	return fmt.Sprintf("（附带 %d 个附件）", len(files))
+}
+
+// human is a byte count for people (1.5 MB).
+func human(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
 }

@@ -126,3 +126,54 @@ func TestS3(t *testing.T) {
 		t.Fatalf("path style off: %+v %v", cfg.S3, err)
 	}
 }
+
+func TestFS(t *testing.T) {
+	base := map[string]string{"DATABASE_URL": "postgres://u:p@pg:5432/agent_teams", "AGENT_TEAMS_PUBLIC_URL": "https://a.example",
+		"AGENT_TEAMS_S3_ENDPOINT": "https://s3.example", "AGENT_TEAMS_S3_BUCKET": "b", "AGENT_TEAMS_S3_ACCESS_KEY": "k", "AGENT_TEAMS_S3_SECRET_KEY": "s"}
+	get := func(extra map[string]string) Getenv {
+		return func(k string) string {
+			if v, ok := extra[k]; ok {
+				return v
+			}
+			return base[k]
+		}
+	}
+	cfg, err := Load(get(nil))
+	if err != nil || cfg.FS.Configured() {
+		t.Fatalf("off by default: %+v %v", cfg.FS, err)
+	}
+	full := map[string]string{"AGENT_TEAMS_FS_META_HOST": "db.example:15432", "AGENT_TEAMS_FS_BUCKET": "fs",
+		"AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY": "root", "AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY": "rootpw"}
+	cfg, err = Load(get(full))
+	if err != nil || !cfg.FS.Configured() || cfg.FS.AdminURL != base["DATABASE_URL"] || cfg.FS.S3Endpoint != "https://s3.example" ||
+		cfg.FS.MetaSSLMode != "verify-full" || cfg.FS.CapacityGB != 20 || cfg.FS.JuiceFS != "juicefs" {
+		t.Fatalf("defaults: %+v %v", cfg.FS, err)
+	}
+	if _, err := Load(get(map[string]string{"AGENT_TEAMS_FS_BUCKET": "fs"})); err == nil {
+		t.Fatal("partial FS accepted")
+	}
+	bad := map[string]string{}
+	for k, v := range full {
+		bad[k] = v
+	}
+	bad["AGENT_TEAMS_FS_META_HOST"] = "db.example"
+	if _, err := Load(get(bad)); err == nil {
+		t.Fatal("meta host without port accepted")
+	}
+	bad["AGENT_TEAMS_FS_META_HOST"], bad["AGENT_TEAMS_FS_CLIENT_VERSION"] = "db.example:15432", "1.5.0"
+	if _, err := Load(get(bad)); err == nil {
+		t.Fatal("client version without checksums accepted")
+	}
+	bad["AGENT_TEAMS_FS_CLIENT_SHA256"] = "linux-amd64=ABC, linux-arm64=def"
+	if cfg, err := Load(get(bad)); err != nil || cfg.FS.ClientSHA256["linux-amd64"] != "abc" || cfg.FS.ClientSHA256["linux-arm64"] != "def" {
+		t.Fatalf("checksums: %+v %v", cfg.FS.ClientSHA256, err)
+	}
+	bad["AGENT_TEAMS_FS_CAPACITY_GB"] = "0"
+	if cfg, err := Load(get(bad)); err != nil || cfg.FS.CapacityGB != 0 {
+		t.Fatalf("capacity 0 (no limit): %+v %v", cfg.FS.CapacityGB, err)
+	}
+	bad["AGENT_TEAMS_FS_CAPACITY_GB"] = "-1"
+	if _, err := Load(get(bad)); err == nil {
+		t.Fatal("negative capacity accepted")
+	}
+}

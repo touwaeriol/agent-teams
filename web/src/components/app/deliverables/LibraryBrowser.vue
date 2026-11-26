@@ -8,7 +8,8 @@ import { computed, ref } from "vue";
 import { useDeliverables } from "@/api/queries";
 import IconButton from "@/components/common/IconButton.vue";
 import Loading from "@/components/common/Loading.vue";
-import { formatBytes, isLibraryDeliverable, nextSort, sortLibrary, type SortKey } from "@/lib/library";
+import { isLibraryDeliverable, nextSort, sortLibrary, type SortKey } from "@/lib/library";
+import { formatBytes } from "@/lib/bytes";
 import { cn } from "@/lib/utils";
 import AddButton from "./AddButton.vue";
 import { saveView, storedView, type LibraryView } from "./browser";
@@ -66,7 +67,7 @@ const vFocus = { mounted: (el: HTMLInputElement) => panel.value && el.focus() };
       <LibraryGrid v-if="items.length > 0 && view === 'grid'" :pid="pid" :items="items" />
     </div>
     <div :class="cn('flex shrink-0 items-center border-t py-2.5 text-xs text-muted-foreground', panel ? 'px-4' : '')">
-      已使用 {{ formatBytes(list.data.value?.storage_bytes ?? 0) }}
+      已使用 {{ formatBytes(list.data.value?.storage_bytes ?? 0, "decimal") }}
       <span class="ml-auto">{{ items.length }} 项</span>
     </div>
   </div>

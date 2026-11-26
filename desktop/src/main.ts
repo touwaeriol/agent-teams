@@ -7,20 +7,21 @@ import { join } from "node:path";
 import { desktopUserAgent, resolveAppUrl } from "./config";
 import { PROTOCOL, deepLinkToUrl, findDeepLink } from "./deeplink";
 import { menuTemplate, isDevToolsShortcut } from "./menu";
-import { classifyLink, isSameOrigin } from "./navigation";
+import { classifyLink, isSameOrigin, staysInWindow } from "./navigation";
 import { OFFLINE_PAGE, showsOfflinePage } from "./offline";
 import { allowPermission } from "./permissions";
 import { checkForUpdatesNow, startAutoUpdate, updatesEnabled } from "./updater";
 import { loadWindowState, trackWindowState } from "./windowStore";
 
 const APP_ID = "ai.prophey.agentteams";
-const appUrl = resolveAppUrl(process.env);
+const appUrl = resolveAppUrl(process.env, app.isPackaged);
 const appOrigin = appUrl.origin;
 const isMac = process.platform === "darwin";
 const devMode = !app.isPackaged;
 
 let mainWindow: BrowserWindow | null = null;
 let pendingUrl: string | null = null; // a deep link that arrived before the window existed
+let quitting = false; // Mac: closing the window only hides it until the app quits
 
 const webPreferences = (): Electron.WebPreferences => ({
   contextIsolation: true,
@@ -40,7 +41,7 @@ function openExternal(url: string) {
 /** Navigation rules for every page the app opens (main window and same-origin popups). */
 function guardContents(contents: WebContents) {
   contents.on("will-navigate", (event, url) => {
-    if (classifyLink(url, appOrigin) === "app") return;
+    if (staysInWindow(classifyLink(url, appOrigin))) return;
     event.preventDefault();
     openExternal(url);
   });
@@ -78,6 +79,12 @@ function createMainWindow(url: string) {
   if (state.maximized) win.maximize();
   trackWindowState(win);
   win.once("ready-to-show", () => win.show());
+  // Mac keeps the page (reminders, notifications, the live session) running with the window hidden.
+  win.on("close", (event) => {
+    if (!isMac || quitting) return;
+    event.preventDefault();
+    win.hide();
+  });
   win.on("closed", () => (mainWindow = null));
   void win.loadURL(url);
   mainWindow = win;
@@ -154,6 +161,7 @@ function main() {
   });
   app.on("web-contents-created", (_e, contents) => guardContents(contents));
   app.on("activate", () => showApp());
+  app.on("before-quit", () => (quitting = true));
   app.on("window-all-closed", () => {
     if (!isMac) app.quit();
   });

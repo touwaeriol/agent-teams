@@ -1,7 +1,8 @@
 // Attachments of session.send / first_message (attachments_v2, #58): any type, up to 200 MB each.
 // The daemon asks the console for a short-lived download URL at delivery time (GET
 // /nodes/attachments/{id}/url, node token), streams the file into <cwd>/.attachments/<id>-<name>
-// (git-ignored by its own .gitignore) and lists every attachment's path in the text. Images and
+// (git-ignored by its own .gitignore; with the shared folder, a link to the project's attachments/
+// there, kept with the project) and lists every attachment's path in the text. Images and
 // PDFs under the runtime's per-file limits also go in as content blocks. The URL never reaches the AI.
 import { createHash, randomBytes } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
@@ -22,7 +23,7 @@ const ID = /^img_[0-9A-Za-z]{1,60}$/;
 const MAX_NAME_BYTES = 120;
 
 export interface AttachmentOptions {
-  /** Total time for one attachment: the /url requests, presigned retries and the legacy fallback together (also one write_shared_file upload). */
+  /** Total time for one attachment: the /url requests, presigned retries and the legacy fallback together. */
   timeoutMs: number;
   /** Free space that must remain on the disk after the download. */
   minFreeBytes: number;
@@ -122,7 +123,7 @@ export function attachmentFileName(ref: Pick<AttachmentRef, "id" | "name">): str
  * (the session was closed).
  */
 export async function downloadAttachment(
-  cwd: string, ref: AttachmentRef, http: ConsoleHttp, opts: AttachmentOptions, presetUrl?: string | null, cancel?: AbortSignal,
+  cwd: string, ref: AttachmentRef, http: ConsoleHttp, opts: AttachmentOptions, presetUrl?: string | null, cancel?: AbortSignal, into?: string | null,
 ): Promise<SavedAttachment> {
   const deadline = Date.now() + opts.timeoutMs;
   const left = () => deadline - Date.now();
@@ -133,7 +134,8 @@ export async function downloadAttachment(
   const root = await realpath(cwd).catch(() => {
     throw new AttachmentError("the working directory is missing");
   });
-  const dir = await attachmentDir(root);
+  // into: the shared folder's attachments/ (reached from the working directory through the .attachments link).
+  const dir = into ?? (await attachmentDir(root));
   const name = attachmentFileName(ref);
   const abs = join(dir, name);
   const rel = `${ATTACH_DIR}/${name}`;
@@ -358,7 +360,7 @@ export async function planDelivery(runtime: AttachmentRuntime, outcomes: Attachm
   if (!lines.length) return { note: "", images, links };
   const note =
     `\n\n[附件]\n${lines.join("\n")}\n` +
-    "用 read_attachment(id) 可以重新下载；assign_task、send_message 等工具带 attachments=[id] 可以把附件转给别人；save_attachment(id, path) 可以存为共享文件。";
+    "用 read_attachment(id) 可以重新下载；assign_task、send_message 等工具带 attachments=[id] 可以把附件转给别人；开了共享文件夹时附件已经在 .attachments/（随项目保存），要整理成项目文件就复制到 .project-files/。";
   return { note, images, links };
 }
 

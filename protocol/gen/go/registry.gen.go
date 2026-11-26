@@ -14,6 +14,9 @@ const (
 	TypeError                 = "error"
 	TypeFileChunk             = "file.chunk"
 	TypeFileDownload          = "file.download"
+	TypeFsMount               = "fs.mount"
+	TypeFsStatus              = "fs.status"
+	TypeFsUnmount             = "fs.unmount"
 	TypeGitCleanup            = "git.cleanup"
 	TypeGitPrepare            = "git.prepare"
 	TypeGitPurge              = "git.purge"
@@ -75,6 +78,9 @@ var Messages = map[string]MessageMeta{
 	TypeError:                 {Direction: Both, Reliable: false, Key: nil, New: func() any { return new(ProtocolError) }},
 	TypeFileChunk:             {Direction: NodeToConsole, Reliable: true, Key: []string{"upload_id", "index"}, New: func() any { return new(FileChunk) }},
 	TypeFileDownload:          {Direction: ConsoleToNode, Reliable: true, Key: []string{"download_id", "index"}, New: func() any { return new(FileDownload) }},
+	TypeFsMount:               {Direction: ConsoleToNode, Reliable: false, Key: []string{"volume", "generation"}, New: func() any { return new(FsMount) }},
+	TypeFsStatus:              {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(FsStatus) }},
+	TypeFsUnmount:             {Direction: ConsoleToNode, Reliable: false, Key: []string{"volume"}, New: func() any { return new(FsUnmount) }},
 	TypeGitCleanup:            {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitCleanup) }},
 	TypeGitPrepare:            {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPrepare) }},
 	TypeGitPurge:              {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPurge) }},
@@ -135,13 +141,11 @@ const (
 	ToolCloseQuestion      = "close_question"
 	ToolCloseSubthread     = "close_subthread"
 	ToolCompleteTask       = "complete_task"
-	ToolDeleteSharedFile   = "delete_shared_file"
 	ToolEnqueueMerge       = "enqueue_merge"
 	ToolFinish             = "finish"
 	ToolForwardToThread    = "forward_to_thread"
 	ToolGetTask            = "get_task"
 	ToolListDeliverables   = "list_deliverables"
-	ToolListSharedFiles    = "list_shared_files"
 	ToolListTasks          = "list_tasks"
 	ToolListTeam           = "list_team"
 	ToolListThreads        = "list_threads"
@@ -160,13 +164,11 @@ const (
 	ToolReadAttachment     = "read_attachment"
 	ToolReadDeliverable    = "read_deliverable"
 	ToolReadMessages       = "read_messages"
-	ToolReadSharedFile     = "read_shared_file"
 	ToolRemember           = "remember"
 	ToolReplyTo            = "reply_to"
 	ToolReportProgress     = "report_progress"
 	ToolRequestReview      = "request_review"
 	ToolReviewPermission   = "review_permission"
-	ToolSaveAttachment     = "save_attachment"
 	ToolScheduleCancel     = "schedule_cancel"
 	ToolScheduleCreate     = "schedule_create"
 	ToolScheduleList       = "schedule_list"
@@ -177,7 +179,6 @@ const (
 	ToolThreadStatus       = "thread_status"
 	ToolUpdatePlan         = "update_plan"
 	ToolWaitTask           = "wait_task"
-	ToolWriteSharedFile    = "write_shared_file"
 )
 
 // Tools describes every platform tool.
@@ -218,10 +219,6 @@ var Tools = map[string]ToolMeta{
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(CompleteTaskInput) }, NewResult: func() any { return new(CompleteTaskResult) },
 	},
-	ToolDeleteSharedFile: {
-		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
-		NewInput: func() any { return new(DeleteSharedFileInput) }, NewResult: func() any { return new(DeleteSharedFileResult) },
-	},
 	ToolEnqueueMerge: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(EnqueueMergeInput) }, NewResult: func() any { return new(EnqueueMergeResult) },
@@ -241,10 +238,6 @@ var Tools = map[string]ToolMeta{
 	ToolListDeliverables: {
 		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ListDeliverablesInput) }, NewResult: func() any { return new(ListDeliverablesResult) },
-	},
-	ToolListSharedFiles: {
-		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
-		NewInput: func() any { return new(ListSharedFilesInput) }, NewResult: func() any { return new(ListSharedFilesResult) },
 	},
 	ToolListTasks: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
@@ -318,10 +311,6 @@ var Tools = map[string]ToolMeta{
 		Tiers: []Tier{TierMember}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ReadMessagesInput) }, NewResult: func() any { return new(ReadMessagesResult) },
 	},
-	ToolReadSharedFile: {
-		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
-		NewInput: func() any { return new(ReadSharedFileInput) }, NewResult: func() any { return new(ReadSharedFileResult) },
-	},
 	ToolRemember: {
 		Tiers: []Tier{TierCoordinator}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(RememberInput) }, NewResult: nil,
@@ -341,10 +330,6 @@ var Tools = map[string]ToolMeta{
 	ToolReviewPermission: {
 		Tiers: []Tier{TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(ReviewPermissionInput) }, NewResult: nil,
-	},
-	ToolSaveAttachment: {
-		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
-		NewInput: func() any { return new(SaveAttachmentInput) }, NewResult: func() any { return new(SaveAttachmentResult) },
 	},
 	ToolScheduleCancel: {
 		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
@@ -385,9 +370,5 @@ var Tools = map[string]ToolMeta{
 	ToolWaitTask: {
 		Tiers: []Tier{TierMember}, Blocking: []Tier{TierMember}, Requires: "can_delegate",
 		NewInput: func() any { return new(WaitTaskInput) }, NewResult: func() any { return new(WaitTaskResult) },
-	},
-	ToolWriteSharedFile: {
-		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",
-		NewInput: func() any { return new(WriteSharedFileInput) }, NewResult: func() any { return new(WriteSharedFileResult) },
 	},
 }

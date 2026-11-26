@@ -305,6 +305,7 @@ func (s *Server) deleteProject(ctx context.Context, in *projectIDInput) (*struct
 	if err := s.store.DeleteProject(ctx, p.User.ID, in.PID); err != nil {
 		return nil, storeErr(err, "没有这个项目")
 	}
+	s.hooks.ProjectDeleted(ctx, p.User.ID, in.PID)
 	s.events.User(ctx, p.User.ID, "project", map[string]any{"project_id": in.PID, "op": "delete"})
 	return nil, nil
 }

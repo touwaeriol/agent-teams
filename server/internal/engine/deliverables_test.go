@@ -234,7 +234,7 @@ func TestDeliverableReferenceInline(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return artifacts.Save(tm.w.ctx, tx, logo.ID, 1, artifacts.Publisher{Name: "designer-1"}, files)
+		return tm.w.e.Core.Artifacts().Save(tm.w.ctx, tx, logo.ID, 1, artifacts.Publisher{Name: "designer-1"}, files)
 	})
 	if err != nil {
 		t.Fatal(err)

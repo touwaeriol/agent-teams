@@ -3,12 +3,13 @@
 //   1. seeds the image's bundled release into the data dir (containers: AGENT_TEAMS_SEED),
 //   2. counts starts of a switched, unconfirmed release and rolls back to previous after
 //      MAX_UNCONFIRMED_BOOTS starts or CONFIRM_DEADLINE_MS,
-//   3. runs <data>/current/node.mjs and restarts it: at once on exit 75 (update), with backoff otherwise.
+//   3. runs <data>/current/node.mjs and restarts it: at once on exit 75 (update), with backoff otherwise;
+//      exit 76 (external shared folder lost) ends the launcher too, so the container restart policy remounts it.
 // Only node: builtins: it runs without node_modules.
 import { spawn, type ChildProcess } from "node:child_process";
 import { cpSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildOf, CONFIRM_DEADLINE_MS, defaultDataDir, MAX_UNCONFIRMED_BOOTS, ReleaseLayout, releaseId } from "./release.js";
+import { buildOf, CONFIRM_DEADLINE_MS, defaultDataDir, EXIT_FS_LOST, MAX_UNCONFIRMED_BOOTS, ReleaseLayout, releaseId } from "./release.js";
 
 export const EXIT_UPGRADE = 75;
 const CONFIG_ERROR = 2;
@@ -145,6 +146,10 @@ export async function launch(o: LauncherOptions): Promise<number> {
     if (code === EXIT_UPGRADE) {
       backoff = 1000;
       continue;
+    }
+    if (code === EXIT_FS_LOST) {
+      log("the shared folder's external mount went away; exiting so the container is restarted");
+      return code;
     }
     if (now() - started > 60_000) backoff = 1000;
     const wait = code === CONFIG_ERROR ? 30_000 : backoff;

@@ -84,13 +84,13 @@ func TestSplit(t *testing.T) {
 }
 
 func TestPolicy(t *testing.T) {
-	s := NewServer(nil, nil, "", "https://agent.example.com", nil)
+	s := NewServer(func() Store { return Store{} }, nil, "", "https://agent.example.com", nil)
 	p := s.policy()
 	if !strings.HasPrefix(p, "sandbox allow-scripts") || strings.Contains(p, "allow-same-origin") ||
 		!strings.Contains(p, "frame-ancestors 'self' https://agent.example.com") {
 		t.Fatalf("policy %s", p)
 	}
-	iso := NewServer(nil, nil, "https://files.example.net", "", nil)
+	iso := NewServer(func() Store { return Store{} }, nil, "https://files.example.net", "", nil)
 	if !iso.Isolated() || !strings.Contains(iso.policy(), "allow-same-origin") {
 		t.Fatal("isolated origin keeps same-origin inside its own sandbox")
 	}

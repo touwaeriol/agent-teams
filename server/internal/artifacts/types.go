@@ -83,3 +83,26 @@ func Detail(by string, version int, entry string, files []ArtifactFile, prev map
 	out["entry"], out["content_type"], out["render"], out["files"], out["size"] = entry, ct, Render(ct), len(files), size
 	return out
 }
+
+// fileTypes are content types of common data files the deliverable table does not list.
+var fileTypes = map[string]string{
+	".xml": "application/xml", ".yaml": "application/yaml", ".yml": "application/yaml",
+	".zip": "application/zip", ".gz": "application/gzip", ".tar": "application/x-tar", ".tgz": "application/gzip",
+	".log": "text/plain; charset=utf-8", ".tsv": "text/tab-separated-values; charset=utf-8",
+	".sql": "text/plain; charset=utf-8", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+	".mp3":  "audio/mpeg", ".wav": "audio/wav", ".mp4": "video/mp4", ".webm": "video/webm",
+}
+
+// FileType is the type any file is listed and downloaded with, from its extension only; unknown
+// extensions are application/octet-stream.
+func FileType(p string) string {
+	if ct := ContentType(p); ct != "" {
+		return ct
+	}
+	if ct := fileTypes[strings.ToLower(path.Ext(p))]; ct != "" {
+		return ct
+	}
+	return "application/octet-stream"
+}

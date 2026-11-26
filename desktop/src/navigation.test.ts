@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyLink, isSameOrigin } from "./navigation";
+import { classifyLink, isSameOrigin, staysInWindow } from "./navigation";
 
 const app = "https://agent.prophey.ai";
 
@@ -8,13 +8,16 @@ describe("classifyLink", () => {
     ["https://agent.prophey.ai/projects/p1/threads/3/full", "app"],
     ["https://agent.prophey.ai", "app"],
     ["https://agent.prophey.ai:443/login", "app"],
-    ["https://github.com/touwaeriol/agent-teams/pull/1", "browser"],
+    ["https://github.com/touwaeriol/agent-teams/pull/1", "flow"],
+    ["https://github.com/session", "flow"],
+    ["https://docs.github.com/x", "browser"],
     ["http://agent.prophey.ai/login", "browser"], // other scheme = other origin
     ["https://agent.prophey.ai.evil.example/", "browser"],
     ["https://rustfs.prophey.ai/bucket/x", "browser"],
     ["file:///etc/passwd", "deny"],
     ["javascript:alert(1)", "deny"],
-    ["mailto:a@b.c", "deny"],
+    ["mailto:a@b.c", "browser"],
+    ["MAILTO:a@b.c", "browser"],
     ["agentteams://projects/x", "deny"],
     ["about:blank", "deny"],
     ["", "deny"],
@@ -24,4 +27,11 @@ describe("classifyLink", () => {
 it("isSameOrigin works for a local dev server", () => {
   expect(isSameOrigin("http://127.0.0.1:5173/sessions/new", "http://127.0.0.1:5173")).toBe(true);
   expect(isSameOrigin("http://127.0.0.1:5174/", "http://127.0.0.1:5173")).toBe(false);
+});
+
+it("only the site and flow pages stay in the window", () => {
+  expect(staysInWindow(classifyLink("https://github.com/apps/x/installations/new", app))).toBe(true);
+  expect(staysInWindow(classifyLink("https://agent.prophey.ai/settings", app))).toBe(true);
+  expect(staysInWindow(classifyLink("https://example.com/", app))).toBe(false);
+  expect(staysInWindow(classifyLink("file:///etc/passwd", app))).toBe(false);
 });

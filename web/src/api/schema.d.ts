@@ -329,7 +329,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Keep an attachment as a shared file of its project (copied inside the store; 409 file_exists unless overwrite, 409 quota_exceeded, 410 attachment_expired; 404 for one still uploading or not yet in a project) */
+        /** Keep an attachment in its project's files (409 file_exists unless overwrite, 409 folder_unavailable without a shared folder, 410 attachment_expired; 404 for one still uploading or not yet in a project) */
         post: operations["save-attachment-shared"];
         delete?: never;
         options?: never;
@@ -1298,6 +1298,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{pid}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A folder of the project's files (in the user's shared folder) */
+        get: operations["list-project-files"];
+        put?: never;
+        /** Upload files into the project's files (multipart: file… parts; optional dir; optional path… per file, in order); a file with the same path is replaced */
+        post: operations["upload-project-files"];
+        /** Delete a file, or a folder with everything in it */
+        delete: operations["delete-project-file"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/files/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download one of the project's files (always as an attachment, never rendered) */
+        get: operations["download-project-file"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{pid}/files/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a folder in the project's files */
+        post: operations["create-project-folder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{pid}/library": {
         parameters: {
             query?: never;
@@ -1500,42 +1553,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{pid}/shared-files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The project's shared files (no content) with the total and the limits */
-        get: operations["list-shared-files"];
-        put?: never;
-        /** Upload files to the project's shared files (multipart: file… parts; optional dir prefix; optional path… per file, in order); a file with the same path is overwritten */
-        post: operations["upload-shared-files"];
-        /** Delete one shared file */
-        delete: operations["delete-shared-file"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{pid}/shared-files/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Download one shared file (always as an attachment, never rendered): 302 to a presigned URL valid 5 minutes, or the bytes for files from before #58 */
-        get: operations["download-shared-file"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/projects/{pid}/threads": {
         parameters: {
             query?: never;
@@ -1562,7 +1579,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a presigned upload of an attachment (any type, at most 200 MB) or a shared file (at most 200 MB, project quota 5 GB) */
+        /** Start a presigned upload of an attachment (any type, at most 200 MB) */
         post: operations["create-upload"];
         delete?: never;
         options?: never;
@@ -1596,7 +1613,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Finish an upload: the object's size is checked, an attachment's type sniffed, a shared file put at its path */
+        /** Finish an upload: the object's size is checked and its type sniffed */
         post: operations["complete-upload"];
         delete?: never;
         options?: never;
@@ -1956,6 +1973,42 @@ export interface paths {
         post?: never;
         /** Delete an uploaded skill and remove it from the roles */
         delete: operations["delete-skill"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/fs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My shared folder (JuiceFS volume) */
+        get: operations["get-shared-folder"];
+        put?: never;
+        /** Switch the shared folder on (or retry a failed provisioning) */
+        post: operations["enable-shared-folder"];
+        /** Delete the shared folder and every file in it */
+        delete: operations["delete-shared-folder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/fs/docker-volume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compose volume for a Docker node (carries the metadata password) */
+        post: operations["shared-folder-docker-volume"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3215,6 +3268,23 @@ export interface components {
             content: string;
             path: string;
         };
+        FileEntry: {
+            content_type?: string;
+            dir: boolean;
+            /** Format: date-time */
+            mod_time: string;
+            name: string;
+            /** @description Relative to the project's folder */
+            path: string;
+            /** Format: int64 */
+            size: number;
+        };
+        FilesUploaded: {
+            files: components["schemas"]["FileEntry"][] | null;
+        };
+        FolderCreate: {
+            path: string;
+        };
         ForwardInputBody: {
             /** @description Your own messages in this conversation, any order (forwarded oldest first) */
             message_ids: number[] | null;
@@ -3245,6 +3315,40 @@ export interface components {
             /** Format: int64 */
             thread_no: number;
             title: string;
+        };
+        FsDeleteInputBody: {
+            /** @description The volume name, typed by the user: every file in it is deleted */
+            confirm: string;
+        };
+        FsDockerVolume: {
+            /** @description Compose fragment: the juicedata/juicefs volume and how the node service mounts it */
+            compose: string;
+            /** @description Where the node container sees the folder (AGENT_TEAMS_FS_DIR) */
+            mount: string;
+            /** @description Host command installing the volume plugin (once per host) */
+            plugin: string;
+        };
+        FsView: {
+            /** @description The console has AGENT_TEAMS_FS_* (otherwise the folder cannot be switched on) */
+            configured: boolean;
+            /** @description A project's folder inside the volume, with {project_id} */
+            project_dir: string;
+            /** @description The folder every project of the user shares */
+            shared_dir: string;
+            /** @description Absent until switched on */
+            volume?: components["schemas"]["FsVolumeView"];
+        };
+        FsVolumeView: {
+            /** Format: int64 */
+            capacity_gb: number;
+            /** Format: date-time */
+            created_at: string;
+            error: string;
+            /** @enum {string} */
+            state: "provisioning" | "ready" | "error" | "deleting";
+            /** Format: date-time */
+            updated_at: string;
+            volume: string;
         };
         Gates: {
             decision: boolean;
@@ -3669,6 +3773,16 @@ export interface components {
             /** Format: int64 */
             slots: number;
         };
+        NodeFsView: {
+            error: string;
+            /**
+             * @description daemon: the node mounts it itself; external: mounted for it (Docker volume plugin)
+             * @enum {string}
+             */
+            mode: "daemon" | "external";
+            /** @description mounting, mounted, unmounted, error; empty before the first report */
+            state: string;
+        };
         NodeLog: {
             /** Format: date-time */
             created_at: string;
@@ -3807,6 +3921,8 @@ export interface components {
             };
             /** @description hello.features has self_update (the last hello while offline) */
             self_update: boolean;
+            /** @description Shared-folder support and mount state; absent when the daemon cannot use it */
+            shared_folder?: components["schemas"]["NodeFsView"];
             /** Format: date-time */
             since: string | null;
             update_available: boolean;
@@ -3920,6 +4036,15 @@ export interface components {
             /** Format: int64 */
             thread_no: number | null;
             tokens: components["schemas"]["UsageTokens"];
+        };
+        ProjectFiles: {
+            /** @description The user's shared folder is ready (otherwise entries is empty and reason says why) */
+            available: boolean;
+            /** @description The folder listed, relative to the project's folder ("" = the project's folder) */
+            dir: string;
+            /** @description Folders first, then files, by name */
+            entries: components["schemas"]["FileEntry"][] | null;
+            reason?: string;
         };
         ProjectInput: {
             auto_approve?: boolean;
@@ -4384,9 +4509,9 @@ export interface components {
             thread_id: string;
         };
         SaveSharedBody: {
-            /** @description Replace a shared file at the path (default false: 409 file_exists) */
+            /** @description Replace a file at the path (default false: 409 file_exists) */
             overwrite?: boolean;
-            /** @description Shared-file path to save it at */
+            /** @description Where to save it, relative to the project's folder */
             path: string;
         };
         Schedule: {
@@ -4686,54 +4811,6 @@ export interface components {
         };
         SetupPROutputBody: {
             pr_url: string;
-        };
-        SharedFile: {
-            content_type: string;
-            /** Format: date-time */
-            created_at: string;
-            path: string;
-            sha256: string;
-            /** Format: int64 */
-            size: number;
-            /** Format: date-time */
-            updated_at: string;
-            /** @description Employee name (dev-1) or user */
-            uploaded_by: string;
-            /**
-             * Format: int64
-             * @description Thread the employee uploaded it from (shown as dev-1 #31)
-             */
-            uploaded_by_thread_no?: number;
-        };
-        SharedFileLimits: {
-            /**
-             * Format: int64
-             * @description Largest single file
-             */
-            file_bytes: number;
-            /**
-             * Format: int64
-             * @description Total of all files of the project
-             */
-            project_bytes: number;
-            /**
-             * Format: int64
-             * @description Number of files of the project
-             */
-            project_files: number;
-        };
-        SharedFileList: {
-            /** Format: int64 */
-            file_count: number;
-            files: components["schemas"]["SharedFile"][] | null;
-            limits: components["schemas"]["SharedFileLimits"];
-            /** Format: int64 */
-            total_bytes: number;
-        };
-        SharedFileUpload: {
-            files: components["schemas"]["UploadedSharedFile"][] | null;
-            /** Format: int64 */
-            total_bytes: number;
         };
         Skill: {
             builtin: boolean;
@@ -5113,16 +5190,12 @@ export interface components {
         };
         UploadCreate: {
             /**
-             * @description attachment: a file for a message (not counted in the project's quota); shared: a shared file
+             * @description attachment: a file for a message
              * @enum {string}
              */
-            kind: "attachment" | "shared";
-            /** @description File name (an attachment shows it; a shared file uses it as its path when path is not given) */
+            kind: "attachment";
+            /** @description File name, shown with the attachment */
             name: string;
-            /** @description Shared files: replace a file at the path (default true); false answers 409 file_exists */
-            overwrite?: boolean;
-            /** @description Shared files: the target path (default: name) */
-            path?: string;
             /**
              * Format: int64
              * @description Exact size in bytes (at most 200 MB: more answers 413 file_too_large); the object must have it at completion
@@ -5132,8 +5205,7 @@ export interface components {
         UploadDone: {
             attachment?: components["schemas"]["AttachmentView"];
             /** @enum {string} */
-            kind: "attachment" | "shared";
-            shared_file?: components["schemas"]["UploadedSharedFile"];
+            kind: "attachment";
         };
         UploadParts: {
             /**
@@ -5153,10 +5225,10 @@ export interface components {
              * @description Unfinished uploads are dropped after this
              */
             expires_at: string;
-            /** @description The attachment id, or the shared file's object id */
+            /** @description The attachment id */
             id: string;
             /** @enum {string} */
-            kind: "attachment" | "shared";
+            kind: "attachment";
             /**
              * Format: int64
              * @description Bytes per part (16 MB)
@@ -5167,28 +5239,8 @@ export interface components {
              * @description Number of parts
              */
             parts: number;
-            /** @description img_… for an attachment (also its id), up_… for a shared file */
+            /** @description img_…, also the attachment's id */
             upload_id: string;
-        };
-        UploadedSharedFile: {
-            content_type: string;
-            /** Format: date-time */
-            created_at: string;
-            /** @description A file with this path existed and was replaced */
-            overwritten: boolean;
-            path: string;
-            sha256: string;
-            /** Format: int64 */
-            size: number;
-            /** Format: date-time */
-            updated_at: string;
-            /** @description Employee name (dev-1) or user */
-            uploaded_by: string;
-            /**
-             * Format: int64
-             * @description Thread the employee uploaded it from (shown as dev-1 #31)
-             */
-            uploaded_by_thread_no?: number;
         };
         Usage: {
             by_employee: components["schemas"]["EmployeeUsage"][] | null;
@@ -6244,7 +6296,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UploadedSharedFile"];
+                    "application/json": components["schemas"]["FileEntry"];
                 };
             };
             /** @description Error */
@@ -8724,6 +8776,182 @@ export interface operations {
             };
         };
     };
+    "list-project-files": {
+        parameters: {
+            query?: {
+                /** @description Folder to list, relative to the project's folder */
+                dir?: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectFiles"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "upload-project-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description filename of the file being uploaded
+                     */
+                    filename?: string;
+                    /** @description general purpose name for multipart form value */
+                    name?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FilesUploaded"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-project-file": {
+        parameters: {
+            query: {
+                /** @description Relative to the project's folder, for example data/sample.csv */
+                path: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "download-project-file": {
+        parameters: {
+            query: {
+                /** @description Relative to the project's folder, for example data/sample.csv */
+                path: string;
+            };
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-project-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FolderCreate"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "upload-library-file": {
         parameters: {
             query?: never;
@@ -9290,155 +9518,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["APIError"];
                 };
-            };
-        };
-    };
-    "list-shared-files": {
-        parameters: {
-            query?: {
-                /** @description Only paths starting with this text */
-                prefix?: string;
-            };
-            header?: never;
-            path: {
-                pid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SharedFileList"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "upload-shared-files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                pid: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": {
-                    /**
-                     * Format: binary
-                     * @description filename of the file being uploaded
-                     */
-                    filename?: string;
-                    /** @description general purpose name for multipart form value */
-                    name?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SharedFileUpload"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "delete-shared-file": {
-        parameters: {
-            query: {
-                /** @description Shared-files path, for example data/sample.csv */
-                path: string;
-            };
-            header?: never;
-            path: {
-                pid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description No Content */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "download-shared-file": {
-        parameters: {
-            query: {
-                /** @description Shared-files path, for example data/sample.csv */
-                path: string;
-            };
-            header?: never;
-            path: {
-                pid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The file */
-            200: {
-                headers: {
-                    "Cache-Control"?: string;
-                    "Content-Disposition"?: string;
-                    "Content-Security-Policy"?: string;
-                    "Content-Type"?: string;
-                    Location?: string;
-                    "X-Content-Type-Options"?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": unknown;
-                };
-            };
-            /** @description Redirect to the object store */
-            302: {
-                headers: {
-                    /** @description Presigned URL */
-                    Location?: string;
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };
@@ -10497,6 +10576,124 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-shared-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "enable-shared-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-shared-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FsDeleteInputBody"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "shared-folder-docker-volume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FsDockerVolume"];
+                };
             };
             /** @description Error */
             default: {

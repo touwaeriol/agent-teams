@@ -7,7 +7,7 @@
 import { computed, ref } from "vue";
 import { X } from "lucide-vue-next";
 import { typeLabel } from "@/lib/images";
-import { formatSize } from "@/lib/sharedFiles";
+import { formatBytes } from "@/lib/bytes";
 import FileIcon from "./FileIcon.vue";
 import Spinner from "@/components/common/Spinner.vue";
 import { cn } from "@/lib/utils";
@@ -41,7 +41,7 @@ const open = (key: string) => {
         <span class="flex min-w-0 flex-col">
           <span class="truncate font-medium">{{ x.name }}</span>
           <span class="truncate text-[11px] text-muted-foreground">
-            {{ x.kind === "pdf" ? "PDF" : x.kind === "text" ? "文本" : typeLabel("", x.name) }}<template v-if="x.size !== undefined"> · {{ formatSize(x.size) }}</template>
+            {{ x.kind === "pdf" ? "PDF" : x.kind === "text" ? "文本" : typeLabel("", x.name) }}<template v-if="x.size !== undefined"> · {{ formatBytes(x.size) }}</template>
             <template v-if="!x.id && !x.error"> · {{ (x.progress ?? 0) >= 1 ? "正在完成…" : `${Math.min(99, Math.round((x.progress ?? 0) * 100))}%` }}</template>
           </span>
         </span>

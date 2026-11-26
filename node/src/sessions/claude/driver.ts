@@ -95,6 +95,7 @@ export class ClaudeDriver implements Driver {
       canUseTool: (tool, input, opts) => this.canUseTool(tool, input, opts),
       hooks: this.hooks(), secretPaths: this.deps.secretPaths, skills: this.deps.skills ?? null, plugins: this.deps.plugins ?? [],
       context: this.ctx.spec.context, ...(this.ctx.systemExtra ? { systemExtra: this.ctx.systemExtra } : {}),
+      ...(this.ctx.extraDirs ? { additionalDirectories: this.ctx.extraDirs } : {}),
       stderr: (d) => this.ctx.log.debug({ stderr: d.slice(0, 2000) }, "claude stderr"),
     });
   }

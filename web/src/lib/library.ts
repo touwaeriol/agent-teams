@@ -51,20 +51,6 @@ export function uploadProblem(file: { name: string; size: number }): string | nu
   return null;
 }
 
-/** 9.4 kB / 1.2 MB (decimal units, like the reference); "—" when unknown. */
-export function formatBytes(n: number | undefined | null): string {
-  if (n === undefined || n === null || !Number.isFinite(n)) return "—";
-  if (n < 1000) return `${n} B`;
-  const units = ["kB", "MB", "GB", "TB"];
-  let v = n / 1000;
-  let i = 0;
-  while (v >= 1000 && i < units.length - 1) {
-    v /= 1000;
-    i += 1;
-  }
-  return `${v >= 100 ? Math.round(v) : Number(v.toFixed(1))} ${units[i]}`;
-}
-
 export function sizeOf(d: Pick<DeliverableView, "detail">): number | undefined {
   const size = (d.detail as { size?: unknown }).size;
   return typeof size === "number" ? size : undefined;

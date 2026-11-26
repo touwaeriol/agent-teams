@@ -20,6 +20,8 @@ type ArtifactFile struct {
 	Size        int    `json:"size"`
 	SHA256      string `json:"sha256" gorm:"column:sha256"`
 	Data        []byte `json:"-"`
+	// InVolume: the data is in the owner's shared folder (volume.go), not in the row.
+	InVolume bool `json:"-" gorm:"column:in_volume"`
 }
 
 // ArtifactVersion is one published version of a deliverable.
@@ -55,20 +57,33 @@ func files(ctx context.Context, q store.DB, deliverableID string) *gorm.DB {
 	return q.Gorm(ctx).Model(&fileRow{}).Where("deliverable_id = ?", deliverableID)
 }
 
-// NextVersion is 1 + the highest stored version (1 for a new deliverable).
+// NextVersion is 1 + the highest stored version (1 for a new deliverable). Call it in the
+// publishing transaction: it locks the deliverable's row first (SELECT … FOR UPDATE), so two
+// publishes of one deliverable take turns and never get the same number.
 func NextVersion(ctx context.Context, q store.DB, deliverableID string) (int, error) {
+	var id string
+	if err := store.QueryRow(ctx, q, `SELECT id FROM at_deliverables WHERE id = $1 FOR UPDATE`, deliverableID).Scan(&id); err != nil {
+		if store.IsNoRows(err) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
 	var v int
 	err := files(ctx, q, deliverableID).Select("COALESCE(MAX(version), 0) + 1").Row().Scan(&v)
 	return v, err
 }
 
-// Save stores the files of one version (one INSERT).
-func Save(ctx context.Context, q store.DB, deliverableID string, version int, by Publisher, list []ArtifactFile) error {
+// save stores the rows of one version (one INSERT); inVolume rows keep no data.
+func save(ctx context.Context, q store.DB, deliverableID string, version int, by Publisher, list []ArtifactFile, inVolume bool) error {
 	if len(list) == 0 {
 		return nil
 	}
 	rows := make([]fileRow, len(list))
 	for i, f := range list {
+		f.InVolume = inVolume
+		if inVolume {
+			f.Data = nil
+		}
 		rows[i] = fileRow{DeliverableID: deliverableID, Version: version, ArtifactFile: f, PublishedBy: by.Name, PublisherID: by.EmployeeID}
 	}
 	return q.Gorm(ctx).Create(&rows).Error
@@ -88,7 +103,7 @@ func Versions(ctx context.Context, q store.DB, deliverableID string) ([]Artifact
 	return out, err
 }
 
-// LoadVersion reads every file of one version with its data, by path.
+// LoadVersion reads the rows of one version, by path (data only for files kept in the database).
 func LoadVersion(ctx context.Context, q store.DB, deliverableID string, version int) ([]ArtifactFile, error) {
 	out := []ArtifactFile{}
 	err := files(ctx, q, deliverableID).Where("version = ?", version).Order("path").Find(&out).Error
@@ -109,7 +124,7 @@ func Files(ctx context.Context, q store.DB, deliverableID string, version int) (
 	return out, err
 }
 
-// Load reads one file with its data.
+// Load reads one row (data only for a file kept in the database).
 func Load(ctx context.Context, q store.DB, deliverableID string, version int, path string) (ArtifactFile, error) {
 	var f ArtifactFile
 	err := files(ctx, q, deliverableID).Where("version = ? AND path = ?", version, path).Take(&f).Error

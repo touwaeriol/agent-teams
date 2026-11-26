@@ -537,30 +537,17 @@ func EndTaskSchedules(ctx context.Context, tx *Tx, t Task) error {
 
 // endSchedules cancels the active schedules matching where and tells the pages about each.
 func endSchedules(ctx context.Context, tx *Tx, where string, args ...any) error {
-	rows, err := tx.Gorm(ctx).Raw(`UPDATE at_schedules SET status = 'cancelled', next_run_at = NULL, ended_at = now(), updated_at = now()
-		WHERE status = 'active' AND `+where+` RETURNING id, project_id, thread_id`, args...).Rows()
+	var list []struct {
+		ID, ProjectID string
+		ThreadID      *string
+	}
+	err := tx.Gorm(ctx).Raw(`UPDATE at_schedules SET status = 'cancelled', next_run_at = NULL, ended_at = now(), updated_at = now()
+		WHERE status = 'active' AND `+where+` RETURNING id, project_id, thread_id`, args...).Scan(&list).Error
 	if err != nil {
 		return err
 	}
-	type ended struct {
-		id, project string
-		thread      *string
-	}
-	var list []ended
-	for rows.Next() {
-		var e ended
-		if err := rows.Scan(&e.id, &e.project, &e.thread); err != nil {
-			rows.Close()
-			return err
-		}
-		list = append(list, e)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
 	for _, e := range list {
-		if err := EmitSchedule(ctx, tx, e.project, e.thread, e.id); err != nil {
+		if err := EmitSchedule(ctx, tx, e.ProjectID, e.ThreadID, e.ID); err != nil {
 			return err
 		}
 	}

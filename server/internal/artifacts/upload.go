@@ -20,13 +20,9 @@ import (
 // leave the session more unclaimed data than MaxPending.
 var ErrBadChunk = errors.New("bad file.chunk data")
 
-// MaxPending is how much unclaimed chunk data one session may leave in the database
-// (two full uploads of the largest kind, a 20 MB shared file — sharedfiles.MaxFileBytes), so a
-// daemon cannot fill it with chunks no tool.call ever claims.
-const MaxPending = 2 * MaxUploadBytes
-
-// MaxUploadBytes is the largest single upload any tool accepts (write_shared_file).
-const MaxUploadBytes = 20 << 20
+// MaxPending is how much unclaimed chunk data one session may leave in the database (two full
+// publish_file uploads), so a daemon cannot fill it with chunks no tool.call ever claims.
+const MaxPending = 2 * MaxBytes
 
 // SaveChunk stores one file.chunk (idempotent by upload_id + index) and drops chunks
 // of uploads that were never claimed by a tool.call within a day.

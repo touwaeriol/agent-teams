@@ -135,7 +135,17 @@ volumes:                             # 和 docker run 方式同名的卷：两�
 - **镜像**（git、gh、Node、Claude Code / Codex CLI 等系统工具）：`docker compose pull && docker compose up -d`；docker run 方式则 `docker pull` 后删掉旧容器、用同样的命令（同样的卷名）重新 `docker run`。
 - **换令牌**：在网页重新生成令牌，改 `compose.yml` / `node.env` 里的 `AGENT_TEAMS_NODE_TOKEN`，`docker compose up -d`。卷不用动。
 
-## 8. 排错
+## 8. 共享文件夹（可选）
+
+控制面板“设置 → 共享文件夹”开通后，每个用户有一个 JuiceFS 网络文件夹，员工会话里用 `$AGENT_TEAMS_PROJECT_DIR`（本项目）和 `$AGENT_TEAMS_SHARED_DIR`（所有项目共用）访问。Docker 节点推荐由宿主机用 JuiceFS 官方卷插件挂载，节点容器不需要任何特权，也拿不到存储密码：
+
+1. 宿主机装一次插件：`docker plugin install juicedata/juicefs --alias juicedata/juicefs --grant-all-permissions`。
+2. 在“共享文件夹”页点“生成 Docker 卷配置”，把给出的 `volumes:` 片段和服务里的 `AGENT_TEAMS_FS_DIR=/home/agent/.fs`、卷挂载合进 `compose.yml`，然后 `docker compose up -d`。这段配置含存储密码，只放在这台宿主机上。
+3. “节点”页显示“共享文件夹（Docker 卷）：已挂载”即可。
+
+不想用插件时，给容器加 `--device /dev/fuse --cap-add SYS_ADMIN` 后守护进程会自己挂载（权限更大，不推荐）。插件的挂载进程退出后，节点守护进程会发现挂载丢失并自行退出，由容器的重启策略把容器拉起来、插件重新挂载（compose 里服务要有 `restart: unless-stopped`，docker run 要加 `--restart unless-stopped`）。同一个 SQLite 库同一时间只能由一个会话写。
+
+## 9. 排错
 
 | 现象 | 原因和处理 |
 | --- | --- |

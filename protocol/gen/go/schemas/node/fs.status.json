@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/node/fs.status.json",
+  "title": "FsStatus",
+  "description": "State of the shared folder on this node: after the welcome (external mounts), after each fs.mount or fs.unmount, and whenever a health check finds the mount gone or back. mode daemon = the daemon runs juicefs itself; external = mounted outside the daemon (Docker volume plugin, host service) at AGENT_TEAMS_FS_DIR. Unreliable (the latest state is what matters).",
+  "x-direction": "node_to_console",
+  "x-reliable": false,
+  "type": "object",
+  "required": [
+    "state",
+    "mode"
+  ],
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "mounting",
+        "mounted",
+        "unmounted",
+        "error"
+      ]
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "daemon",
+        "external"
+      ]
+    },
+    "volume": {
+      "type": "string"
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "error": {
+      "type": "string",
+      "maxLength": 2000
+    }
+  }
+}

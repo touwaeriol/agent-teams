@@ -93,6 +93,17 @@ describe("publish_file upload", () => {
     expect(up.upload.upload_id).toMatch(/^up_[0-9A-Za-z]{10,40}$/);
   });
 
+  it("reads a file in the shared folder through its link only when the folder is an allowed root", async () => {
+    const dir = workdir();
+    const vol = mkdtempSync(join(tmpdir(), "at-vol-"));
+    writeFileSync(join(vol, "report.md"), "# R");
+    symlinkSync(vol, join(dir, ".project-files"));
+    await expect(prepareUpload(dir, ".project-files/report.md")).rejects.toThrow(/inside your working directory/);
+    const up = await prepareUpload(dir, ".project-files/report.md", [vol]);
+    expect(up.upload.files.map((f) => f.path)).toEqual(["report.md"]);
+    await expect(prepareUpload(dir, ".project-files", [vol])).rejects.toBeInstanceOf(UploadError);
+  });
+
   it("bundles a site directory, skipping hidden files and node_modules", async () => {
     const up = await prepareUpload(workdir(), "design");
     expect(up.upload.files.map((f) => f.path)).toEqual(["assets/logo.svg", "index.html", "s.css"]);
