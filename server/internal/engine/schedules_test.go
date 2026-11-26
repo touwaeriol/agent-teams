@@ -265,3 +265,51 @@ func TestScheduleRunsMerge(t *testing.T) {
 		t.Fatalf("runs %+v", runs)
 	}
 }
+
+// scheduleEvents counts the project's schedule events about id.
+func scheduleEvents(t *testing.T, tm *team, id string) int {
+	t.Helper()
+	var n int
+	if err := store.QueryRow(tm.w.ctx, tm.w.e.Core.Pool, `SELECT count(*) FROM at_events WHERE type = 'schedule' AND payload->>'id' = $1`,
+		id).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// TestScheduleChangesReachThePage: every change to a schedule (an agent's schedule_* tools, the
+// user on the page, a thread ending its lead's wake-ups) is a project event, so the wake-ups above
+// a thread's message box drop a cancelled one without a reload.
+func TestScheduleChangesReachThePage(t *testing.T) {
+	tm := startTeam(t)
+	step := func(id, what string, want int) {
+		t.Helper()
+		if n := scheduleEvents(t, tm, id); n != want {
+			t.Fatalf("%s: %d schedule events, want %d", what, n, want)
+		}
+	}
+	daily := scheduleID.FindString(text(tm.lead.mustCall("schedule_create", map[string]any{"name": "每日派任务", "cron": "20 12 * * *",
+		"timezone": "Asia/Shanghai", "message": "派任务"})))
+	step(daily, "created", 1)
+	tm.lead.mustCall("schedule_update", map[string]any{"schedule_id": daily, "cron": "30 12 * * *"})
+	step(daily, "updated", 2)
+	tm.lead.mustCall("schedule_cancel", map[string]any{"schedule_id": daily})
+	step(daily, "cancelled by the lead", 3)
+
+	var user timers.Schedule
+	tm.b.must(201, "POST", "/api/projects/"+tm.projectID+"/schedules",
+		map[string]any{"name": "周报", "cron": "0 18 * * 5", "message": "写周报", "thread_no": tm.thread.No}, &user)
+	step(user.ID, "created on the page", 1)
+	tm.b.must(204, "DELETE", "/api/schedules/"+user.ID, nil, nil)
+	step(user.ID, "deleted on the page", 2)
+
+	once := scheduleID.FindString(text(tm.lead.mustCall("schedule_create", map[string]any{"name": "看 CI", "in_minutes": 30, "message": "看 CI"})))
+	err := tm.w.e.Core.InTx(tm.w.ctx, func(tx *core.Tx) error { return core.EndLeadSchedules(tm.w.ctx, tx, tm.thread.ID) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	step(once, "ended with the thread", 2)
+	if s := scheduleOf(t, tm, once); s.Status != timers.StatusCancelled {
+		t.Fatalf("after the thread ended %+v", s)
+	}
+}
