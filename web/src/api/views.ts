@@ -18,9 +18,9 @@ export type ProjectUpdate = S["ProjectUpdate"];
 export type DeliverySettings = S["Delivery"];
 export type MemoryBrief = S["MemoryBrief"];
 export type MemoryFileView = S["MemoryFile"];
-export type SharedFile = S["SharedFile"];
-export type SharedFileList = S["SharedFileList"];
-export type SharedFileUpload = S["SharedFileUpload"];
+export type FileEntry = S["FileEntry"];
+export type ProjectFiles = S["ProjectFiles"];
+export type FilesUploaded = S["FilesUploaded"];
 /** usage: subscription quota per runtime. The openapi does not mark it nullable, but the server
  * sends null until the node reports (and older servers omit it): both mean "no data yet". */
 export type NodeView = Omit<S["NodeView"], "usage"> & { usage?: NodeUsage | null };

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Attachment cards (#58): any file type as a card with size and download, "已过期" for attachments
-// whose retention ran out (the list marks them; a failed thumbnail asks, 410), "存为共享文件", and the composer strip's progress bar and cancel.
+// whose retention ran out (the list marks them; a failed thumbnail asks, 410), "存到项目文件", and the composer strip's progress bar and cancel.
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, ref } from "vue";
@@ -87,7 +87,7 @@ describe("attachment cards", () => {
     expect(w.find("img").exists()).toBe(false);
   });
 
-  it("存为共享文件 asks for the path, and asks again to overwrite after 409 file_exists", async () => {
+  it("存到项目文件 asks for the path, and asks again to overwrite after 409 file_exists", async () => {
     const saves = stubFetch([], (b) =>
       b.overwrite
         ? new Response(JSON.stringify({ path: b.path, size: 1, overwritten: true }), { status: 200, headers: { "Content-Type": "application/json" } })
@@ -95,16 +95,16 @@ describe("attachment cards", () => {
     );
     const w = mountCards([zip], true);
     await flushPromises();
-    await w.get("[aria-label='把 数据.zip 存为共享文件']").trigger("click");
+    await w.get("[aria-label='把 数据.zip 存到项目文件']").trigger("click");
     await flushPromises();
-    const input = document.body.querySelector<HTMLInputElement>("input[aria-label=共享文件路径]")!;
+    const input = document.body.querySelector<HTMLInputElement>("input[aria-label=项目文件路径]")!;
     expect(input.value).toBe("数据.zip");
     input.value = "inputs/数据.zip";
     input.dispatchEvent(new Event("input"));
     const form = document.body.querySelector("form")!;
     form.dispatchEvent(new Event("submit"));
     await flushPromises();
-    expect(document.body.textContent).toContain("共享文件里已经有 inputs/数据.zip");
+    expect(document.body.textContent).toContain("项目文件里已经有 inputs/数据.zip");
     document.body.querySelector<HTMLInputElement>(".el-checkbox input")!.click();
     await flushPromises();
     form.dispatchEvent(new Event("submit"));

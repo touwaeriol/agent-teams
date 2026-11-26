@@ -34,7 +34,6 @@ export const PROJECT_EVENTS = [
   "merge",
   "ci",
   "memory",
-  "shared_file",
   "session_controls",
   "node",
   "layout",
@@ -228,11 +227,6 @@ function onMemory(qc: QueryClient, pid: string, _d: { op: "write" | "delete"; na
   qc.invalidateQueries({ queryKey: keys.overview(pid) });
 }
 
-/** A shared file was written (uploaded or overwritten) or deleted: refetch the list. */
-function onSharedFile(qc: QueryClient, pid: string, _d: { op: "write" | "delete"; path: string; by: string }) {
-  qc.invalidateQueries({ queryKey: keys.sharedFiles(pid) });
-}
-
 function onSessionControls(qc: QueryClient, pid: string, _d: { thread_id: string; applied: boolean; error?: string }) {
   qc.invalidateQueries({ queryKey: keys.sessionControls(pid) });
 }
@@ -299,7 +293,6 @@ const HANDLERS: Partial<Record<ProjectEventType, Handler>> = {
   merge: onMerge,
   ci: onCi,
   memory: onMemory,
-  shared_file: onSharedFile,
   session_controls: onSessionControls,
   node: onNode,
   layout: onLayout,

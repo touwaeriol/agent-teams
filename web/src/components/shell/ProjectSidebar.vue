@@ -60,7 +60,7 @@ const nav = () => emit("navigate");
         <template #icon><LayoutGrid /></template>
         资料库
       </SideLink>
-      <SideLink v-if="current" :to="`/projects/${current.id}/shared-files`" @navigate="nav">
+      <SideLink v-if="current" :to="`/projects/${current.id}/files`" @navigate="nav">
         <template #icon><FolderOpen /></template>
         共享文件
       </SideLink>

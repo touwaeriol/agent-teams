@@ -8,7 +8,7 @@ import { projects as projectActions } from "@/api/actions";
 import { errorText } from "@/api/mutations";
 import { attachKind, LEGACY_MAX_BYTES, pastedFiles, pickImages, type AttachKind } from "@/lib/images";
 import { fileBase64 } from "@/lib/library";
-import { formatSize } from "@/lib/sharedFiles";
+import { formatSize } from "@/lib/projectFiles";
 import { toast } from "@/lib/toast";
 import { projectUploads, storageUnavailable, UploadCancelled, uploadFile, type UploadApi } from "@/lib/upload";
 

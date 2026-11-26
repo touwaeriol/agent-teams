@@ -57,8 +57,9 @@ export const deliverables = {
     unwrap(client.POST("/api/deliverables/{id}/comments", { params: { path: { id } }, body: { text, version, ...attachmentsField(attachments) } })),
 };
 
-export const sharedFiles = {
-  remove: (pid: string, path: string) => unwrap(client.DELETE("/api/projects/{pid}/shared-files", { params: { path: { pid }, query: { path } } })),
+export const projectFiles = {
+  remove: (pid: string, path: string) => unwrap(client.DELETE("/api/projects/{pid}/files", { params: { path: { pid }, query: { path } } })),
+  mkdir: (pid: string, path: string) => unwrap(client.POST("/api/projects/{pid}/files/folders", { params: { path: { pid } }, body: { path } })),
 };
 
 export const schedules = {

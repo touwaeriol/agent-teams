@@ -7,7 +7,7 @@
 import { computed, ref } from "vue";
 import { X } from "lucide-vue-next";
 import { typeLabel } from "@/lib/images";
-import { formatSize } from "@/lib/sharedFiles";
+import { formatSize } from "@/lib/projectFiles";
 import FileIcon from "./FileIcon.vue";
 import Spinner from "@/components/common/Spinner.vue";
 import { cn } from "@/lib/utils";

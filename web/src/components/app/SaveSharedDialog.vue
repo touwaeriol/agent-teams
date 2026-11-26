@@ -1,10 +1,10 @@
 <script setup lang="ts">
-/** "存为共享文件": the target path (default the file name) and, after a 409 file_exists, an overwrite choice. */
+/** "存到项目文件": the target path (default the file name) and, after a 409 file_exists, an overwrite choice. */
 import { ref, watch } from "vue";
 import { ApiError } from "@/api/client";
 import FormDialog from "@/components/common/FormDialog.vue";
 import { markExpired, saveAttachmentShared } from "@/lib/attachmentActions";
-import { sharedPathProblem } from "@/lib/sharedFiles";
+import { pathProblem } from "@/lib/projectFiles";
 import { toast } from "@/lib/toast";
 
 const props = defineProps<{ attachment: { id: string; name: string } | null }>();
@@ -25,7 +25,7 @@ watch(open, (o) => {
 async function submit() {
   const a = props.attachment;
   if (!a || busy.value) return;
-  const bad = sharedPathProblem(path.value);
+  const bad = pathProblem(path.value);
   if (bad) {
     error.value = bad;
     return;
@@ -34,13 +34,13 @@ async function submit() {
   error.value = "";
   try {
     const f = await saveAttachmentShared(a.id, path.value, overwrite.value);
-    toast.success(f.overwritten ? `已存为共享文件 ${f.path}（覆盖了原来的文件）` : `已存为共享文件 ${f.path}`);
+    toast.success(`已存到项目文件 ${f.path}`);
     emit("saved", f.path);
     open.value = false;
   } catch (e) {
     if (e instanceof ApiError && e.code === "file_exists") {
       exists.value = true;
-      error.value = `共享文件里已经有 ${path.value}。勾选“覆盖”后再保存，或者换一个路径。`;
+      error.value = `项目文件里已经有 ${path.value}。勾选“覆盖”后再保存，或者换一个路径。`;
     } else if (e instanceof ApiError && e.status === 410) {
       markExpired(a.id);
       emit("expired", a.id);
@@ -57,8 +57,8 @@ async function submit() {
 <template>
   <FormDialog
     v-model:open="open"
-    title="存为共享文件"
-    description="存进项目的共享文件后会一直保留（附件本身最后一次使用 24 小时后会过期），项目里的统筹、组长和成员都能用工具读到。"
+    title="存到项目文件"
+    description="存进项目文件（你的共享文件夹）后会一直保留（附件本身最后一次使用 24 小时后会过期），员工在工作目录的 .project-files/ 里就能读到。"
     submit-label="保存"
     :busy="busy"
     :disabled="!path.trim()"
@@ -67,7 +67,7 @@ async function submit() {
   >
     <label class="flex flex-col gap-1.5 text-sm">
       <span class="font-medium">路径</span>
-      <el-input v-model="path" placeholder="例如 inputs/需求.pdf" aria-label="共享文件路径" />
+      <el-input v-model="path" placeholder="例如 inputs/需求.pdf" aria-label="项目文件路径" />
     </label>
     <el-checkbox v-if="exists" v-model="overwrite">覆盖已有的同名文件</el-checkbox>
     <p v-if="error" class="text-[13px] text-destructive" role="alert">{{ error }}</p>

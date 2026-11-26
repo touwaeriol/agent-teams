@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * Attachments of a sent message: images as thumbnails that open the in-page preview; PDFs and any
- * other file as a card (icon, name, type, size) with download and "存为共享文件". An attachment whose
+ * other file as a card (icon, name, type, size) with download and "存到项目文件". An attachment whose
  * retention ran out (410) shows "已过期" and offers nothing.
  */
 import { computed, inject, reactive, ref } from "vue";
@@ -10,7 +10,7 @@ import { Download, FolderInput } from "lucide-vue-next";
 import type { AttachmentRef } from "@/api/views";
 import { attachmentState } from "@/lib/attachmentActions";
 import { attachKind, attachmentDownloadUrl, attachmentUrl, isImageType, typeLabel } from "@/lib/images";
-import { formatSize } from "@/lib/sharedFiles";
+import { formatSize } from "@/lib/projectFiles";
 import { cn } from "@/lib/utils";
 import FileIcon from "./FileIcon.vue";
 import ImagePreview from "./ImagePreview.vue";
@@ -18,7 +18,7 @@ import SaveSharedDialog from "./SaveSharedDialog.vue";
 
 type Item = AttachmentRef & { expired?: boolean };
 const props = withDefaults(
-  defineProps<{ items: Item[] | undefined; align?: "start" | "end"; /** smaller thumbnails (quoted messages) */ small?: boolean; /** offer "存为共享文件" (default: inside a project page) */ canSave?: boolean }>(),
+  defineProps<{ items: Item[] | undefined; align?: "start" | "end"; /** smaller thumbnails (quoted messages) */ small?: boolean; /** offer "存到项目文件" (default: inside a project page) */ canSave?: boolean }>(),
   { align: "end", canSave: undefined },
 );
 // Not useRoute(): the component also renders outside a router (tests, previews) without warnings.
@@ -86,8 +86,8 @@ function save(x: Item) {
           v-if="saveable"
           type="button"
           class="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-raised hover:text-foreground"
-          :aria-label="`把 ${x.name} 存为共享文件`"
-          title="存为共享文件"
+          :aria-label="`把 ${x.name} 存到项目文件`"
+          title="存到项目文件"
           @click="save(x)"
         >
           <FolderInput class="size-4" :stroke-width="1.8" />

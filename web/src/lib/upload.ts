@@ -80,10 +80,7 @@ export class UploadCancelled extends Error {
 }
 
 export interface UploadOptions {
-  kind: "attachment" | "shared";
-  /** Shared files: the target path. */
-  path?: string;
-  overwrite?: boolean;
+  kind: "attachment";
   /** Bytes sent so far (all parts), and the total. */
   onProgress?: (sent: number, total: number) => void;
   /** Called once the console accepted the upload (its id is known, so it can be cancelled). */
@@ -113,7 +110,6 @@ export async function uploadFile(file: Blob & { name?: string }, api: UploadApi,
   if (signal.aborted) throw new UploadCancelled();
   const session = await api.create({
     kind: o.kind, name: file.name || "file", size: file.size,
-    ...(o.path !== undefined ? { path: o.path } : {}), ...(o.overwrite !== undefined ? { overwrite: o.overwrite } : {}),
   });
   o.onStarted?.(session);
   const id = session.upload_id;

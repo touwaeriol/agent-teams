@@ -32,7 +32,9 @@ export const keys = {
   /** All of a thread's deliverables (any publisher), under allDeliverables. */
   threadDeliverables: (pid: string, no: number) => ["p", pid, "deliverables", "#thread", no] as const,
   memory: (pid: string) => ["p", pid, "memory"] as const,
-  sharedFiles: (pid: string) => ["p", pid, "shared-files"] as const,
+  /** Every folder of the project's files (invalidate this to refresh them all). */
+  projectFiles: (pid: string) => ["p", pid, "files"] as const,
+  projectDir: (pid: string, dir: string) => ["p", pid, "files", dir] as const,
   memoryFile: (pid: string, name: string) => ["p", pid, "memory", name] as const,
   schedules: (pid: string) => ["p", pid, "schedules"] as const,
   scheduleRuns: (pid: string, id: string) => ["p", pid, "schedules", id, "runs"] as const,
@@ -254,9 +256,13 @@ export const useProjectUsage = (pid: Arg, days: Arg<number>) =>
 export const useMemory = (pid: Arg) =>
   useKeyed(() => keys.memory(val(pid)), () => list(client.GET("/api/projects/{pid}/memory", path({ pid: val(pid) }))), { enabled: has(pid) });
 
-/** The project's shared files (no content) with the total and the limits; refetched on shared_file events. */
-export const useSharedFiles = (pid: Arg) =>
-  useKeyed(() => keys.sharedFiles(val(pid)), () => unwrap(client.GET("/api/projects/{pid}/shared-files", path({ pid: val(pid) }))), { enabled: has(pid) });
+/** One folder of the project's files (the project's folder in the user's shared folder); available false with a reason until the folder is on. */
+export const useProjectFiles = (pid: Arg, dir: Arg) =>
+  useKeyed(
+    () => keys.projectDir(val(pid), val(dir)),
+    () => unwrap(client.GET("/api/projects/{pid}/files", { params: { path: { pid: val(pid) }, query: { dir: val(dir) } } })),
+    { enabled: has(pid) },
+  );
 
 /** One memory file with its content; `name` empty = nothing to load (a new file). */
 export const useMemoryFile = (pid: Arg, name: Arg) =>
