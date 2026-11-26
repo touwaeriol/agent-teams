@@ -48,7 +48,10 @@ type fakeVolumes struct {
 	destroyed int
 }
 
-func (f *fakeVolumes) Format(_ context.Context, s FormatSpec) error { f.formatted[s.Volume] = s; return nil }
+func (f *fakeVolumes) Format(_ context.Context, s FormatSpec) error {
+	f.formatted[s.Volume] = s
+	return nil
+}
 func (f *fakeVolumes) Destroy(context.Context, string, string) error {
 	f.destroyed++
 	return nil
@@ -217,4 +220,3 @@ func mustStore(t *testing.T, url string) *store.Store {
 	t.Cleanup(st.Close)
 	return st
 }
-

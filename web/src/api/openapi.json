@@ -2362,6 +2362,111 @@
         ],
         "type": "object"
       },
+      "FsDeleteInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "description": "The volume name, typed by the user: every file in it is deleted",
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "FsDockerVolume": {
+        "additionalProperties": false,
+        "properties": {
+          "compose": {
+            "description": "Compose fragment: the juicedata/juicefs volume and how the node service mounts it",
+            "type": "string"
+          },
+          "mount": {
+            "description": "Where the node container sees the folder (AGENT_TEAMS_FS_DIR)",
+            "type": "string"
+          },
+          "plugin": {
+            "description": "Host command installing the volume plugin (once per host)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "compose",
+          "plugin",
+          "mount"
+        ],
+        "type": "object"
+      },
+      "FsView": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "description": "The console has AGENT_TEAMS_FS_* (otherwise the folder cannot be switched on)",
+            "type": "boolean"
+          },
+          "project_dir": {
+            "description": "A project's folder inside the volume, with {project_id}",
+            "type": "string"
+          },
+          "shared_dir": {
+            "description": "The folder every project of the user shares",
+            "type": "string"
+          },
+          "volume": {
+            "$ref": "#/components/schemas/FsVolumeView",
+            "description": "Absent until switched on"
+          }
+        },
+        "required": [
+          "configured",
+          "project_dir",
+          "shared_dir"
+        ],
+        "type": "object"
+      },
+      "FsVolumeView": {
+        "additionalProperties": false,
+        "properties": {
+          "capacity_gb": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "provisioning",
+              "ready",
+              "error",
+              "deleting"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "volume": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "volume",
+          "state",
+          "error",
+          "capacity_gb",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "Gates": {
         "additionalProperties": false,
         "properties": {
@@ -16682,6 +16787,129 @@
         "summary": "Delete an uploaded skill and remove it from the roles",
         "tags": [
           "team"
+        ]
+      }
+    },
+    "/api/storage/fs": {
+      "delete": {
+        "operationId": "delete-shared-folder",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FsDeleteInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete the shared folder and every file in it",
+        "tags": [
+          "storage"
+        ]
+      },
+      "get": {
+        "operationId": "get-shared-folder",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "My shared folder (JuiceFS volume)",
+        "tags": [
+          "storage"
+        ]
+      },
+      "post": {
+        "operationId": "enable-shared-folder",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Switch the shared folder on (or retry a failed provisioning)",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/storage/fs/docker-volume": {
+      "post": {
+        "operationId": "shared-folder-docker-volume",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FsDockerVolume"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Compose volume for a Docker node (carries the metadata password)",
+        "tags": [
+          "storage"
         ]
       }
     },

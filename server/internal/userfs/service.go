@@ -72,7 +72,9 @@ func (s *Service) Enabled() bool {
 }
 
 // Get returns the user's volume.
-func (s *Service) Get(ctx context.Context, userID string) (Volume, error) { return Get(ctx, s.db, userID) }
+func (s *Service) Get(ctx context.Context, userID string) (Volume, error) {
+	return Get(ctx, s.db, userID)
+}
 
 // Enable provisions the user's volume (or finishes a provisioning that failed). It returns the
 // volume as it stands after this attempt: ready, or error with the reason.

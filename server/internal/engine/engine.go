@@ -33,6 +33,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/timers"
 	"github.com/touwaeriol/agent-teams/server/internal/toolsvc"
+	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
 
 // Deps are the foundation objects the engines use.
@@ -57,6 +58,8 @@ type Deps struct {
 	Blobs blobstore.Store
 	// AttachmentTTL is how long an attachment is kept after its last use (0 = 24 h).
 	AttachmentTTL time.Duration
+	// FS provisions the users' shared folders (nil: not configured, sessions get none).
+	FS *userfs.Service
 }
 
 // Engine holds every orchestration component.
@@ -76,6 +79,7 @@ type Engine struct {
 	Timers    *timers.Runner
 	GH        *ghops.GitHub
 	SSH       *sshgw.Gateway
+	FS        *userfs.Service
 	log       *slog.Logger
 }
 
@@ -118,6 +122,10 @@ func New(d Deps) (*Engine, error) {
 	e.Orch.Rules = e.Approvals.Rules
 	e.Orch.ChatAnswers = e.Tools.NoteChatReply
 	e.Tools.Reviews = e.Approvals
+	if e.FS = d.FS; e.FS != nil {
+		e.FS.OnChange = e.pushFS
+		e.Orch.SharedFolder = e.sharedFolder
+	}
 	gw.SetHandler(&router{e: e})
 	return e, nil
 }

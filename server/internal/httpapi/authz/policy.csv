@@ -244,3 +244,7 @@ p, admin, /api/admin/users/:id/password-reset, POST
 p, admin, /api/admin/voice, GET
 p, admin, /api/admin/voice, PUT
 p, admin, /api/admin/voice/test, POST
+p, user, /api/storage/fs, GET
+p, user, /api/storage/fs, POST
+p, user, /api/storage/fs, DELETE
+p, user, /api/storage/fs/docker-volume, POST

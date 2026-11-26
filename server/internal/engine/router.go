@@ -66,6 +66,8 @@ func (r *router) Handle(ctx context.Context, node store.Node, typ string, body a
 	case *protocol.StreamDelta:
 		e.Events.Delta(string(m.SessionID), m.Text)
 		return nil
+	case *protocol.FsStatus:
+		return e.fsStatus(ctx, node, m)
 	}
 	return r.other(ctx, node, typ, body)
 }
@@ -96,6 +98,7 @@ func (r *router) NodeOnline(ctx context.Context, node store.Node) {
 		r.e.log.Warn("ssh servers update after reconnect", "node_id", node.ID, "err", err)
 	}
 	r.e.Orch.ReleaseHolds(ctx, node.UserID)
+	r.e.pushFSNode(ctx, node.ID, node.UserID)
 	r.kickProjects(ctx, node)
 }
 

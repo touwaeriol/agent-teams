@@ -641,6 +641,11 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 	if open.SshServers, err = sshgw.SessionServers(ctx, o.store, tx, node.ID, sess.ID); err != nil {
 		return err
 	}
+	if o.SharedFolder != nil {
+		if open.Fs, err = o.SharedFolder(ctx, tx, env.project.UserID, node.ID, env.project.ID); err != nil {
+			return err
+		}
+	}
 	if err := o.addSkills(ctx, tx, env.project.UserID, env.emp, &open); err != nil {
 		return err
 	}

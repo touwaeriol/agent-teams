@@ -1961,6 +1961,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/storage/fs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My shared folder (JuiceFS volume) */
+        get: operations["get-shared-folder"];
+        put?: never;
+        /** Switch the shared folder on (or retry a failed provisioning) */
+        post: operations["enable-shared-folder"];
+        /** Delete the shared folder and every file in it */
+        delete: operations["delete-shared-folder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/storage/fs/docker-volume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compose volume for a Docker node (carries the metadata password) */
+        post: operations["shared-folder-docker-volume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/threads/{tid}": {
         parameters: {
             query?: never;
@@ -3245,6 +3281,40 @@ export interface components {
             /** Format: int64 */
             thread_no: number;
             title: string;
+        };
+        FsDeleteInputBody: {
+            /** @description The volume name, typed by the user: every file in it is deleted */
+            confirm: string;
+        };
+        FsDockerVolume: {
+            /** @description Compose fragment: the juicedata/juicefs volume and how the node service mounts it */
+            compose: string;
+            /** @description Where the node container sees the folder (AGENT_TEAMS_FS_DIR) */
+            mount: string;
+            /** @description Host command installing the volume plugin (once per host) */
+            plugin: string;
+        };
+        FsView: {
+            /** @description The console has AGENT_TEAMS_FS_* (otherwise the folder cannot be switched on) */
+            configured: boolean;
+            /** @description A project's folder inside the volume, with {project_id} */
+            project_dir: string;
+            /** @description The folder every project of the user shares */
+            shared_dir: string;
+            /** @description Absent until switched on */
+            volume?: components["schemas"]["FsVolumeView"];
+        };
+        FsVolumeView: {
+            /** Format: int64 */
+            capacity_gb: number;
+            /** Format: date-time */
+            created_at: string;
+            error: string;
+            /** @enum {string} */
+            state: "provisioning" | "ready" | "error" | "deleting";
+            /** Format: date-time */
+            updated_at: string;
+            volume: string;
         };
         Gates: {
             decision: boolean;
@@ -10493,6 +10563,124 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-shared-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "enable-shared-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FsView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-shared-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FsDeleteInputBody"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "shared-folder-docker-volume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FsDockerVolume"];
+                };
             };
             /** @description Error */
             default: {
