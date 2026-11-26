@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { desktopUserAgent, resolveAppUrl } from "./config";
 import { PROTOCOL, deepLinkToUrl, findDeepLink } from "./deeplink";
 import { menuTemplate, isDevToolsShortcut } from "./menu";
-import { classifyLink } from "./navigation";
+import { classifyLink, isSameOrigin } from "./navigation";
 import { OFFLINE_PAGE, showsOfflinePage } from "./offline";
 import { allowPermission } from "./permissions";
 import { checkForUpdatesNow, startAutoUpdate, updatesEnabled } from "./updater";
@@ -113,13 +113,19 @@ function setupPermissions() {
   });
 }
 
+/** The page the main window shows if it is on the site (not the offline page), else the site's home. */
+function currentSiteUrl(): string {
+  const url = mainWindow?.webContents.getURL() ?? "";
+  return isSameOrigin(url, appOrigin) ? url : appUrl.toString();
+}
+
 function setupMenu() {
   const template = menuTemplate({
     platform: process.platform,
     appName: app.name,
     devTools: devMode,
     openHome: () => showApp(appUrl.toString()),
-    openWebsite: () => void shell.openExternal(mainWindow?.webContents.getURL().startsWith(appOrigin) ? mainWindow.webContents.getURL() : appUrl.toString()),
+    openWebsite: () => void shell.openExternal(currentSiteUrl()),
     checkForUpdates: updatesEnabled(process.env) ? () => void checkForUpdatesNow() : undefined,
   });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
