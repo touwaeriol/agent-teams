@@ -8,7 +8,7 @@ import { useConnections, useGitRepos } from "@/api/queries";
 import type { ProjectView } from "@/api/views";
 import AddRepo from "@/components/app/repo/AddRepo.vue";
 import RepoRow from "@/components/app/repo/RepoRow.vue";
-import { moveRepo, removeRepo, REPOS_HINT, reposPayload, type RepoRef } from "@/components/app/repo/repo";
+import { moveRepo, removeRepo, setBase, REPOS_HINT, reposPayload, type RepoRef } from "@/components/app/repo/repo";
 import { repoRefs } from "./logic";
 import { useUpdate } from "./useUpdate";
 
@@ -45,6 +45,7 @@ const adding = ref(false);
         :connections="list"
         @move="(d: number) => (draft = moveRepo(draft, i, d))"
         @remove="draft = removeRepo(draft, i)"
+        @base="(b: string) => (draft = setBase(draft, i, b))"
       />
     </ol>
     <p v-else-if="!connections.isLoading.value" class="border-t px-4 py-3 text-[13px] text-muted-foreground">

@@ -3939,6 +3939,7 @@ type GitResult struct {
 type GitResultErrorCode string
 
 const GitResultErrorCodeAuthFailed GitResultErrorCode = "auth_failed"
+const GitResultErrorCodeBaseMissing GitResultErrorCode = "base_missing"
 const GitResultErrorCodeCloneFailed GitResultErrorCode = "clone_failed"
 const GitResultErrorCodeDirtyConflict GitResultErrorCode = "dirty_conflict"
 const GitResultErrorCodeFetchFailed GitResultErrorCode = "fetch_failed"
@@ -3955,6 +3956,7 @@ var enumValues_GitResultErrorCode = []interface{}{
 	"fetch_failed",
 	"not_a_repo",
 	"dirty_conflict",
+	"base_missing",
 	"path_outside_root",
 	"locked_timeout",
 	"rejected_non_ff",

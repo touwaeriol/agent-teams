@@ -44,6 +44,9 @@ func (r *Relay) RefSHA(ctx context.Context, repo store.GitRepo, branch string) (
 	return "", ErrNoRef
 }
 
+// ErrNoDefault: the upstream names no default branch (an empty repository).
+var ErrNoDefault = errors.New("仓库没有默认分支（空仓库，还没有推送任何分支）")
+
 // DefaultBranch is the upstream's default branch: the one saved by the last test connection,
 // else asked from the upstream now.
 func (r *Relay) DefaultBranch(ctx context.Context, repo store.GitRepo) (string, error) {
@@ -59,7 +62,7 @@ func (r *Relay) DefaultBranch(ctx context.Context, repo store.GitRepo) (string, 
 		return "", err
 	}
 	if refs.Head == "" {
-		return "main", nil
+		return "", ErrNoDefault
 	}
 	return refs.Head, nil
 }

@@ -77,6 +77,7 @@ type Repo struct {
 	conn    store.GitConnection
 	git     *store.GitRepo // standalone repository (reached through the relay), else nil
 	project store.Project
+	base    string // the project's base branch for the repository ('' = not recorded yet)
 }
 
 // Standalone reports a standalone Git repository (no GitHub connection).
@@ -138,7 +139,7 @@ func (g *GitHub) ReposOf(ctx context.Context, p store.Project) ([]Repo, error) {
 			if err != nil {
 				return nil, fmt.Errorf("git repository %s: %w", pr.Repo, err)
 			}
-			out = append(out, Repo{Slug: gr.Slug, git: &gr, project: p})
+			out = append(out, Repo{Slug: gr.Slug, git: &gr, project: p, base: pr.BaseBranch})
 			continue
 		}
 		if pr.GitConnectionID == nil || pr.Repo == "" {
@@ -165,7 +166,7 @@ func (g *GitHub) repo(ctx context.Context, p store.Project, pr store.ProjectRepo
 	if err != nil {
 		return Repo{}, fmt.Errorf("git connection of %s: %w", slug, err)
 	}
-	return Repo{Slug: slug, conn: conn, project: p}, nil
+	return Repo{Slug: slug, conn: conn, project: p, base: pr.BaseBranch}, nil
 }
 
 // Find picks the repository named slug from a list (case-insensitive, ".git" and URLs allowed;
@@ -233,8 +234,23 @@ func branchKey(r Repo) string {
 	return r.conn.ID + "|" + strings.ToLower(r.Slug)
 }
 
-// DefaultBranch returns the repository's default branch (see branchTTL for the caching).
+// Base is the base branch the project recorded for the repository (empty: not recorded yet).
+func (r Repo) Base() string { return r.base }
+
+// DefaultBranch is the branch the project works from in the repository: the base branch
+// recorded in the project's repository settings, else the upstream's default branch.
 func (g *GitHub) DefaultBranch(ctx context.Context, r Repo) (string, error) {
+	if r.base != "" {
+		return r.base, nil
+	}
+	return g.UpstreamDefault(ctx, r)
+}
+
+// ErrEmptyRepo means the upstream has no branch at all (nothing pushed yet).
+var ErrEmptyRepo = errors.New("仓库是空的，还没有任何分支")
+
+// UpstreamDefault asks the upstream for its default branch (see branchTTL for the caching).
+func (g *GitHub) UpstreamDefault(ctx context.Context, r Repo) (string, error) {
 	return cachedBranchOf(ctx, branchKey(r), func(ctx context.Context) (string, error) { return g.fetchDefaultBranch(ctx, r) })
 }
 
@@ -291,7 +307,7 @@ func (g *GitHub) fetchDefaultBranch(ctx context.Context, r Repo) (string, error)
 		return "", err
 	}
 	if out.DefaultBranch == "" {
-		out.DefaultBranch = "main"
+		return "", ErrEmptyRepo
 	}
 	return out.DefaultBranch, nil
 }

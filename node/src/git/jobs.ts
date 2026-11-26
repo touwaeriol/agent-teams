@@ -175,6 +175,7 @@ export class GitJobs {
     if (isGitDir(cwd)) return { created: false, ...(b.sync ? await this.syncWorktree(cwd, b.branch, b.sync, refetch) : { head_sha: await this.head(cwd) }) };
     if (existsSync(cwd) && readdirSync(cwd).length > 0) throw new JobError("dirty_conflict", `${b.cwd} exists and is not a worktree`);
     const start = await this.startPoint(shared, b.branch, b.base);
+    await this.requireStart(shared, start, b.base);
     const add = await this.git(shared, ["worktree", "add", "-B", b.branch, "--", cwd, start]);
     if (add.code !== 0) throw new JobError("dirty_conflict", "git worktree add failed", add.stderr);
     const log_tail = tail(add.stdout + add.stderr);
@@ -304,8 +305,21 @@ export class GitJobs {
 
   private async checkoutBranch(cwd: string, branch: string, base?: string): Promise<void> {
     const start = await this.startPoint(cwd, branch, base);
+    await this.requireStart(cwd, start, base);
     const r = await this.git(cwd, ["checkout", "-B", branch, start, "--"]);
     if (r.code !== 0) throw new JobError("dirty_conflict", `cannot check out ${branch}`, r.stderr);
+  }
+
+  /**
+   * The start point must exist on the remote: a missing base branch (renamed, deleted, or never
+   * there) is its own error, so the console tells the user to fix the project's start branch
+   * instead of retrying a checkout that cannot work.
+   */
+  private async requireStart(repo: string, start: string, base?: string): Promise<void> {
+    const ok = await this.git(repo, ["rev-parse", "--verify", "--quiet", `refs/remotes/${start}^{commit}`]);
+    if (ok.code === 0) return;
+    if (!base) throw new JobError("base_missing", "no start branch is configured for this repository", ok.stderr);
+    throw new JobError("base_missing", `start branch ${base} does not exist on the remote`, ok.stderr);
   }
 
   /** origin/<branch> when the branch already exists remotely, else origin/<base>. */

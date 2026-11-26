@@ -332,6 +332,19 @@ func fakeGitHub(t *testing.T) http.Handler {
 		}
 		writeJSON(w, map[string]any{"full_name": r.PathValue("o") + "/" + r.PathValue("r"), "default_branch": "main"})
 	})
+	mux.HandleFunc("GET /repos/{o}/{r}/git/ref/heads/{b...}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("r") == "empty" {
+			w.WriteHeader(409)
+			_, _ = w.Write([]byte(`{"message":"Git Repository is empty."}`))
+			return
+		}
+		if b := r.PathValue("b"); b != "main" && b != "feature/x" && b != "dev" {
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+			return
+		}
+		writeJSON(w, map[string]any{"object": map[string]string{"sha": "abc"}})
+	})
 	mux.HandleFunc("GET /repos/{o}/{r}/branches", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []map[string]string{{"name": "main"}, {"name": "feature/x"}, {"name": "dev"}})
 	})

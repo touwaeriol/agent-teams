@@ -263,11 +263,15 @@ CREATE TABLE at_project_repos (     -- 项目绑定的仓库（00070），positi
   repo              TEXT NOT NULL,                 -- owner/name（GitHub 返回的 full_name）
   git_connection_id TEXT REFERENCES at_git_connections(id) ON DELETE SET NULL,  -- 连接被删的仓库不再使用
   position          INT  NOT NULL DEFAULT 0,
+  base_branch       TEXT NOT NULL DEFAULT '',      -- 00480：起点分支，讨论串从这里开始、PR 合回这里
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (project_id, repo)
 );
 -- 迁移：每个项目原来的 repo/git_connection_id 成为第一行；branch 不是 main/master 时在 context 末尾追加
 -- “仓库 <repo> 的基准分支：<branch>”，信息不丢。
+-- base_branch（00480）：添加仓库时取上游默认分支（或用户选的分支）并检查存在，空仓库/分支不存在直接报错；
+-- 项目设置里可改。00480 从独立仓库的 default_branch 和 context 里的“基准分支”行回填，其余 GitHub 仓库
+-- 由控制面启动时（WarmAll）向 GitHub 取默认分支写入。不再有“取不到就用 main”的兜底。
 
 -- v1 at_conversations: id, user_id, title, created_at, history JSONB, plan JSONB, project_id
 ALTER TABLE at_conversations   -- kind 在 00002（P1）加，v1 防护补丁按它过滤；其余在 00010

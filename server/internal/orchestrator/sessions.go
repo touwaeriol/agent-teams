@@ -725,7 +725,7 @@ func (o *Orchestrator) prepareRepo(ctx context.Context, tx *core.Tx, env session
 		shared := protocol.RelPath(sharedFor(env.project.ID, r.Slug, cwd == p.Cwd))
 		body.Shared = &shared
 	}
-	meta := map[string]any{"purpose": "prepare", "employee_id": env.emp.ID, "fetch_only": opts.fetchOnly, "repo": r.Slug}
+	meta := map[string]any{"purpose": "prepare", "employee_id": env.emp.ID, "fetch_only": opts.fetchOnly, "repo": r.Slug, "base": base}
 	maps.Copy(meta, opts.meta)
 	_, err := o.gw.Enqueue(ctx, tx, nodeID, nodegw.Command{Type: protocol.TypeGitPrepare, Body: body, Meta: meta})
 	return job, err
