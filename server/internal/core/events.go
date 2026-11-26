@@ -29,9 +29,17 @@ const (
 	EvSharedFile  = "shared_file"
 	// EvSessionControls: a session's permission mode, model or effort changed or a switch failed (#53).
 	EvSessionControls = "session_controls"
-	EvServer          = "server"  // an SSH connection to a remote server ended (remote-servers.md §9.4)
-	EvContext         = "context" // a session's context breakdown changed or a refresh failed (protocol.md §4.10)
+	EvServer          = "server"   // an SSH connection to a remote server ended (remote-servers.md §9.4)
+	EvContext         = "context"  // a session's context breakdown changed or a refresh failed (protocol.md §4.10)
+	EvSchedule        = "schedule" // a schedule was created, changed, ended or deleted (the page refetches its list)
 )
+
+// EmitSchedule tells the project's pages that a schedule changed, in tx: an agent's schedule_*
+// tool, a run moving it on, a thread or task ending its wake-ups, or the user on the page.
+func EmitSchedule(ctx context.Context, tx *Tx, projectID string, threadID *string, id string) error {
+	_, err := tx.Emit(ctx, projectID, threadID, EvSchedule, "", map[string]any{"id": id, "thread_id": threadID})
+	return err
+}
 
 // ProjectChannel is the pub/sub channel of a project's events.
 func ProjectChannel(projectID string) string { return "project:" + projectID }

@@ -138,7 +138,7 @@ func (a *API) deleteSchedule(ctx context.Context, in *scheduleIDInput) (*struct{
 	if err != nil {
 		return nil, err
 	}
-	return nil, scheduleErr(timers.DeleteSchedule(ctx, a.e.Core.Pool, s.ID))
+	return nil, scheduleErr(a.e.Core.InTx(ctx, func(tx *core.Tx) error { return timers.DeleteSchedule(ctx, tx, s) }))
 }
 
 func (a *API) runSchedule(ctx context.Context, in *scheduleIDInput) (*struct{}, error) {
