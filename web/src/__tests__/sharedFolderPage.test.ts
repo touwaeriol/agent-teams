@@ -10,7 +10,7 @@ import SharedFolder from "@/pages/settings/SharedFolder.vue";
 const EMPTY = { configured: true, project_dir: "projects/{project_id}", shared_dir: "shared" };
 const READY_S3 = {
   ...EMPTY,
-  volume: { volume: "at-0123456789abcdef", backend: "s3", summary: { endpoint: "https://s3.me", bucket: "mine" }, state: "ready", error: "", capacity_gb: 20, created_at: "", updated_at: "" },
+  volume: { volume: "at-0123456789abcdef", backend: "s3", summary: { endpoint: "https://s3.me", bucket: "mine" }, state: "ready", error: "", capacity_gb: 0, created_at: "", updated_at: "" },
 };
 
 function api(get: unknown) {
@@ -60,6 +60,7 @@ describe("SharedFolder page", () => {
     await flushPromises();
     expect(w.text()).toContain("自己的 S3");
     expect(w.text()).toContain("https://s3.me/mine");
+    expect(w.text()).toContain("不限");
     expect(w.text()).not.toContain("开通共享文件夹");
   });
 });

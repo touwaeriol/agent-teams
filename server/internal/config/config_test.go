@@ -169,7 +169,11 @@ func TestFS(t *testing.T) {
 		t.Fatalf("checksums: %+v %v", cfg.FS.ClientSHA256, err)
 	}
 	bad["AGENT_TEAMS_FS_CAPACITY_GB"] = "0"
+	if cfg, err := Load(get(bad)); err != nil || cfg.FS.CapacityGB != 0 {
+		t.Fatalf("capacity 0 (no limit): %+v %v", cfg.FS.CapacityGB, err)
+	}
+	bad["AGENT_TEAMS_FS_CAPACITY_GB"] = "-1"
 	if _, err := Load(get(bad)); err == nil {
-		t.Fatal("capacity 0 accepted")
+		t.Fatal("negative capacity accepted")
 	}
 }

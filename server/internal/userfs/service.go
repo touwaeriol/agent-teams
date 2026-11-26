@@ -117,13 +117,22 @@ func (s *Service) Enable(ctx context.Context, userID string, b Backend) (Volume,
 	return Get(ctx, s.db, userID)
 }
 
+// capacityFor is a new volume's quota in GiB: the platform's limit on its own storage, none (0)
+// when the user brings the storage.
+func (s *Service) capacityFor(b Backend) int {
+	if b.Kind == BackendPlatform {
+		return s.cfg.CapacityGB
+	}
+	return 0
+}
+
 // current is the user's row for backend b: created when missing, replaced when a failed one was
 // on other settings (nothing of it was in use), ErrSwitch when a working one is on another backend.
 func (s *Service) current(ctx context.Context, userID string, b Backend) (Volume, error) {
 	vol, err := Get(ctx, s.db, userID)
 	switch {
 	case IsNotFound(err):
-		return insert(ctx, s.db, s.vault, userID, s.cfg.CapacityGB, b)
+		return insert(ctx, s.db, s.vault, userID, s.capacityFor(b), b)
 	case err != nil:
 		return vol, err
 	case vol.State == StateError && (vol.Backend != b.Kind || b.Kind != BackendPlatform):
@@ -133,7 +142,7 @@ func (s *Service) current(ctx context.Context, userID string, b Backend) (Volume
 		if err := remove(ctx, s.db, userID); err != nil {
 			return vol, err
 		}
-		return insert(ctx, s.db, s.vault, userID, s.cfg.CapacityGB, b)
+		return insert(ctx, s.db, s.vault, userID, s.capacityFor(b), b)
 	case vol.Backend != b.Kind:
 		return vol, ErrSwitch
 	}

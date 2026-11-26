@@ -43,6 +43,9 @@ means deleting the folder first; files are not migrated.
 | `s3` | the user's bucket, under `at-<id>/`, with the user's keys | `jfs_<id>` schema here | volume destroyed (the prefix in their bucket), role dropped |
 | `juicefs` | the user's own formatted JuiceFS | the user's engine (URL + password sealed here) | only forgotten; nodes unmount |
 
+Only `platform` volumes get a quota (`AGENT_TEAMS_FS_CAPACITY_GB`, default 20, 0 = none); a volume
+on the user's own S3 has no limit.
+
 The console formats an `s3` volume itself, so the endpoint must resolve to a public address
 (`PublicEndpoint`: no loopback, private, link-local or CGNAT). A `juicefs` URL is never contacted by
 the console; nodes report a bad one through `fs.status`.

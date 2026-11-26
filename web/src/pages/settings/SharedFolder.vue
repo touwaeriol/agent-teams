@@ -121,7 +121,7 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
                 <span v-if="vol.summary.meta" class="font-mono text-muted-foreground">{{ vol.summary.meta }}</span>
               </dd>
               <dt v-if="vol.backend !== 'juicefs'" class="text-muted-foreground">容量上限</dt>
-              <dd v-if="vol.backend !== 'juicefs'">{{ vol.capacity_gb }} GB</dd>
+              <dd v-if="vol.backend !== 'juicefs'">{{ vol.capacity_gb > 0 ? `${vol.capacity_gb} GB` : "不限" }}</dd>
               <dt class="text-muted-foreground">项目目录</dt>
               <dd class="font-mono">{{ view.project_dir }}</dd>
               <dt class="text-muted-foreground">公共目录</dt>

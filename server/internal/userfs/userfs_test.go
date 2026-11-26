@@ -229,7 +229,7 @@ func TestOwnS3(t *testing.T) {
 	s.CheckEndpoint = func(context.Context, string) error { return nil }
 	b := Backend{Kind: BackendS3, S3Endpoint: "https://s3.user.example/", Bucket: "mine", AccessKey: "UAK", SecretKey: "USK"}
 	vol, err := s.Enable(ctx, "u1", b)
-	if err != nil || vol.State != StateReady || vol.Backend != BackendS3 || vol.Summary.Bucket != "mine" || vol.Summary.Endpoint != "https://s3.user.example" {
+	if err != nil || vol.State != StateReady || vol.Backend != BackendS3 || vol.CapacityGB != 0 || vol.Summary.Bucket != "mine" || vol.Summary.Endpoint != "https://s3.user.example" {
 		t.Fatalf("enable: %+v %v", vol, err)
 	}
 	n := NamesFor("u1")
