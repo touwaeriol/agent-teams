@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 470 {
+	if migrations.Latest() != 480 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -1672,7 +1672,7 @@ INSERT INTO at_schedules (id, project_id, name, cron, message) VALUES ('sc1', 'p
 	if _, err := p.Up(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 470 {
+	if v, err := p.GetDBVersion(ctx); err != nil || v != migrations.Latest() || v != 480 {
 		t.Fatalf("version %d %v", v, err)
 	}
 	var got string
@@ -1959,6 +1959,51 @@ INSERT INTO at_attachments (id, project_id, user_id, name, content_type, size, s
 		t.Fatal("project_id still nullable after down")
 	}
 	if _, err := p.UpTo(ctx, 470); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestProjectRepoBaseMigration: 00480 gives each project repository a base branch, from a
+// standalone repository's saved default branch or a base 00070 wrote into the project context;
+// a GitHub repository without one stays ” (the control plane fills it from GitHub).
+func TestProjectRepoBaseMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 470); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_git_connections (id, user_id, name, token_secret) VALUES ('c1', 'u1', 'gh', 'x');
+INSERT INTO at_git_repos (id, user_id, slug, url, transport, host, default_branch)
+	VALUES ('g1', 'u1', 'git.example.com/team/app', 'https://git.example.com/team/app.git', 'https', 'git.example.com', 'trunk');
+INSERT INTO at_projects (id, user_id, name, context) VALUES
+	('p1', 'u1', 'A', E'说明\n\n仓库 acme/web.app 的基准分支：develop\n其他'),
+	('p2', 'u1', 'B', '');
+INSERT INTO at_project_repos (project_id, repo, git_connection_id, git_repo_id) VALUES
+	('p1', 'acme/web.app', 'c1', NULL),
+	('p1', 'acme/api', 'c1', NULL),
+	('p2', 'git.example.com/team/app', NULL, 'g1');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 480); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT string_agg(repo || '=' || base_branch, ',' ORDER BY repo) FROM at_project_repos`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if want := "acme/api=,acme/web.app=develop,git.example.com/team/app=trunk"; got != want {
+		t.Fatalf("bases %q, want %q", got, want)
+	}
+	if _, err := p.DownTo(ctx, 470); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 480); err != nil {
 		t.Fatal(err)
 	}
 }

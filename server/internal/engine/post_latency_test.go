@@ -24,6 +24,7 @@ func TestPostMessageSlowGitHub(t *testing.T) {
 	n := w.connect(node.Token, nodetest.Options{})
 	var conn struct{ ID string }
 	b.must(201, "POST", "/api/git/connections", map[string]string{"name": "gh", "token": "ghp_good"}, &conn)
+	gh.setRefIn("o/slow", "main", "sha-slow-main")
 	var project struct{ ID string }
 	b.must(201, "POST", "/api/projects", map[string]any{"name": "slow",
 		"repos": []map[string]any{{"repo": "o/slow", "git_connection_id": conn.ID}}}, &project)

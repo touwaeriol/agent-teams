@@ -102,6 +102,35 @@ func TestProjectWithRepoAndConnection(t *testing.T) {
 	}
 }
 
+// TestProjectRepoBaseBranch: adding a repository stores the branch threads start from (its
+// default branch unless one is given); a branch that does not exist or an empty repository is
+// refused when the repository is added, and the base can be changed later.
+func TestProjectRepoBaseBranch(t *testing.T) {
+	h := newHarness(t)
+	c, _ := h.signUp("a@example.com")
+	var conn GitConnectionView
+	c.must(201, "POST", "/api/git/connections", map[string]string{"token": "ghp_good"}, &conn)
+	var p ProjectView
+	c.must(201, "POST", "/api/projects", map[string]any{"name": "R", "repos": []map[string]any{
+		{"repo": "o/r", "git_connection_id": conn.ID}, {"repo": "o/web", "git_connection_id": conn.ID, "base_branch": "dev"}}}, &p)
+	if p.Repos[0].BaseBranch != "main" || p.Repos[1].BaseBranch != "dev" {
+		t.Fatalf("bases %+v", p.Repos)
+	}
+	r := c.do("PATCH", "/api/projects/"+p.ID, map[string]any{"repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID, "base_branch": "develop"}}})
+	if r.Status != 422 || !strings.Contains(string(r.Body), "没有分支 develop") {
+		t.Fatalf("missing branch = %d %s", r.Status, r.Body)
+	}
+	r = c.do("PATCH", "/api/projects/"+p.ID, map[string]any{"repos": []map[string]any{{"repo": "o/empty", "git_connection_id": conn.ID}}})
+	if r.Status != 422 || !strings.Contains(string(r.Body), "是空的") {
+		t.Fatalf("empty repo = %d %s", r.Status, r.Body)
+	}
+	c.must(200, "PATCH", "/api/projects/"+p.ID, map[string]any{"repos": []map[string]any{
+		{"repo": "o/r", "git_connection_id": conn.ID, "base_branch": "feature/x"}, {"repo": "o/web", "git_connection_id": conn.ID}}}, &p)
+	if p.Repos[0].BaseBranch != "feature/x" || p.Repos[1].BaseBranch != "dev" {
+		t.Fatalf("changed bases %+v", p.Repos)
+	}
+}
+
 // TestAutoApproveAnyNode: "全部放行" no longer needs an isolated node.
 func TestAutoApproveAnyNode(t *testing.T) {
 	h := newHarness(t)

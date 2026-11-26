@@ -20,7 +20,7 @@ import (
 // Repositories added while it runs are checked out at once and removed ones are cleaned up, and
 // the employee is told.
 func TestSessionMultiRepo(t *testing.T) {
-	_, ghSrv := newFakeGitHub(t)
+	gh, ghSrv := newFakeGitHub(t)
 	w := newWorld(t, ghSrv)
 	b := w.signUp("session@example.com")
 	var node nodeCreated
@@ -43,6 +43,7 @@ func TestSessionMultiRepo(t *testing.T) {
 		ThreadNo int    `json:"thread_no"`
 		ThreadID string `json:"thread_id"`
 	}
+	gh.setRefIn("o/r", "develop", "sha-develop")
 	msg := "修复登录后的跳转\n前端在 o/web，接口在 o/r"
 	b.must(201, "POST", "/api/sessions", map[string]any{"message": msg, "role": "dev", "node_id": node.Node.ID,
 		"repos": []map[string]any{{"repo": "o/r", "git_connection_id": conn.ID, "branch": "develop"},
@@ -161,6 +162,7 @@ func TestSessionMultiRepo(t *testing.T) {
 	}
 
 	var after struct{ Kind string }
+	gh.setRefIn("o/api", "v2", "sha-api-v2")
 	b.must(200, "PUT", "/api/sessions/"+p.ID+"/repos", map[string]any{"repos": []map[string]any{
 		{"repo": "o/r", "git_connection_id": conn.ID}, {"repo": "o/api", "git_connection_id": conn.ID, "branch": "v2"}}}, &after)
 	added := prepares(t, w, n, 1)

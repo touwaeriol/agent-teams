@@ -901,6 +901,7 @@ export interface GitResult {
     | "fetch_failed"
     | "not_a_repo"
     | "dirty_conflict"
+    | "base_missing"
     | "path_outside_root"
     | "locked_timeout"
     | "rejected_non_ff"

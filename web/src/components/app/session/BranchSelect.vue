@@ -5,7 +5,7 @@ import { computed } from "vue";
 import { useBranches, useGitRepoBranches } from "@/api/queries";
 import type { RepoRef } from "../repo/repo";
 
-const props = defineProps<{ item: RepoRef }>();
+const props = withDefaults(defineProps<{ item: RepoRef; clearable?: boolean; label?: string }>(), { clearable: true, label: "" });
 const value = defineModel<string>({ required: true });
 const github = useBranches(
   () => (props.item.git_repo_id ? "" : (props.item.git_connection_id ?? "")),
@@ -21,11 +21,11 @@ const options = computed(() => (q.value.data.value ?? []) as string[]);
     v-model="value"
     filterable
     allow-create
-    clearable
+    :clearable="clearable"
     default-first-option
     :loading="q.isLoading.value"
     placeholder="默认分支"
-    :aria-label="`${item.repo} 的分支`"
+    :aria-label="label || `${item.repo} 的分支`"
     class="w-44 shrink-0"
   >
     <el-option v-for="b in options" :key="b" :label="b" :value="b" />

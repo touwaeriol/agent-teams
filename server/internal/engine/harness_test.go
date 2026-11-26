@@ -127,7 +127,7 @@ func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) 
 	cfg := config.Config{PublicURL: "http://console.test", SecretKeys: []string{secret}, WebDir: t.TempDir(),
 		NodeDistDir: dist, OfficeDir: t.TempDir()}
 	h := httpapi.New(httpapi.Deps{Config: cfg, Store: db, KV: cache, GitHub: client, Tokens: tokens, Office: reg, Log: log,
-		Nodes: e.Gateway, Events: e.Events, Hooks: e.Hooks(), SSH: e.SSHHooks(), Extensions: []func(api huma.API, r gin.IRoutes){orchapi.New(e, reg).Register}})
+		Relay: e.GH.Relay, Nodes: e.Gateway, Events: e.Events, Hooks: e.Hooks(), SSH: e.SSHHooks(), Extensions: []func(api huma.API, r gin.IRoutes){orchapi.New(e, reg).Register}})
 	srv := httptest.NewServer(h.Handler())
 	t.Cleanup(func() {
 		cancel()

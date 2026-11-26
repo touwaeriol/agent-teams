@@ -67,7 +67,7 @@ describe("RepoList", () => {
     const Host = defineComponent(() => () => h(RepoList, { modelValue: value.value, "onUpdate:modelValue": (v: RepoRef[]) => (value.value = v) }));
     const w = mountWith(Host);
     await flushPromises();
-    expect(w.findAll("li").map((li) => li.text())).toEqual(["1o/apiGitHub · touwaeriol", "2o/web连接已删除"]);
+    expect(w.findAll("li").map((li) => li.text())).toEqual(["1o/apiGitHub · touwaeriol默认分支", "2o/web连接已删除默认分支"]);
     expect(w.get("[aria-label='上移 o/api']").attributes("disabled")).toBeDefined();
     await w.get("[aria-label='下移 o/api']").trigger("click");
     expect(value.value.map((r) => r.repo)).toEqual(["o/web", "o/api"]);
@@ -89,7 +89,7 @@ describe("RepoList", () => {
     const value = ref<RepoRef[]>([{ repo: "gitlab.com/acme/web", git_connection_id: null, git_repo_id: "gr_1" }]);
     const w = mountWith(RepoList, { modelValue: value.value });
     await flushPromises();
-    expect(w.get("li").text()).toBe("1gitlab.com/acme/web推送分支交付GitLab · 单独添加");
+    expect(w.get("li").text()).toBe("1gitlab.com/acme/web推送分支交付GitLab · 单独添加默认分支");
     expect(w.text()).toContain("再加一个仓库");
   });
 });
@@ -540,7 +540,8 @@ describe("Project settings · 环境", () => {
     await flushPromises();
     expect(w.text()).toContain("每个讨论串中都包含的仓库");
     expect(w.text()).not.toMatch(/云环境|管理节点|分支命名/);
-    expect(w.findAll("li").map((li) => li.text())).toEqual(["1o/apiGitHub · touwaeriol"]);
+    expect(w.findAll("li").map((li) => li.text())).toEqual(["1o/apiGitHub · touwaeriol默认分支"]);
+    expect(w.find("[aria-label='o/api 的起点分支']").exists()).toBe(true);
     await w.findAll("button").find((b) => b.text().includes("添加"))!.trigger("click");
     expect(w.text()).toContain("再加一个仓库");
     await w.get("[aria-label='移除 o/api']").trigger("click");
