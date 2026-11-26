@@ -3333,7 +3333,8 @@ func (j *ForwardToThreadResult) UnmarshalJSON(value []byte) error {
 // mounts at its own data directory and answers with fs.status; a generation older
 // than the one mounted is ignored.
 type FsMount struct {
-	// Object storage key limited to the volume's prefix.
+	// Object storage key of the volume (limited to its prefix on the platform's
+	// bucket); empty for the user's own JuiceFS, whose keys live in its metadata.
 	AccessKey string `json:"access_key"`
 
 	// Local cache size; default 10240.
@@ -3349,12 +3350,13 @@ type FsMount struct {
 	// from the mounted one.
 	Generation int `json:"generation"`
 
-	// MetaPassword corresponds to the JSON schema field "meta_password".
+	// Goes in META_PASSWORD; empty when the URL carries it (or needs none).
 	MetaPassword string `json:"meta_password"`
 
 	// Metadata engine URL without the password
-	// (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x); the password
-	// goes in META_PASSWORD.
+	// (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x for platform and
+	// own-S3 volumes; the user's own engine URL for an own JuiceFS, where a password
+	// that could not be split out stays inline).
 	MetaURL string `json:"meta_url"`
 
 	// SecretKey corresponds to the JSON schema field "secret_key".
@@ -3479,23 +3481,14 @@ func (j *FsMount) UnmarshalJSON(value []byte) error {
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
 	}
-	if utf8.RuneCountInString(string(plain.AccessKey)) < 1 {
-		return fmt.Errorf("field %s length: must be >= %d", "access_key", 1)
-	}
 	if plain.CacheSizeMB != nil && 100 > *plain.CacheSizeMB {
 		return fmt.Errorf("field %s: must be >= %v", "cache_size_mb", 100)
 	}
 	if 1 > plain.Generation {
 		return fmt.Errorf("field %s: must be >= %v", "generation", 1)
 	}
-	if utf8.RuneCountInString(string(plain.MetaPassword)) < 1 {
-		return fmt.Errorf("field %s length: must be >= %d", "meta_password", 1)
-	}
 	if utf8.RuneCountInString(string(plain.MetaURL)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "meta_url", 1)
-	}
-	if utf8.RuneCountInString(string(plain.SecretKey)) < 1 {
-		return fmt.Errorf("field %s length: must be >= %d", "secret_key", 1)
 	}
 	if matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9-]{2,62}$`, string(plain.Volume)); !matched {
 		return fmt.Errorf("field %s pattern match: must match %s", "Volume", `^[a-z0-9][a-z0-9-]{2,62}$`)

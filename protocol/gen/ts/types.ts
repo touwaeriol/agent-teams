@@ -776,12 +776,15 @@ export interface FsMount {
    */
   generation: number;
   /**
-   * Metadata engine URL without the password (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x); the password goes in META_PASSWORD.
+   * Metadata engine URL without the password (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x for platform and own-S3 volumes; the user's own engine URL for an own JuiceFS, where a password that could not be split out stays inline).
    */
   meta_url: string;
+  /**
+   * Goes in META_PASSWORD; empty when the URL carries it (or needs none).
+   */
   meta_password: string;
   /**
-   * Object storage key limited to the volume's prefix.
+   * Object storage key of the volume (limited to its prefix on the platform's bucket); empty for the user's own JuiceFS, whose keys live in its metadata.
    */
   access_key: string;
   secret_key: string;

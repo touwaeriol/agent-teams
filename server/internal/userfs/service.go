@@ -59,6 +59,8 @@ type Service struct {
 	// OnChange runs after a user's volume became ready or was removed (push fs.mount / fs.unmount
 	// to the user's nodes).
 	OnChange func(ctx context.Context, userID string)
+	// CheckEndpoint replaces PublicEndpoint (tests).
+	CheckEndpoint func(ctx context.Context, endpoint string) error
 }
 
 // New builds the service; meta, iam and volumes nil = the real backends from cfg.
@@ -76,13 +78,27 @@ func (s *Service) Get(ctx context.Context, userID string) (Volume, error) {
 	return Get(ctx, s.db, userID)
 }
 
-// Enable provisions the user's volume (or finishes a provisioning that failed). It returns the
-// volume as it stands after this attempt: ready, or error with the reason.
-func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
+// ErrSwitch: the user already has a folder on another storage; it has to be deleted first (no
+// migration between storages).
+var ErrSwitch = errors.New("已经有共享文件夹了：换存储要先删除当前的（文件不会迁移）")
+
+// Enable provisions the user's volume on backend b (or finishes a provisioning that failed). It
+// returns the volume as it stands after this attempt: ready, or error with the reason. A failed
+// volume may be retried with other settings; a ready one must be deleted before switching.
+func (s *Service) Enable(ctx context.Context, userID string, b Backend) (Volume, error) {
 	if !s.Enabled() {
 		return Volume{}, ErrDisabled
 	}
-	vol, err := insert(ctx, s.db, s.vault, userID, s.cfg.CapacityGB)
+	b, err := b.Normalize()
+	if err != nil {
+		return Volume{}, err
+	}
+	if b.Kind == BackendS3 {
+		if err := s.checkEndpoint(ctx, b.S3Endpoint); err != nil {
+			return Volume{}, err
+		}
+	}
+	vol, err := s.current(ctx, userID, b)
 	if err != nil {
 		return vol, err
 	}
@@ -101,25 +117,63 @@ func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
 	return Get(ctx, s.db, userID)
 }
 
+// current is the user's row for backend b: created when missing, replaced when a failed one was
+// on other settings (nothing of it was in use), ErrSwitch when a working one is on another backend.
+func (s *Service) current(ctx context.Context, userID string, b Backend) (Volume, error) {
+	vol, err := Get(ctx, s.db, userID)
+	switch {
+	case IsNotFound(err):
+		return insert(ctx, s.db, s.vault, userID, s.cfg.CapacityGB, b)
+	case err != nil:
+		return vol, err
+	case vol.State == StateError && (vol.Backend != b.Kind || b.Kind != BackendPlatform):
+		if err := s.teardown(ctx, vol); err != nil {
+			s.log.Warn("shared folder: cleaning up a failed volume", "user_id", userID, "err", err)
+		}
+		if err := remove(ctx, s.db, userID); err != nil {
+			return vol, err
+		}
+		return insert(ctx, s.db, s.vault, userID, s.cfg.CapacityGB, b)
+	case vol.Backend != b.Kind:
+		return vol, ErrSwitch
+	}
+	return vol, nil
+}
+
+// checkEndpoint is PublicEndpoint unless a test replaced it.
+func (s *Service) checkEndpoint(ctx context.Context, endpoint string) error {
+	if s.CheckEndpoint != nil {
+		return s.CheckEndpoint(ctx, endpoint)
+	}
+	return PublicEndpoint(ctx, endpoint)
+}
+
 func (s *Service) provision(ctx context.Context, vol Volume) error {
 	sec, err := secrets(ctx, s.db, s.vault, vol)
 	if err != nil {
 		return fmt.Errorf("open secrets: %w", err)
 	}
+	if vol.Backend == BackendJuiceFS {
+		return nil // the user's own volume: nodes check it when they mount
+	}
 	n := NamesFor(vol.UserID)
 	if err := s.meta.Ensure(ctx, n.Role, sec.MetaPassword); err != nil {
 		return fmt.Errorf("元数据库：%w", err)
 	}
-	if err := s.iam.Ensure(ctx, n, sec.SecretKey, Policy(s.cfg.Bucket, n.Volume)); err != nil {
-		return fmt.Errorf("对象存储账号：%w", err)
+	f := FormatSpec{MetaPassword: sec.MetaPassword, Volume: n.Volume, CapacityGB: vol.CapacityGB,
+		Bucket: sec.Bucket, AccessKey: sec.AccessKey, SecretKey: sec.SecretKey}
+	if vol.Backend == BackendPlatform {
+		if err := s.iam.Ensure(ctx, n, sec.SecretKey, Policy(s.cfg.Bucket, n.Volume)); err != nil {
+			return fmt.Errorf("对象存储账号：%w", err)
+		}
+		f.Bucket, f.AccessKey = s.cfg.BucketURL(), n.AccessKey
 	}
 	db, err := s.cfg.database()
 	if err != nil {
 		return err
 	}
-	err = s.volumes.Format(ctx, FormatSpec{MetaURL: MetaURL(n.Role, s.cfg.adminHost(), db, "disable"), MetaPassword: sec.MetaPassword,
-		Volume: n.Volume, Bucket: s.cfg.BucketURL(), AccessKey: n.AccessKey, SecretKey: sec.SecretKey, CapacityGB: vol.CapacityGB})
-	if err != nil {
+	f.MetaURL = MetaURL(n.Role, s.cfg.adminHost(), db, "disable")
+	if err := s.volumes.Format(ctx, f); err != nil {
 		return fmt.Errorf("juicefs format：%w", err)
 	}
 	return nil
@@ -145,7 +199,12 @@ func (s *Service) Disable(ctx context.Context, userID string) error {
 	return remove(ctx, s.db, userID)
 }
 
+// teardown deletes what the console made: a platform volume entirely, a volume in the user's
+// bucket with its data (objects under at-<id>/) and metadata; the user's own JuiceFS is only forgotten.
 func (s *Service) teardown(ctx context.Context, vol Volume) error {
+	if vol.Backend == BackendJuiceFS {
+		return nil
+	}
 	n := NamesFor(vol.UserID)
 	sec, err := secrets(ctx, s.db, s.vault, vol)
 	if err != nil {
@@ -158,8 +217,10 @@ func (s *Service) teardown(ctx context.Context, vol Volume) error {
 	if err := s.volumes.Destroy(ctx, MetaURL(n.Role, s.cfg.adminHost(), db, "disable"), sec.MetaPassword); err != nil {
 		return fmt.Errorf("juicefs destroy：%w", err)
 	}
-	if err := s.iam.Remove(ctx, n); err != nil {
-		return fmt.Errorf("对象存储账号：%w", err)
+	if vol.Backend == BackendPlatform {
+		if err := s.iam.Remove(ctx, n); err != nil {
+			return fmt.Errorf("对象存储账号：%w", err)
+		}
 	}
 	return s.meta.Drop(ctx, n.Role)
 }
@@ -195,9 +256,16 @@ func (s *Service) MountSpec(ctx context.Context, userID string) (protocol.FsMoun
 	for _, a := range s.cfg.ClientAssets() {
 		assets = append(assets, protocol.FsMountClientAssetsElem{Platform: a.Platform, URL: a.URL, SHA256: a.SHA256})
 	}
-	return protocol.FsMount{Volume: n.Volume, Generation: vol.Generation, MetaURL: MetaURL(n.Role, s.cfg.MetaHost, db, s.cfg.MetaSSLMode),
+	m := protocol.FsMount{Volume: n.Volume, Generation: vol.Generation, MetaURL: MetaURL(n.Role, s.cfg.MetaHost, db, s.cfg.MetaSSLMode),
 		MetaPassword: sec.MetaPassword, AccessKey: n.AccessKey, SecretKey: sec.SecretKey,
-		Client: protocol.FsMountClient{Version: s.cfg.ClientVersion, Assets: assets}}, nil
+		Client: protocol.FsMountClient{Version: s.cfg.ClientVersion, Assets: assets}}
+	switch vol.Backend {
+	case BackendS3:
+		m.AccessKey = sec.AccessKey
+	case BackendJuiceFS:
+		m.MetaURL, m.AccessKey, m.SecretKey = sec.MetaURL, "", ""
+	}
+	return m, nil
 }
 
 // Ready tells whether the user has a ready volume (session.open sends a shared folder only then).

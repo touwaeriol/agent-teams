@@ -19,12 +19,14 @@ import (
 
 // FsVolumeView is the user's volume without any secret.
 type FsVolumeView struct {
-	Volume     string    `json:"volume"`
-	State      string    `json:"state" enum:"provisioning,ready,error,deleting"`
-	Error      string    `json:"error"`
-	CapacityGB int       `json:"capacity_gb"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	Volume     string                `json:"volume"`
+	Backend    string                `json:"backend" enum:"platform,s3,juicefs" doc:"platform: the platform's storage; s3: the user's bucket; juicefs: the user's own JuiceFS"`
+	Summary    userfs.StorageSummary `json:"summary" doc:"Where the user's own storage is (no secret)"`
+	State      string                `json:"state" enum:"provisioning,ready,error,deleting"`
+	Error      string                `json:"error"`
+	CapacityGB int                   `json:"capacity_gb"`
+	CreatedAt  time.Time             `json:"created_at"`
+	UpdatedAt  time.Time             `json:"updated_at"`
 }
 
 // FsView is GET /api/storage/fs.
@@ -36,6 +38,19 @@ type FsView struct {
 }
 
 type fsOutput struct{ Body FsView }
+
+// fsEnableInput picks the storage; no body (or kind platform) = the platform's.
+type fsEnableInput struct {
+	Body *struct {
+		Kind         string `json:"kind,omitempty" enum:"platform,s3,juicefs" doc:"Default platform"`
+		S3Endpoint   string `json:"s3_endpoint,omitempty" maxLength:"300" doc:"s3: https://host[:port]"`
+		Bucket       string `json:"bucket,omitempty" maxLength:"63"`
+		AccessKey    string `json:"access_key,omitempty" maxLength:"256"`
+		SecretKey    string `json:"secret_key,omitempty" maxLength:"256"`
+		MetaURL      string `json:"meta_url,omitempty" maxLength:"1000" doc:"juicefs: the metadata engine URL of the user's formatted volume"`
+		MetaPassword string `json:"meta_password,omitempty" maxLength:"256" doc:"juicefs: its password when not in the URL"`
+	}
+}
 
 type fsDeleteInput struct {
 	Body struct {
@@ -78,7 +93,7 @@ func (a *API) fsView(ctx context.Context, userID string) (FsView, error) {
 	if err != nil {
 		return v, err
 	}
-	v.Volume = &FsVolumeView{Volume: vol.Volume, State: vol.State, Error: vol.Error, CapacityGB: vol.CapacityGB, CreatedAt: vol.CreatedAt, UpdatedAt: vol.UpdatedAt}
+	v.Volume = &FsVolumeView{Volume: vol.Volume, Backend: vol.Backend, Summary: vol.Summary, State: vol.State, Error: vol.Error, CapacityGB: vol.CapacityGB, CreatedAt: vol.CreatedAt, UpdatedAt: vol.UpdatedAt}
 	return v, nil
 }
 
@@ -101,10 +116,16 @@ func fsErr(err error) error {
 	if userfs.IsNotFound(err) {
 		return httpapi.Fail(404, "not_found", err.Error())
 	}
+	if errors.Is(err, userfs.ErrSwitch) {
+		return httpapi.Fail(409, "fs_exists", err.Error())
+	}
+	if errors.Is(err, userfs.ErrInvalidBackend) {
+		return httpapi.Fail(422, "invalid_storage", err.Error())
+	}
 	return err
 }
 
-func (a *API) enableUserFs(ctx context.Context, _ *struct{}) (*fsOutput, error) {
+func (a *API) enableUserFs(ctx context.Context, in *fsEnableInput) (*fsOutput, error) {
 	u, err := a.user(ctx)
 	if err != nil {
 		return nil, err
@@ -112,7 +133,12 @@ func (a *API) enableUserFs(ctx context.Context, _ *struct{}) (*fsOutput, error) 
 	if a.e.FS == nil {
 		return nil, fsErr(userfs.ErrDisabled)
 	}
-	if _, err := a.e.FS.Enable(ctx, u.ID); err != nil {
+	var b userfs.Backend
+	if in.Body != nil {
+		b = userfs.Backend{Kind: in.Body.Kind, S3Endpoint: in.Body.S3Endpoint, Bucket: in.Body.Bucket, AccessKey: in.Body.AccessKey,
+			SecretKey: in.Body.SecretKey, MetaURL: in.Body.MetaURL, MetaPassword: in.Body.MetaPassword}
+	}
+	if _, err := a.e.FS.Enable(ctx, u.ID, b); err != nil {
 		return nil, fsErr(err)
 	}
 	v, err := a.fsView(ctx, u.ID)
@@ -149,11 +175,10 @@ func (a *API) userFsDockerVolume(ctx context.Context, _ *struct{}) (*fsDockerOut
 	if err != nil {
 		return nil, fsErr(err)
 	}
-	meta, err := url.Parse(spec.MetaURL)
+	metaURL, err := withPassword(spec.MetaURL, spec.MetaPassword)
 	if err != nil {
 		return nil, err
 	}
-	meta.User = url.UserPassword(meta.User.Username(), spec.MetaPassword)
 	compose := fmt.Sprintf(`# 共享文件夹（JuiceFS 卷 %[1]s）。卷参数里有元数据库密码，只放在这台宿主机上。
 services:
   node:
@@ -168,7 +193,21 @@ volumes:
     driver_opts:
       name: %[1]s
       metaurl: "%[2]s"
-`, spec.Volume, meta.String(), FsDockerMount)
+`, spec.Volume, metaURL, FsDockerMount)
 	return &fsDockerOutput{Body: FsDockerVolume{Compose: compose, Mount: FsDockerMount,
 		Plugin: "docker plugin install juicedata/juicefs --alias juicedata/juicefs --grant-all-permissions"}}, nil
+}
+
+// withPassword puts the metadata password back into the URL (the plugin takes one URL); a URL
+// that already carries it, or needs none, is kept.
+func withPassword(raw, password string) (string, error) {
+	if password == "" {
+		return raw, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	u.User = url.UserPassword(u.User.Username(), password)
+	return u.String(), nil
 }

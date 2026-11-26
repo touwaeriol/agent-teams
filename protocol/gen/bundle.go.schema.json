@@ -751,22 +751,20 @@
           "minimum": 1
         },
         "meta_url": {
-          "description": "Metadata engine URL without the password (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x); the password goes in META_PASSWORD.",
+          "description": "Metadata engine URL without the password (postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x for platform and own-S3 volumes; the user's own engine URL for an own JuiceFS, where a password that could not be split out stays inline).",
           "type": "string",
           "minLength": 1
         },
         "meta_password": {
-          "type": "string",
-          "minLength": 1
+          "description": "Goes in META_PASSWORD; empty when the URL carries it (or needs none).",
+          "type": "string"
         },
         "access_key": {
-          "description": "Object storage key limited to the volume's prefix.",
-          "type": "string",
-          "minLength": 1
+          "description": "Object storage key of the volume (limited to its prefix on the platform's bucket); empty for the user's own JuiceFS, whose keys live in its metadata.",
+          "type": "string"
         },
         "secret_key": {
-          "type": "string",
-          "minLength": 1
+          "type": "string"
         },
         "client": {
           "description": "The juicefs client to run: the daemon picks the asset of its platform (linux-amd64, linux-arm64, darwin-arm64…), downloads it and checks sha256, unless that exact version is already present. A tar.gz holding the juicefs binary.",

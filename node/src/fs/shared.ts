@@ -144,7 +144,7 @@ export class SharedFs {
       mkdirSync(cache, { recursive: true, mode: 0o700 });
       const args = ["mount", "-d", "--no-usage-report", "--cache-dir", cache, "--cache-size", String(m.cache_size_mb ?? 10240),
         "--log", join(this.o.dataDir, "jfs-mount.log"), m.meta_url, dir];
-      const r = await this.run(bin, args, { env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? "/", META_PASSWORD: m.meta_password }, timeoutMs: 120_000 });
+      const r = await this.run(bin, args, { env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? "/", ...(m.meta_password ? { META_PASSWORD: m.meta_password } : {}) }, timeoutMs: 120_000 });
       if (r.code !== 0) throw new Error(lastLine(r.stderr || r.stdout) || `juicefs mount exited ${r.code}`);
       if (!(await waitFor(() => isMounted(dir), this.o.mountWaitMs ?? 30_000))) throw new Error("the mount did not appear");
       this.set(mountedStatus(m));

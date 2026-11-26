@@ -8,11 +8,15 @@ import { useAction } from "@/api/mutations";
 import { keys, useSharedFolder } from "@/api/queries";
 import type { components } from "@/api/schema";
 import Callout from "@/components/common/Callout.vue";
+import Field from "@/components/common/Field.vue";
 import Loading from "@/components/common/Loading.vue";
 import Panel from "@/components/common/Panel.vue";
 import NavButton from "@/components/shell/NavButton.vue";
 
 type Docker = components["schemas"]["FsDockerVolume"];
+type Kind = "platform" | "s3" | "juicefs";
+
+const KIND_LABEL: Record<Kind, string> = { platform: "平台默认存储", s3: "自己的 S3", juicefs: "自己的 JuiceFS" };
 
 const STATE: Record<string, { label: string; type: "success" | "warning" | "danger" | "info" }> = {
   provisioning: { label: "开通中", type: "warning" },
@@ -27,8 +31,27 @@ const vol = computed(() => view.value?.volume);
 const state = computed(() => STATE[vol.value?.state ?? ""] ?? null);
 const docker = ref<Docker | null>(null);
 const typed = ref("");
+const kind = ref<Kind>("platform");
+const form = ref({ s3_endpoint: "", bucket: "", access_key: "", secret_key: "", meta_url: "", meta_password: "" });
+const showSetup = computed(() => !vol.value || vol.value.state === "error");
+const formProblem = computed(() => {
+  const f = form.value;
+  if (kind.value === "s3" && (!f.s3_endpoint || !f.bucket || !f.access_key || !f.secret_key)) return "请填完 S3 地址、bucket 和密钥";
+  if (kind.value === "juicefs" && !f.meta_url) return "请填元数据地址";
+  return "";
+});
+function body() {
+  const f = form.value;
+  if (kind.value === "s3") return { kind: "s3" as const, s3_endpoint: f.s3_endpoint, bucket: f.bucket, access_key: f.access_key, secret_key: f.secret_key };
+  if (kind.value === "juicefs") return { kind: "juicefs" as const, meta_url: f.meta_url, ...(f.meta_password ? { meta_password: f.meta_password } : {}) };
+  return undefined;
+}
 
-const enable = useAction(() => sharedFolder.enable(), { invalidate: [keys.sharedFolder], success: "共享文件夹已开通" });
+const enable = useAction(() => sharedFolder.enable(body()), {
+  invalidate: [keys.sharedFolder],
+  success: "共享文件夹已开通",
+  onSuccess: () => (form.value = { s3_endpoint: "", bucket: "", access_key: "", secret_key: "", meta_url: "", meta_password: "" }),
+});
 const remove = useAction(() => sharedFolder.remove(typed.value), {
   invalidate: [keys.sharedFolder],
   success: "共享文件夹已删除",
@@ -54,14 +77,36 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
       <template v-else-if="view">
         <Callout v-if="!view.configured" tone="warn">控制面板还没有配置共享存储（AGENT_TEAMS_FS_*），请管理员先配置。</Callout>
 
-        <Panel v-else-if="!vol" title="还没有开通">
-          <p class="text-[13px] leading-[22px] text-muted-foreground">
-            开通后会为你建一个独立的卷，节点下次连上就会自动挂载。SQLite 这类数据库可以放进去，但同一个库同一时间只能由一个会话写入。
-          </p>
-          <div><el-button type="primary" :loading="enable.isPending.value" @click="enable.mutate()">开通共享文件夹</el-button></div>
-        </Panel>
-
         <template v-else>
+          <Panel v-if="showSetup" :title="vol ? '重新设置存储' : '开通共享文件夹'">
+            <p class="text-[13px] leading-[22px] text-muted-foreground">
+              默认用平台的存储，开通即用；也可以用你自己的 S3 或 JuiceFS。节点连上后会自动挂载。SQLite 这类数据库可以放进去，但同一个库同一时间只能由一个会话写入。
+            </p>
+            <Callout v-if="vol?.state === 'error'" tone="bad">{{ vol.error || "开通失败" }}</Callout>
+            <el-radio-group v-model="kind" aria-label="存储">
+              <el-radio-button v-for="(label, k) in KIND_LABEL" :key="k" :value="k">{{ label }}</el-radio-button>
+            </el-radio-group>
+            <div v-if="kind === 's3'" class="grid gap-3 sm:grid-cols-2">
+              <Field label="S3 地址"><el-input v-model="form.s3_endpoint" placeholder="https://s3.example.com" /></Field>
+              <Field label="Bucket"><el-input v-model="form.bucket" placeholder="my-bucket" /></Field>
+              <Field label="Access Key"><el-input v-model="form.access_key" autocomplete="off" /></Field>
+              <Field label="Secret Key"><el-input v-model="form.secret_key" type="password" show-password autocomplete="new-password" /></Field>
+              <p class="text-[12px] leading-5 text-muted-foreground sm:col-span-2">我们会把它格式化成 JuiceFS（文件放在 bucket 的 {{ "at-…/" }} 前缀下），元数据存在平台。密钥只用于挂载，保存后不再显示。删除共享文件夹会清掉这个前缀下的数据。</p>
+            </div>
+            <div v-else-if="kind === 'juicefs'" class="grid gap-3 sm:grid-cols-2">
+              <Field label="元数据地址" class="sm:col-span-2"><el-input v-model="form.meta_url" placeholder="redis://host:6379/1 或 postgres://user@host:5432/db" /></Field>
+              <Field label="元数据密码（可选）"><el-input v-model="form.meta_password" type="password" show-password autocomplete="new-password" /></Field>
+              <p class="text-[12px] leading-5 text-muted-foreground sm:col-span-2">填一个已经 juicefs format 过的卷。你的节点要能连到这个地址；平台不会动它的数据，删除共享文件夹只是不再挂载。</p>
+            </div>
+            <p class="text-[12px] text-muted-foreground">换存储不会迁移文件。</p>
+            <div>
+              <el-button type="primary" :disabled="Boolean(formProblem)" :loading="enable.isPending.value" @click="enable.mutate()">{{ vol ? "重试" : "开通" }}</el-button>
+              <span v-if="formProblem" class="ml-3 text-[12px] text-muted-foreground">{{ formProblem }}</span>
+            </div>
+          </Panel>
+        </template>
+
+        <template v-if="view.configured && vol">
           <Panel title="状态">
             <template #action>
               <el-tag v-if="state" :type="state.type" disable-transitions>{{ state.label }}</el-tag>
@@ -69,8 +114,14 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
             <dl class="grid grid-cols-[110px_1fr] gap-y-2 text-[13px]">
               <dt class="text-muted-foreground">卷名</dt>
               <dd class="font-mono">{{ vol.volume }}</dd>
-              <dt class="text-muted-foreground">容量上限</dt>
-              <dd>{{ vol.capacity_gb }} GB</dd>
+              <dt class="text-muted-foreground">存储</dt>
+              <dd>
+                {{ KIND_LABEL[vol.backend] }}
+                <span v-if="vol.summary.endpoint" class="font-mono text-muted-foreground">{{ vol.summary.endpoint }}/{{ vol.summary.bucket }}</span>
+                <span v-if="vol.summary.meta" class="font-mono text-muted-foreground">{{ vol.summary.meta }}</span>
+              </dd>
+              <dt v-if="vol.backend !== 'juicefs'" class="text-muted-foreground">容量上限</dt>
+              <dd v-if="vol.backend !== 'juicefs'">{{ vol.capacity_gb }} GB</dd>
               <dt class="text-muted-foreground">项目目录</dt>
               <dd class="font-mono">{{ view.project_dir }}</dd>
               <dt class="text-muted-foreground">公共目录</dt>
@@ -79,8 +130,6 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
             <p class="text-[13px] leading-[22px] text-muted-foreground">
               员工会话里用环境变量 <code>$AGENT_TEAMS_PROJECT_DIR</code> 和 <code>$AGENT_TEAMS_SHARED_DIR</code> 找到这两个目录。节点的挂载状态在“节点”页查看。
             </p>
-            <Callout v-if="vol.state === 'error'" tone="bad">{{ vol.error || "开通失败" }}</Callout>
-            <div v-if="vol.state === 'error'"><el-button :loading="enable.isPending.value" @click="enable.mutate()">重试</el-button></div>
           </Panel>
 
           <Panel v-if="vol.state === 'ready'" title="Docker 节点">
@@ -99,7 +148,8 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
           </Panel>
 
           <Panel v-if="vol.state !== 'deleting'" title="删除" tone="danger">
-            <p class="text-[13px] leading-[22px] text-muted-foreground">删除会清空卷里的所有文件，无法恢复。确认请输入卷名 <span class="font-mono">{{ vol.volume }}</span>。</p>
+            <p class="text-[13px] leading-[22px] text-muted-foreground">
+              {{ vol.backend === "juicefs" ? "删除后节点不再挂载，你的 JuiceFS 和里面的文件不受影响。" : "删除会清空卷里的所有文件，无法恢复。" }}想换存储也要先删除（文件不迁移）。确认请输入卷名 <span class="font-mono">{{ vol.volume }}</span>。</p>
             <div class="flex flex-wrap gap-2">
               <el-input v-model="typed" class="max-w-[280px]" :placeholder="vol.volume" aria-label="输入卷名确认删除" />
               <el-button type="danger" :disabled="typed !== vol.volume" :loading="remove.isPending.value" @click="remove.mutate()">删除共享文件夹</el-button>
