@@ -94,6 +94,16 @@ describe("git jobs", () => {
     expect(git(join(h.opts.root, "projects/p1/repo"), "branch", "--list", "thread/12/dev-2")).toBe("");
   });
 
+  it("reports a start branch missing on the remote as base_missing, not as a conflict", async () => {
+    h = await startHarness();
+    makeRemote(h.dir);
+    h.console.command("git.prepare", { ...prepare("g_m", "dev-3"), base: "develop" });
+    const res = await h.console.waitType("git.result", (b) => b.job_id === "g_m");
+    expect(res.body).toMatchObject({ ok: false, error_code: "base_missing" });
+    expect(res.body.error).toContain("develop");
+    expect(existsSync(join(h.opts.root, "projects/p1/threads/12/dev-3"))).toBe(false);
+  });
+
   it("syncs an existing worktree before a task: reset, current, merged, conflict, dirty, review checkout", async () => {
     h = await startHarness();
     const bare = makeRemote(h.dir);

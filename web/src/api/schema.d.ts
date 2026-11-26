@@ -4299,6 +4299,8 @@ export interface components {
             used_by_projects: components["schemas"]["ProjectRef"][] | null;
         };
         RepoRef: {
+            /** @description Branch threads start from and open pull requests against; '' on input = the repository's default branch (looked up and stored) */
+            base_branch?: string;
             git_connection_id?: string | null;
             /** @description A standalone repository (git-repos.md); then repo is its slug and git_connection_id is null */
             git_repo_id?: string | null;
@@ -4747,6 +4749,8 @@ export interface components {
             runtime: string;
         };
         SessionRepoRef: {
+            /** @description Branch threads start from and open pull requests against; '' on input = the repository's default branch (looked up and stored) */
+            base_branch?: string;
             /** @description Branch the employee's work branch is cut from; '' = the repository's default branch */
             branch?: string;
             git_connection_id?: string | null;

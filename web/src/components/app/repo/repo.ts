@@ -1,5 +1,5 @@
 // Repositories of a project (shared by NewProject and the project settings): pure helpers for the
-// ordered list and the picker. Base branches are not set here: they belong in the project context.
+// ordered list, the picker and each repository's start branch.
 import type { GitConnectionView, GitRepoView, RepoItem } from "@/api/views";
 
 /** A project repository: a GitHub one (git_connection_id) or a standalone Git repository (git_repo_id,
@@ -8,12 +8,15 @@ export interface RepoRef {
   repo: string;
   git_connection_id: string | null;
   git_repo_id?: string | null;
+  /** The branch threads start from and open pull requests against; unset on a new repository =
+   * its default branch (the console looks it up and stores it when the project is saved). */
+  base_branch?: string;
 }
 
 /** The picker's source value for standalone repositories (beside the GitHub connection ids). */
 export const STANDALONE = "standalone";
 
-export const REPOS_HINT = "基准分支、分支约定等写在项目指令里（例如“仓库 org/web 的基准分支：develop”），统筹和组长会按它开分支和 PR；没写的仓库用默认分支。";
+export const REPOS_HINT = "起点分支：讨论串从这个分支开始，PR 也合回这里。新加的仓库用它的默认分支（保存时自动获取并记下来），可以随时改成别的分支，例如 develop。";
 
 /** owner/repo from a pasted GitHub URL or the text as typed. */
 export function normalizeRepo(text: string): string {
@@ -35,6 +38,11 @@ export function addRepo(list: RepoRef[], item: RepoRef): RepoRef[] {
   return [...list, { repo, git_connection_id: item.git_connection_id }];
 }
 
+/** Sets the start branch of the repository at index. */
+export function setBase(list: RepoRef[], index: number, base: string): RepoRef[] {
+  return list.map((r, i) => (i === index ? { ...r, base_branch: base } : r));
+}
+
 export function removeRepo(list: RepoRef[], index: number): RepoRef[] {
   return list.filter((_, i) => i !== index);
 }
@@ -51,7 +59,10 @@ export function moveRepo(list: RepoRef[], index: number, delta: number): RepoRef
 /** The repos field of POST/PATCH /api/projects. */
 export function reposPayload(list: RepoRef[]): RepoRef[] {
   return list
-    .map((r) => (r.git_repo_id ? { repo: r.repo, git_connection_id: null, git_repo_id: r.git_repo_id } : { repo: normalizeRepo(r.repo), git_connection_id: r.git_connection_id }))
+    .map((r) => ({
+      ...(r.git_repo_id ? { repo: r.repo, git_connection_id: null, git_repo_id: r.git_repo_id } : { repo: normalizeRepo(r.repo), git_connection_id: r.git_connection_id }),
+      ...(r.base_branch?.trim() ? { base_branch: r.base_branch.trim() } : {}),
+    }))
     .filter((r) => r.repo && (r.git_connection_id || ("git_repo_id" in r && r.git_repo_id)));
 }
 

@@ -260,10 +260,14 @@ func dedupeIDs(ids []string) []string {
 	return out
 }
 
+// refsOf: a session repository's branch is also its base (checked to exist when it is added).
 func refsOf(in []SessionRepoRef) []RepoRef {
 	out := make([]RepoRef, len(in))
 	for i, r := range in {
 		out[i] = r.RepoRef
+		if b := strings.TrimSpace(r.Branch); b != "" {
+			out[i].BaseBranch = b
+		}
 	}
 	return out
 }

@@ -35,7 +35,7 @@ func (r *Runner) Cancel(ctx context.Context, tx *core.Tx, s Schedule) error {
 	if s.Status != StatusActive {
 		return ErrInvalid{"status", "这个定时任务已经结束了"}
 	}
-	return endSchedule(ctx, tx, s.ID, StatusCancelled, r.Now())
+	return endSchedule(ctx, tx, s, StatusCancelled, r.Now())
 }
 
 // Fire sends a schedule's message now (the "立即运行" button); next_run_at stays.
@@ -56,7 +56,10 @@ func (r *Runner) Fire(ctx context.Context, s Schedule, owner string) error {
 		if err := recordRun(ctx, tx, Run{ScheduleID: s.ID, Manual: true, Outcome: RunDelivered, MessageID: p.msgID}); err != nil {
 			return err
 		}
-		return tx.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).Updates(map[string]any{"last_run_at": r.Now(), "last_error": ""}).Error
+		if err := tx.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).Updates(map[string]any{"last_run_at": r.Now(), "last_error": ""}).Error; err != nil {
+			return err
+		}
+		return changed(ctx, tx, cur)
 	})
 }
 
@@ -100,7 +103,7 @@ func (r *Runner) fire(ctx context.Context, args FireArgs, lastTry bool) error {
 			if err := recordRun(ctx, tx, run); err != nil {
 				return err
 			}
-			return endSchedule(ctx, tx, s.ID, StatusMissed, now)
+			return endSchedule(ctx, tx, s, StatusMissed, now)
 		}
 		p, err := r.tryDeliver(ctx, tx, s, args.RunAt, now)
 		var skip skipped
@@ -113,7 +116,7 @@ func (r *Runner) fire(ctx context.Context, args FireArgs, lastTry bool) error {
 			return err
 		}
 		if p.ended {
-			return endSchedule(ctx, tx, s.ID, StatusCancelled, now)
+			return endSchedule(ctx, tx, s, StatusCancelled, now)
 		}
 		return r.advance(ctx, tx, s, now, args.RunAt, err)
 	})
@@ -174,6 +177,9 @@ func (r *Runner) advance(ctx context.Context, tx *core.Tx, s Schedule, now, plan
 		set["status"], set["ended_at"] = StatusDone, now
 	}
 	if err := tx.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).Updates(set).Error; err != nil {
+		return err
+	}
+	if err := changed(ctx, tx, s); err != nil {
 		return err
 	}
 	s.NextRunAt = next

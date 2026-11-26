@@ -3,10 +3,12 @@ import { ArrowDown, ArrowUp, X } from "lucide-vue-next";
 import { computed } from "vue";
 import { useGitRepos } from "@/api/queries";
 import type { GitConnectionView } from "@/api/views";
+import BranchSelect from "../session/BranchSelect.vue";
 import { sourceLabel, type RepoRef } from "./repo";
 
 const props = defineProps<{ item: RepoRef; index: number; count: number; connections: GitConnectionView[] }>();
-const emit = defineEmits<{ move: [delta: number]; remove: [] }>();
+const emit = defineEmits<{ move: [delta: number]; remove: []; base: [branch: string] }>();
+const base = computed({ get: () => props.item.base_branch ?? "", set: (v: string) => emit("base", v) });
 const gitRepos = useGitRepos();
 const source = computed(() => sourceLabel(props.item, props.connections, gitRepos.data.value ?? []));
 const BTN = "flex size-8 shrink-0 items-center justify-center rounded-lg hover:bg-raised disabled:pointer-events-none disabled:opacity-50";
@@ -22,6 +24,7 @@ const BTN = "flex size-8 shrink-0 items-center justify-center rounded-lg hover:b
       title="没有 PR 和 CI：讨论串的改动留在讨论串分支上，完成即交付"
     >推送分支交付</span>
     <span class="max-w-[34%] truncate text-[12px] text-muted-foreground max-sm:hidden" :title="source">{{ source }}</span>
+    <BranchSelect v-model="base" :item="item" :clearable="false" :label="`${item.repo} 的起点分支`" title="起点分支：讨论串从这里开始，PR 合回这里" />
     <button type="button" :class="BTN" :aria-label="`上移 ${item.repo}`" :disabled="index === 0" @click="emit('move', -1)"><ArrowUp class="size-4" /></button>
     <button type="button" :class="BTN" :aria-label="`下移 ${item.repo}`" :disabled="index === count - 1" @click="emit('move', 1)"><ArrowDown class="size-4" /></button>
     <button type="button" :class="BTN" :aria-label="`移除 ${item.repo}`" @click="emit('remove')"><X class="size-4" /></button>

@@ -11,9 +11,6 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// fallbackBase is used when GitHub cannot tell a repository's default branch.
-const fallbackBase = "main"
-
 // RepoFocus is a repository a thread should work in, with an optional explicit base branch
 // (open_thread repos, assign_task repo/base).
 type RepoFocus struct {
@@ -40,14 +37,16 @@ func (o *Orchestrator) ReposIn(ctx context.Context, q core.DB, p store.Project) 
 	return repos
 }
 
-// DefaultBranch is the repository's default branch, "main" when GitHub does not answer. It reads
-// the cache (refreshing a stale entry in the background) so that session opening, which runs
-// inside a transaction, does not wait on GitHub; WarmRepos fills the cache beforehand.
+// DefaultBranch is the base branch recorded in the project's repository settings. A repository
+// bound before base branches were stored falls back to the upstream's default branch, read from
+// the cache (WarmRepos fills it, and records it as the base) so that session opening, which runs
+// inside a transaction, does not wait on GitHub. It is "" when neither is known: there is no
+// guessed "main" any more, the node then reports that the start branch is missing.
 func (o *Orchestrator) DefaultBranch(ctx context.Context, r ghops.Repo) string {
 	b, err := o.gh.DefaultBranch(ctx, r)
-	if err != nil || b == "" {
-		o.log.Warn("default branch", "repo", r.Slug, "err", err)
-		return fallbackBase
+	if err != nil {
+		o.log.Warn("base branch unknown", "repo", r.Slug, "err", err)
+		return ""
 	}
 	return b
 }
@@ -163,9 +162,13 @@ func (o *Orchestrator) reposSection(ctx context.Context, q core.DB, e core.Emplo
 	b.WriteString("## 仓库\n")
 	if t == nil || e.Tier == "coordinator" {
 		for _, r := range p.Repos {
-			fmt.Fprintf(&b, "- %s\n", r.Repo)
+			if r.BaseBranch != "" {
+				fmt.Fprintf(&b, "- %s（起点分支 %s）\n", r.Repo, r.BaseBranch)
+			} else {
+				fmt.Fprintf(&b, "- %s\n", r.Repo)
+			}
 		}
-		b.WriteString("项目指令里写了某个仓库的基准分支时，open_thread 的 repos 参数要带上 {repo, base}。")
+		b.WriteString("讨论串默认从各仓库的起点分支开始（在项目设置里配置）；某个讨论串要从别的分支开始时，open_thread 的 repos 参数带上 {repo, base}。")
 		return b.String()
 	}
 	paths := PathsOf(e, t)
@@ -201,10 +204,26 @@ func legacyCheckout(ctx context.Context, q core.DB, threadID, cwd string) bool {
 // locks are never held across a GitHub round trip.
 func (o *Orchestrator) WarmRepos(ctx context.Context, p store.Project) {
 	for _, r := range o.Repos(ctx, p) {
-		if _, err := o.gh.DefaultBranch(ctx, r); err != nil {
-			o.log.Debug("warm default branch", "repo", r.Slug, "err", err)
-		}
+		o.backfillBase(ctx, p, r)
 		o.repoDoc(ctx, p, r)
+	}
+}
+
+// backfillBase records the upstream's default branch as the base of a repository bound before
+// base branches were stored (00480), so that later thread starts read it from the project.
+func (o *Orchestrator) backfillBase(ctx context.Context, p store.Project, r ghops.Repo) {
+	if r.Base() != "" {
+		return
+	}
+	b, err := o.gh.UpstreamDefault(ctx, r)
+	if err != nil {
+		o.log.Warn("look up default branch", "project_id", p.ID, "repo", r.Slug, "err", err)
+		return
+	}
+	if ok, err := store.SetProjectRepoBase(ctx, o.core.Pool.Gorm(ctx), p.ID, r.Slug, b); err != nil {
+		o.log.Warn("record base branch", "project_id", p.ID, "repo", r.Slug, "err", err)
+	} else if ok {
+		o.log.Info("recorded base branch", "project_id", p.ID, "repo", r.Slug, "base", b)
 	}
 }
 

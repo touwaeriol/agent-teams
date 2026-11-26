@@ -35,7 +35,7 @@ separate S3 user).
   `<bucket>/at-<id>/`, and an S3 user `jfs<id>` with policy `jfs-<id>` may touch only that prefix.
   `juicefs format` stores those keys in the volume's metadata, so mounting needs only the metadata
   URL and password.
-- Table `at_user_fs` (migration 00480) holds the names, sealed secrets (credvault, AAD
+- Table `at_user_fs` (migration 00490) holds the names, sealed secrets (credvault, AAD
   `UserFsAAD`), `generation` (grows when credentials change: nodes remount) and state
   provisioning | ready | error | deleting.
 - Storage is always the platform's (no user-supplied S3 or JuiceFS).

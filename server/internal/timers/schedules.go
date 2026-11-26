@@ -318,6 +318,9 @@ func createSchedule(ctx context.Context, tx *core.Tx, o Owner, in ScheduleInput,
 	if err := tx.Gorm(ctx).Omit("ThreadNo", "ThreadTitle", "Employee").Clauses(clause.Returning{}).Create(&s).Error; err != nil {
 		return s, err
 	}
+	if err := changed(ctx, tx, s); err != nil {
+		return s, err
+	}
 	return ScheduleByID(ctx, tx, s.ID)
 }
 
@@ -376,21 +379,37 @@ func updateSchedule(ctx context.Context, tx *core.Tx, cur Schedule, in ScheduleI
 	err = core.Changed(tx.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).Updates(map[string]any{"name": s.Name,
 		"kind": s.Kind, "cron": s.Cron, "run_at": s.RunAt, "timezone": s.Timezone, "message": s.Message, "enabled": s.Enabled,
 		"ends_at": s.EndsAt, "max_runs": s.MaxRuns, "next_run_at": next, "updated_at": gorm.Expr("now()")}))
+	if err == nil {
+		err = changed(ctx, tx, s)
+	}
 	if err != nil {
 		return s, err
 	}
 	return ScheduleByID(ctx, tx, s.ID)
 }
 
-// endSchedule ends an active schedule with status (done / cancelled / missed).
-func endSchedule(ctx context.Context, tx *core.Tx, id, status string, now time.Time) error {
-	return tx.Gorm(ctx).Table("at_schedules").Where("id = ? AND status = ?", id, StatusActive).
-		Updates(map[string]any{"status": status, "next_run_at": nil, "ended_at": now, "updated_at": gorm.Expr("now()")}).Error
+// changed tells the project's pages that s changed (they refetch the schedule list, so the
+// thread panel drops a cancelled wake-up without a reload).
+func changed(ctx context.Context, tx *core.Tx, s Schedule) error {
+	return core.EmitSchedule(ctx, tx, s.ProjectID, s.ThreadID, s.ID)
 }
 
-// DeleteSchedule removes a schedule.
-func DeleteSchedule(ctx context.Context, q core.DB, id string) error {
-	return core.Changed(q.Gorm(ctx).Where("id = ?", id).Delete(&Schedule{}))
+// endSchedule ends an active schedule with status (done / cancelled / missed).
+func endSchedule(ctx context.Context, tx *core.Tx, s Schedule, status string, now time.Time) error {
+	err := tx.Gorm(ctx).Table("at_schedules").Where("id = ? AND status = ?", s.ID, StatusActive).
+		Updates(map[string]any{"status": status, "next_run_at": nil, "ended_at": now, "updated_at": gorm.Expr("now()")}).Error
+	if err != nil {
+		return err
+	}
+	return changed(ctx, tx, s)
+}
+
+// DeleteSchedule removes a schedule, in tx.
+func DeleteSchedule(ctx context.Context, tx *core.Tx, s Schedule) error {
+	if err := core.Changed(tx.Gorm(ctx).Where("id = ?", s.ID).Delete(&Schedule{})); err != nil {
+		return err
+	}
+	return changed(ctx, tx, s)
 }
 
 // IsInvalid unwraps a validation error.

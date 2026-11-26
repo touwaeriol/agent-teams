@@ -38,6 +38,7 @@ export const PROJECT_EVENTS = [
   "node",
   "layout",
   "context",
+  "schedule",
   "reset",
 ] as const;
 export type ProjectEventType = (typeof PROJECT_EVENTS)[number];
@@ -236,6 +237,11 @@ function onDeliverable(qc: QueryClient, pid: string, _d: { deliverable: Delivera
   qc.invalidateQueries({ queryKey: keys.overview(pid) });
 }
 
+/** A schedule was created, changed, ended or deleted (by an agent, a run or the page): refetch the list. */
+function onSchedule(qc: QueryClient, pid: string) {
+  qc.invalidateQueries({ queryKey: keys.schedules(pid) });
+}
+
 function onNode(qc: QueryClient, pid: string) {
   qc.invalidateQueries({ queryKey: keys.nodes });
   refreshOffice(qc, pid);
@@ -297,6 +303,7 @@ const HANDLERS: Partial<Record<ProjectEventType, Handler>> = {
   node: onNode,
   layout: onLayout,
   context: onContext,
+  schedule: onSchedule,
   reset: onReset,
 };
 

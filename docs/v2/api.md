@@ -37,6 +37,7 @@
 | `memory` | `{op: "write"|"delete", name}` | 记忆文件变了（网页重新拉列表和打开的文件） |
 | `server` | `{server, server_id, employee, session_id, conn_id, duration_ms, commands, bytes_in, bytes_out, reason, last_command?, exit_code?, summary}` | 员工一条到远程服务器的 SSH 连接结束（architecture.md §10.6）；`last_command` 已脱敏、最多 200 字；`summary` 是给讨论串动态的一句话 |
 | `session_controls` | `{thread_id, applied, error?}` | 会话（多仓库会话）的权限模式、模型或思考强度变了：`applied: false` 是切换已发出、等节点回音，`true` 是节点回了（`error` 为失败原因，这次切换一项都没生效）；网页重新拉 `GET /api/projects/{pid}/session-controls`（sessions.md） |
+| `schedule` | `{id, thread_id}` | 定时任务新建、修改、触发后挪到下一次、结束（agent `schedule_cancel`、讨论串或任务结束自动取消）或删除；网页重新拉 `GET /api/projects/{pid}/schedules`（讨论串输入框上方的待触发唤醒随之消失） |
 | `node` | `{node: NodeBrief}` | 该项目用到的节点上下线、槽位变化 |
 | `context` | `{thread_no, conversation_id, session_id, reason: "turn"\|"refresh", refresh_id?, error?, updated_at?}` | 会话（多仓库会话）的上下文细分存好了（每轮结束或刷新），或刷新失败（`error`）；网页重新拉 `GET /api/conversations/{cid}/context/detail` |
 | `layout` | `{layout_id, version}` | 办公室布局更新（前端重新拉布局并重画） |

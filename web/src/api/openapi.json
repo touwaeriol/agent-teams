@@ -5749,6 +5749,11 @@
       "RepoRef": {
         "additionalProperties": false,
         "properties": {
+          "base_branch": {
+            "description": "Branch threads start from and open pull requests against; '' on input = the repository's default branch (looked up and stored)",
+            "maxLength": 255,
+            "type": "string"
+          },
           "git_connection_id": {
             "type": [
               "string",
@@ -7213,6 +7218,11 @@
       "SessionRepoRef": {
         "additionalProperties": false,
         "properties": {
+          "base_branch": {
+            "description": "Branch threads start from and open pull requests against; '' on input = the repository's default branch (looked up and stored)",
+            "maxLength": 255,
+            "type": "string"
+          },
           "branch": {
             "description": "Branch the employee's work branch is cut from; '' = the repository's default branch",
             "maxLength": 255,

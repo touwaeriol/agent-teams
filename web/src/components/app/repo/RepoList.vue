@@ -6,7 +6,7 @@ import { RouterLink } from "vue-router";
 import { useConnections, useGitRepos } from "@/api/queries";
 import AddRepo from "./AddRepo.vue";
 import RepoRow from "./RepoRow.vue";
-import { moveRepo, removeRepo, REPOS_HINT, type RepoRef } from "./repo";
+import { moveRepo, removeRepo, setBase, REPOS_HINT, type RepoRef } from "./repo";
 
 defineProps<{ currentProject?: string }>();
 const value = defineModel<RepoRef[]>({ required: true });
@@ -32,6 +32,7 @@ const canAdd = computed(() => list.value.length > 0 || (gitRepos.data.value?.len
           :connections="list"
           @move="(d: number) => (value = moveRepo(value, i, d))"
           @remove="value = removeRepo(value, i)"
+          @base="(b: string) => (value = setBase(value, i, b))"
         />
       </ol>
       <p v-else class="text-[13px] text-muted-foreground">未关联仓库：员工只能在空目录里工作。</p>

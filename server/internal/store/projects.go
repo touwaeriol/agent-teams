@@ -97,13 +97,17 @@ type ProjectRepo struct {
 	// GitRepoID names a standalone repository (at_git_repos, git-repos.md §3.4); then Repo is its
 	// slug and GitConnectionID is nil.
 	GitRepoID *string `json:"git_repo_id"`
+	// BaseBranch is the branch threads start from and open pull requests against (looked up
+	// when the repository is added, editable in project settings; '' only for a GitHub
+	// repository bound before 00480 until the control plane fills it in).
+	BaseBranch string `json:"base_branch"`
 }
 
 // Standalone reports whether the repository is a standalone Git repository (no GitHub API).
 func (r ProjectRepo) Standalone() bool { return r.GitRepoID != nil && *r.GitRepoID != "" }
 
 const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
-	COALESCE((SELECT json_agg(json_build_object('repo', r.repo, 'git_connection_id', r.git_connection_id, 'git_repo_id', r.git_repo_id)
+	COALESCE((SELECT json_agg(json_build_object('repo', r.repo, 'git_connection_id', r.git_connection_id, 'git_repo_id', r.git_repo_id, 'base_branch', r.base_branch)
 	  ORDER BY r.position, r.created_at) FROM at_project_repos r WHERE r.project_id = p.id), '[]'::json) AS repos,
 	p.created_at, p.updated_at, p.pinned, p.archived, p.work_mode, p.auto_approve, p.merge_policy,
 	p.delivery, p.office_layout, p.icon, p.coordinator_model, p.thread_model, p.thread_codex_model, p.thread_effort, p.auto_resume, p.kind,
@@ -272,6 +276,7 @@ type projectRepoRow struct {
 	Repo            string
 	GitConnectionID *string
 	GitRepoID       *string
+	BaseBranch      string
 	Position        int
 }
 
@@ -283,9 +288,17 @@ func (s *Store) writeRepos(ctx context.Context, projectID string, repos []Projec
 	}
 	rows := make([]projectRepoRow, len(repos))
 	for i, r := range repos {
-		rows[i] = projectRepoRow{ProjectID: projectID, Repo: r.Repo, GitConnectionID: r.GitConnectionID, GitRepoID: r.GitRepoID, Position: i}
+		rows[i] = projectRepoRow{ProjectID: projectID, Repo: r.Repo, GitConnectionID: r.GitConnectionID, GitRepoID: r.GitRepoID, BaseBranch: r.BaseBranch, Position: i}
 	}
 	return s.g(ctx).Create(&rows).Error
+}
+
+// SetProjectRepoBase records a repository's base branch when it has none yet (the control plane
+// filling in repositories bound before base branches were stored); it reports whether it wrote.
+func SetProjectRepoBase(ctx context.Context, db *gorm.DB, projectID, repo, base string) (bool, error) {
+	res := db.WithContext(ctx).Table("at_project_repos").
+		Where("project_id = ? AND repo = ? AND base_branch = ''", projectID, repo).Update("base_branch", base)
+	return res.RowsAffected > 0, res.Error
 }
 
 // UpdateProject applies changes and bumps updated_at.

@@ -526,15 +526,43 @@ func FireDueReminders(ctx context.Context, tx *Tx, now time.Time) ([]string, err
 // themselves (schedule_create) when the thread finishes or is archived; schedules the user or the
 // coordinator aimed at the thread stay (they reopen a finished thread when they fire).
 func EndLeadSchedules(ctx context.Context, tx *Tx, threadID string) error {
-	return endSchedules(tx.Gorm(ctx).Table("at_schedules").Where("thread_id = ? AND created_by IN ('lead', 'member') AND status = 'active'", threadID))
+	return endSchedules(ctx, tx, `thread_id = ? AND created_by IN ('lead', 'member')`, threadID)
 }
 
 // EndTaskSchedules cancels a member's wake-ups bound to a task when the task ends or goes back to
 // the queue.
 func EndTaskSchedules(ctx context.Context, tx *Tx, t Task) error {
-	return endSchedules(tx.Gorm(ctx).Table("at_schedules").Where("thread_id = ? AND task_id = ? AND status = 'active'", t.ConversationID, t.ID))
+	return endSchedules(ctx, tx, `thread_id = ? AND task_id = ?`, t.ConversationID, t.ID)
 }
 
-func endSchedules(g *gorm.DB) error {
-	return g.Updates(map[string]any{"status": "cancelled", "next_run_at": nil, "ended_at": gorm.Expr("now()"), "updated_at": gorm.Expr("now()")}).Error
+// endSchedules cancels the active schedules matching where and tells the pages about each.
+func endSchedules(ctx context.Context, tx *Tx, where string, args ...any) error {
+	rows, err := tx.Gorm(ctx).Raw(`UPDATE at_schedules SET status = 'cancelled', next_run_at = NULL, ended_at = now(), updated_at = now()
+		WHERE status = 'active' AND `+where+` RETURNING id, project_id, thread_id`, args...).Rows()
+	if err != nil {
+		return err
+	}
+	type ended struct {
+		id, project string
+		thread      *string
+	}
+	var list []ended
+	for rows.Next() {
+		var e ended
+		if err := rows.Scan(&e.id, &e.project, &e.thread); err != nil {
+			rows.Close()
+			return err
+		}
+		list = append(list, e)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, e := range list {
+		if err := EmitSchedule(ctx, tx, e.project, e.thread, e.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }

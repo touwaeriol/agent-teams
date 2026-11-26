@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RoleView } from "@/api/views";
 import { pickedSkillFiles, toBase64 } from "@/components/app/library/upload";
-import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions, reposPayload, sortRepos, sourceLabel, standaloneOptions } from "@/components/app/repo/repo";
+import { addRepo, matchesRepo, moveRepo, normalizeRepo, removeRepo, repoOptions, reposPayload, setBase, sortRepos, sourceLabel, standaloneOptions } from "@/components/app/repo/repo";
 import { draftValid, emptyDraft, scheduleBody } from "@/components/app/schedules/schedule";
 import { parseSetting } from "@/pages/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
@@ -27,6 +27,17 @@ describe("repositories", () => {
     expect(moveRepo(two, 1, -1).map((r) => r.repo)).toEqual(["o/web", "o/api"]);
     expect(moveRepo(two, 1, 1)).toBe(two);
     expect(removeRepo(two, 0).map((r) => r.repo)).toEqual(["o/web"]);
+  });
+
+  it("sets a repository's start branch and sends it only when chosen", () => {
+    const two = [{ repo: "o/api", git_connection_id: "g", base_branch: "main" }, { repo: "o/web", git_connection_id: "g" }];
+    const next = setBase(two, 0, "develop");
+    expect(next[0].base_branch).toBe("develop");
+    expect(two[0].base_branch).toBe("main");
+    expect(reposPayload(next)).toEqual([
+      { repo: "o/api", git_connection_id: "g", base_branch: "develop" },
+      { repo: "o/web", git_connection_id: "g" },
+    ]);
   });
 
   it("mixes standalone Git repositories into a project's list", () => {
