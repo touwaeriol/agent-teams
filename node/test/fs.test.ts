@@ -33,11 +33,12 @@ function spec(sha: string, generation = 1): FsMount {
   };
 }
 
-interface Rig { fs: SharedFs; sent: FsStatus[]; calls: { cmd: string; args: string[]; env?: NodeJS.ProcessEnv }[]; data: string; fetches: number }
+interface Rig { fs: SharedFs; sent: FsStatus[]; calls: { cmd: string; args: string[]; env?: NodeJS.ProcessEnv }[]; data: string; fetches: number; sha: string }
 
 function rig(over: Partial<SharedFsOptions> = {}): Rig {
-  const { data: tgz } = tarball();
-  const r: Rig = { sent: [], calls: [], data: tmp(), fetches: 0 } as unknown as Rig;
+  // One tarball per rig: two builds can differ (gzip stores a timestamp), so its own sha is used.
+  const { data: tgz, sha } = tarball();
+  const r: Rig = { sent: [], calls: [], data: tmp(), fetches: 0, sha } as unknown as Rig;
   r.fs = new SharedFs({
     dataDir: r.data, log: silentLogger, send: (_t, b) => r.sent.push(b), fuse: () => true, platform: "linux-amd64", mountWaitMs: 1000,
     fetchFn: (async () => (r.fetches++, new Response(tgz))) as unknown as typeof fetch,
@@ -58,8 +59,8 @@ afterEach(() => {
 
 describe("SharedFs", () => {
   it("downloads the pinned client, mounts with the password in the env only, and keeps a healthy mount", async () => {
-    const { sha } = tarball();
     const r = rig();
+    const sha = r.sha;
     await r.fs.mount(spec(sha));
     expect(r.sent.map((s) => s.state)).toEqual(["mounting", "mounted"]);
     const mount = r.calls.find((c) => c.args[0] === "mount")!;
@@ -94,8 +95,8 @@ describe("SharedFs", () => {
   });
 
   it("unmounts and forgets on fs.unmount", async () => {
-    const { sha } = tarball();
     const r = rig();
+    const sha = r.sha;
     await r.fs.mount(spec(sha));
     await r.fs.unmount({ volume: "at-0123456789abcdef" });
     expect(r.sent.at(-1)).toEqual({ state: "unmounted", mode: "daemon" });
@@ -103,8 +104,8 @@ describe("SharedFs", () => {
   });
 
   it("creates the session directories and refuses paths outside the volume", async () => {
-    const { sha } = tarball();
     const r = rig();
+    const sha = r.sha;
     expect(r.fs.sessionDirs({ project: "projects/p1", shared: "shared" })).toBeNull();
     await r.fs.mount(spec(sha));
     const d = r.fs.sessionDirs({ project: "projects/p1", shared: "shared" })!;
