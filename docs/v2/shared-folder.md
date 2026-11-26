@@ -20,7 +20,10 @@ separate S3 user).
 
 - **Metadata:** PostgreSQL. Each volume has a role and schema `jfs_<id>` (search_path, no access to
   console tables, CONNECTION LIMIT 30). The console creates them through `AGENT_TEAMS_FS_META_ADMIN_URL`
-  (default `DATABASE_URL`). Nodes reach PostgreSQL at `AGENT_TEAMS_FS_META_HOST` over TLS.
+  (default `DATABASE_URL`). Nodes reach PostgreSQL at `AGENT_TEAMS_FS_META_HOST` over TLS. In
+  production this is a dedicated PostgreSQL (not the console's database), so the port opened to
+  nodes leads only to volume metadata; it needs its own daily backup, since a volume cannot be read
+  without its metadata.
 - **Data:** one S3 bucket (`AGENT_TEAMS_FS_BUCKET`, RustFS in production). Volume data lives under
   `<bucket>/at-<id>/`, and an S3 user `jfs<id>` with policy `jfs-<id>` may touch only that prefix.
   `juicefs format` stores those keys in the volume's metadata, so mounting needs only the metadata
