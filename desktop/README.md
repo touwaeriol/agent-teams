@@ -148,7 +148,7 @@ git commit -am "desktop: 0.2.0"
 git tag desktop-v0.2.0 && git push && git push origin desktop-v0.2.0
 ```
 
-tag 必须和 package.json 的版本号一致（workflow 会检查）。签名用的 secrets 列在 workflow 文件头部的注释里，都是可选的。
+tag 必须和 package.json 的版本号一致（workflow 会检查）。产物文件名不带空格（`agent-teams-<版本>-mac-<arch>.dmg/zip`、`agent-teams-setup-<版本>-x64.exe`）：GitHub 上传时会把空格换成点，`latest*.yml` 里的文件名就对不上了，electron-updater 会下载到 404，所以不要改回 `${productName}`。签名用的 secrets 列在 workflow 文件头部的注释里，都是可选的。
 
 ## 自动更新
 

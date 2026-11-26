@@ -24,7 +24,9 @@ module.exports = {
   // workflow builds with --publish never and uploads the files itself (ci/desktop-release.yml);
   // this entry still goes into app-update.yml, which electron-updater reads.
   publish: [{ provider: "github", owner: "touwaeriol", repo: "agent-teams", releaseType: "release", tagNamePrefix: "desktop-v" }],
-  artifactName: "${productName}-${version}-${os}-${arch}.${ext}",
+  // No spaces in file names: GitHub turns them into dots on upload, and then the URLs in
+  // latest*.yml (written with the local names) would 404 for electron-updater.
+  artifactName: "agent-teams-${version}-${os}-${arch}.${ext}",
 
   // Flipped in the Electron binary at package time: the shipped app cannot be turned into a
   // plain Node runtime (ELECTRON_RUN_AS_NODE, NODE_OPTIONS, --inspect) or load code outside app.asar.
@@ -54,7 +56,7 @@ module.exports = {
       NSMicrophoneUsageDescription: "Agent Teams 需要使用麦克风来进行语音输入。",
     },
   },
-  dmg: { artifactName: "${productName}-${version}-mac-${arch}.${ext}" },
+  dmg: { artifactName: "agent-teams-${version}-mac-${arch}.${ext}" },
 
   win: {
     // x64 only; add "arm64" for Windows on ARM (one installer then carries both and is twice the size).
@@ -74,7 +76,7 @@ module.exports = {
     perMachine: false,
     allowToChangeInstallationDirectory: true,
     createDesktopShortcut: true,
-    artifactName: "${productName}-Setup-${version}-${arch}.${ext}",
+    artifactName: "agent-teams-setup-${version}-${arch}.${ext}",
   },
 
   // Not shipped; lets the packaging config be checked on a Linux machine (`--linux dir`).

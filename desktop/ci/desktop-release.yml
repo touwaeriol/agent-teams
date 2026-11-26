@@ -28,7 +28,8 @@ name: Desktop
 
 on:
   push:
-    paths: ['desktop/**', '.github/workflows/desktop-release.yml']
+    branches: ['**']   # without it, a trigger that lists tags ignores branch pushes
+    paths: ['desktop/**', '.github/workflows/desktop-release.yml']   # not applied to tag pushes
     tags: ['desktop-v*']
   workflow_dispatch:
 
