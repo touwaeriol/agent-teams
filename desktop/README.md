@@ -55,11 +55,12 @@ AGENT_TEAMS_URL=http://127.0.0.1:5173 npm start
 | 窗口 | 记住大小、位置和是否最大化（保存在 userData/window-state.json；显示器拔掉后位置作废，只保留大小）。只允许一个实例，再次启动会聚焦已有窗口。Mac 关窗口不退出，点 Dock 图标重新打开；Windows 关掉所有窗口就退出。 |
 | 安全 | contextIsolation、sandbox 打开，nodeIntegration 关闭，禁用 `<webview>`。网页拿不到任何 Node 能力，只能读 `window.agentTeamsDesktop.version` / `.platform`。 |
 | 链接 | 同源（与加载的站点同协议、同域名、同端口）的跳转留在 App 里；`window.open` 打开同源地址（比如讨论串菜单里的“在新窗口中打开”）会在 App 里开新窗口。其他 http/https 链接一律交给系统浏览器打开；其他协议（file:、javascript:、mailto: 等）直接拒绝。 |
+| 跳到其他网站的操作 | 比如设置里的“连接 GitHub”、安装 GitHub App、批准仓库：都在系统浏览器里打开（不在 App 里开例外）。在浏览器里完成后，回到 App 刷新页面（Cmd+R / Ctrl+R）就能看到结果。 |
 | 权限 | 只对加载的站点放行：麦克风（只要音频，摄像头拒绝）、通知、剪贴板写入。其他权限（定位、摄像头、剪贴板读取、MIDI、USB 等）和其他来源（比如交付物 iframe）一律拒绝。 |
 | 深链接 | 注册 `agentteams://` 协议。`agentteams://projects/<pid>/threads/12` 打开站点上的 `/projects/<pid>/threads/12`，其他路径同理（`/sessions/new`、`/projects/<pid>/deliverables` 等，见 web/src/router.ts）。只接受站点上的路径：带协议的（`agentteams://https://…`）、带反斜杠或控制字符的、超过 2048 字符的都会被忽略。Mac 走 open-url 事件，Windows 走第二个实例的命令行参数。 |
 | 菜单 | Mac：应用菜单、文件、编辑（没有它 Cmd+C/V 不能用）、显示（重新加载、缩放、全屏）、窗口、帮助。Windows：同样的菜单，菜单栏默认隐藏，按 Alt 显示。 |
 | 离线 | 主页面加载失败（断网、DNS、证书……）时显示本地中文提示页，带“重试”按钮；网络恢复（online 事件）时自动重新加载原来的地址。 |
-| 下载 | 用 Electron 默认行为：附件、共享文件的下载会弹出系统保存对话框。 |
+| 下载 | 用 Electron 默认行为：附件、共享文件的下载会弹出系统保存对话框。附件的下载按钮是普通链接，会被 302 重定向到对象存储（rustfs.prophey.ai）的预签名地址，所以壳**不拦截跨域重定向**（will-redirect），否则下载会被打断。 |
 | User-Agent | 原来的 UA 后面追加 `AgentTeamsDesktop/<版本号>`，网页以后可以据此识别桌面端。 |
 | 通知 | Windows 上设了 AppUserModelId（`ai.prophey.agentteams`），否则系统通知弹不出来。 |
 
