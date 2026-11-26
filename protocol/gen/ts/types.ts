@@ -786,12 +786,25 @@ export interface FsMount {
   access_key: string;
   secret_key: string;
   /**
-   * The juicefs client to run: downloaded from url and checked against sha256 unless that exact version is already present.
+   * The juicefs client to run: the daemon picks the asset of its platform (linux-amd64, linux-arm64, darwin-arm64…), downloads it and checks sha256, unless that exact version is already present. A tar.gz holding the juicefs binary.
    */
   client: {
     version: string;
-    url: string;
-    sha256: string;
+    /**
+     * @minItems 1
+     */
+    assets: [
+      {
+        platform: string;
+        url: string;
+        sha256: string;
+      },
+      ...{
+        platform: string;
+        url: string;
+        sha256: string;
+      }[]
+    ];
   };
   /**
    * Local cache size; default 10240.

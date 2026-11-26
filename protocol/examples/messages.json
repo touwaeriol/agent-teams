@@ -1888,8 +1888,13 @@
       "secret_key": "secret",
       "client": {
         "version": "1.4.2",
-        "url": "https://agent.example.net/node-dist/juicefs-1.4.2-linux-amd64.tar.gz",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        "assets": [
+          {
+            "platform": "linux-amd64",
+            "url": "https://github.com/juicedata/juicefs/releases/download/v1.4.2/juicefs-1.4.2-linux-amd64.tar.gz",
+            "sha256": "79648a0a67145bf42ca4e8336578c13a5bbc9a0bd34df340b3b93dac1e975247"
+          }
+        ]
       },
       "cache_size_mb": 10240
     }

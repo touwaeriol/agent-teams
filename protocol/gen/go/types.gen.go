@@ -3339,8 +3339,10 @@ type FsMount struct {
 	// Local cache size; default 10240.
 	CacheSizeMB *int `json:"cache_size_mb,omitempty,omitzero"`
 
-	// The juicefs client to run: downloaded from url and checked against sha256
-	// unless that exact version is already present.
+	// The juicefs client to run: the daemon picks the asset of its platform
+	// (linux-amd64, linux-arm64, darwin-arm64…), downloads it and checks sha256,
+	// unless that exact version is already present. A tar.gz holding the juicefs
+	// binary.
 	Client FsMountClient `json:"client"`
 
 	// Grows when the volume's credentials change; a remount is due when it differs
@@ -3362,17 +3364,60 @@ type FsMount struct {
 	Volume string `json:"volume"`
 }
 
-// The juicefs client to run: downloaded from url and checked against sha256 unless
-// that exact version is already present.
+// The juicefs client to run: the daemon picks the asset of its platform
+// (linux-amd64, linux-arm64, darwin-arm64…), downloads it and checks sha256,
+// unless that exact version is already present. A tar.gz holding the juicefs
+// binary.
 type FsMountClient struct {
+	// Assets corresponds to the JSON schema field "assets".
+	Assets []FsMountClientAssetsElem `json:"assets"`
+
+	// Version corresponds to the JSON schema field "version".
+	Version string `json:"version"`
+}
+
+type FsMountClientAssetsElem struct {
+	// Platform corresponds to the JSON schema field "platform".
+	Platform string `json:"platform"`
+
 	// SHA256 corresponds to the JSON schema field "sha256".
 	SHA256 string `json:"sha256"`
 
 	// URL corresponds to the JSON schema field "url".
 	URL string `json:"url"`
+}
 
-	// Version corresponds to the JSON schema field "version".
-	Version string `json:"version"`
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *FsMountClientAssetsElem) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["platform"]; raw != nil && !ok {
+		return fmt.Errorf("field platform in FsMountClientAssetsElem: required")
+	}
+	if _, ok := raw["sha256"]; raw != nil && !ok {
+		return fmt.Errorf("field sha256 in FsMountClientAssetsElem: required")
+	}
+	if _, ok := raw["url"]; raw != nil && !ok {
+		return fmt.Errorf("field url in FsMountClientAssetsElem: required")
+	}
+	type Plain FsMountClientAssetsElem
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if matched, _ := regexp.MatchString(`^[a-z0-9]+-[a-z0-9]+$`, string(plain.Platform)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Platform", `^[a-z0-9]+-[a-z0-9]+$`)
+	}
+	if matched, _ := regexp.MatchString(`^[0-9a-f]{64}$`, string(plain.SHA256)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "SHA256", `^[0-9a-f]{64}$`)
+	}
+	if utf8.RuneCountInString(string(plain.URL)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "url", 1)
+	}
+	*j = FsMountClientAssetsElem(plain)
+	return nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -3381,11 +3426,8 @@ func (j *FsMountClient) UnmarshalJSON(value []byte) error {
 	if err := json.Unmarshal(value, &raw); err != nil {
 		return err
 	}
-	if _, ok := raw["sha256"]; raw != nil && !ok {
-		return fmt.Errorf("field sha256 in FsMountClient: required")
-	}
-	if _, ok := raw["url"]; raw != nil && !ok {
-		return fmt.Errorf("field url in FsMountClient: required")
+	if _, ok := raw["assets"]; raw != nil && !ok {
+		return fmt.Errorf("field assets in FsMountClient: required")
 	}
 	if _, ok := raw["version"]; raw != nil && !ok {
 		return fmt.Errorf("field version in FsMountClient: required")
@@ -3395,11 +3437,8 @@ func (j *FsMountClient) UnmarshalJSON(value []byte) error {
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
 	}
-	if matched, _ := regexp.MatchString(`^[0-9a-f]{64}$`, string(plain.SHA256)); !matched {
-		return fmt.Errorf("field %s pattern match: must match %s", "SHA256", `^[0-9a-f]{64}$`)
-	}
-	if utf8.RuneCountInString(string(plain.URL)) < 1 {
-		return fmt.Errorf("field %s length: must be >= %d", "url", 1)
+	if plain.Assets != nil && len(plain.Assets) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "assets", 1)
 	}
 	if utf8.RuneCountInString(string(plain.Version)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "version", 1)
