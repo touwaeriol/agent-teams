@@ -93,14 +93,21 @@ func (s *Server) userMemory(ctx context.Context) (store.MemoryScope, error) {
 // memoryList reads the folder first (an edit on a node shows at once); a folder out of reach
 // leaves the cached rows.
 func (s *Server) memoryList(ctx context.Context, sc store.MemoryScope) (*memoryListOutput, error) {
-	if err := s.memory.Sync(ctx, sc); err != nil {
-		s.log.Warn("memory folder not read", "scope", sc.Kind, "id", sc.ID, "err", err)
-	}
+	s.syncMemory(ctx, sc)
 	files, err := store.ListMemoryFiles(ctx, s.store.Pool, sc)
 	return &memoryListOutput{Body: files}, err
 }
 
+// syncMemory reads the folder into the rows before they are shown or changed, so a write here is
+// made on the file as it is now, not on an older copy.
+func (s *Server) syncMemory(ctx context.Context, sc store.MemoryScope) {
+	if err := s.memory.Sync(ctx, sc); err != nil {
+		s.log.Warn("memory folder not read", "scope", sc.Kind, "id", sc.ID, "err", err)
+	}
+}
+
 func (s *Server) memoryGet(ctx context.Context, sc store.MemoryScope, name string) (*memoryFileOutput, error) {
+	s.syncMemory(ctx, sc)
 	f, err := store.GetMemoryFile(ctx, s.store.Pool, sc, name)
 	if err != nil {
 		return nil, memoryErr(err)
@@ -109,6 +116,7 @@ func (s *Server) memoryGet(ctx context.Context, sc store.MemoryScope, name strin
 }
 
 func (s *Server) memoryPut(ctx context.Context, sc store.MemoryScope, name string, b memoryBody) (*memoryFileOutput, error) {
+	s.syncMemory(ctx, sc)
 	f, _, err := store.WriteMemoryFile(ctx, s.store.Pool, sc, store.MemoryWrite{Name: name,
 		Description: b.Description, Type: b.Type, Content: b.Content, By: "user"})
 	if err != nil {
@@ -120,7 +128,8 @@ func (s *Server) memoryPut(ctx context.Context, sc store.MemoryScope, name strin
 }
 
 func (s *Server) memoryDelete(ctx context.Context, sc store.MemoryScope, name string) error {
-	if err := s.memory.Delete(ctx, s.store.Pool, sc, name, "user"); err != nil {
+	s.syncMemory(ctx, sc)
+	if err := s.memory.Delete(ctx, sc, name, "user"); err != nil {
 		return memoryErr(err)
 	}
 	s.memory.Changed(sc) // MEMORY.md lost the file's line

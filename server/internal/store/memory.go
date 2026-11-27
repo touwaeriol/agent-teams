@@ -157,13 +157,22 @@ func ListMemoryFiles(ctx context.Context, q DB, s MemoryScope) ([]MemoryBrief, e
 
 // GetMemoryFile loads one file (ErrNotFound when missing).
 func GetMemoryFile(ctx context.Context, q DB, s MemoryScope, name string) (MemoryFile, error) {
+	return getMemoryFile(memoryRows(ctx, q, s), name)
+}
+
+// GetMemoryFileForUpdate loads one file and locks its row until the transaction ends (an edit
+// made from its content).
+func GetMemoryFileForUpdate(ctx context.Context, tx DB, s MemoryScope, name string) (MemoryFile, error) {
+	return getMemoryFile(memoryRows(ctx, tx, s).Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate}), name)
+}
+
+func getMemoryFile(rows *gorm.DB, name string) (MemoryFile, error) {
 	var f MemoryFile
 	name, err := MemoryName(name)
 	if err != nil {
 		return f, err
 	}
-	err = memoryRows(ctx, q, s).Where("name = ?", name).Take(&f).Error
-	return f, MapErr(err)
+	return f, MapErr(rows.Where("name = ?", name).Take(&f).Error)
 }
 
 // MemoryWrite is one create-or-replace.

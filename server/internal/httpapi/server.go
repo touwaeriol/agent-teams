@@ -144,6 +144,9 @@ func withDefaults(d Deps) Deps {
 	}
 	if d.Memory == nil {
 		d.Memory = core.NoMemoryFiles{}
+		if d.Store != nil {
+			d.Memory = core.NoMemoryFiles{DB: d.Store.Pool}
+		}
 	}
 	if d.Hooks == nil {
 		d.Hooks = platform.NoHooks{}

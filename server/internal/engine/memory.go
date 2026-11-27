@@ -26,18 +26,30 @@ const touchKick = 5 * time.Second
 // useMemoryFiles wires memory to the shared folders (s enabled) or to the rows alone.
 func (e *Engine) useMemoryFiles(s *userfs.Service) {
 	if s == nil || !s.Enabled() {
-		e.memory, e.Core.Memory = nil, core.NoMemoryFiles{}
+		e.memory, e.Core.Memory = nil, core.NoMemoryFiles{DB: e.Core.Pool}
 		return
 	}
 	e.memory = &memfiles.Syncer{DB: e.Core.Pool, Folders: s, Log: e.log, OnChange: e.memoryChanged}
 	e.Core.Memory = e.memory
 }
 
-// sweepMemory syncs the scopes with something to do (all: every ready folder).
-func (e *Engine) sweepMemory(ctx context.Context, all bool) {
-	if e.memory != nil {
-		e.memory.Sweep(ctx, all)
+// memorySweepEvery is how often the scopes with pending rows or fresh touches are synced.
+const memorySweepEvery = time.Minute
+
+// runMemorySweep syncs the scopes with something to do every memorySweepEvery, and every ready
+// folder once every memoryFullEvery (the leader's loop).
+func (e *Engine) runMemorySweep(ctx context.Context) {
+	if e.memory == nil {
+		return
 	}
+	var fullAt time.Time
+	every(ctx, memorySweepEvery, func() {
+		full := time.Since(fullAt) >= memoryFullEvery
+		if full {
+			fullAt = time.Now()
+		}
+		e.memory.Sweep(ctx, full)
+	})
 }
 
 // memoryChanged refreshes the pages showing a memory file changed in the folder.
@@ -50,7 +62,7 @@ func (e *Engine) memoryChanged(ctx context.Context, s store.MemoryScope, name, o
 
 // memoryPath finds memory files in a tool call's summary: the links in the working directory
 // (.project-files / .user-files) or the volume's own folders (projects/<pid>, shared).
-var memoryPath = regexp.MustCompile(`(\.project-files|\.user-files|projects/[A-Za-z0-9_-]+|shared)/\.memory/([^/\s,'"` + "`" + `]+\.md)`)
+var memoryPath = regexp.MustCompile(`(?:^|[\s'"` + "`" + `=(:])(?:/\S*/)?(\.project-files|\.user-files|projects/[A-Za-z0-9_-]+|shared)/\.memory/([^/\s,'"` + "`" + `]+\.md)`)
 
 // touchMemory records who is about to change memory files named in a tool call and has their
 // folder read soon after; paths into another project's folder are skipped.

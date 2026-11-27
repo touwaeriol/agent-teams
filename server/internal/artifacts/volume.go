@@ -148,8 +148,9 @@ func (s Store) Load(ctx context.Context, q store.DB, deliverableID string, versi
 	return f.fill(ctx, version, a)
 }
 
-// fill reads the data of a file kept in the owner's shared folder. A file removed from it or
-// changed there (size or SHA-256) is ErrNotFound: the version can no longer be served.
+// fill reads the data of a file kept in the owner's shared folder as it is there now: a file
+// edited in the folder is served edited (size and SHA-256 follow it). A file removed from it, or
+// grown past MaxBytes, is ErrNotFound.
 func (f folder) fill(ctx context.Context, version int, a ArtifactFile) (ArtifactFile, error) {
 	if !a.InVolume {
 		return a, nil
@@ -162,13 +163,14 @@ func (f folder) fill(ctx context.Context, version int, a ArtifactFile) (Artifact
 		return a, err
 	}
 	defer r.Close()
-	if a.Data, err = io.ReadAll(io.LimitReader(r, int64(a.Size)+1)); err != nil {
+	if a.Data, err = io.ReadAll(io.LimitReader(r, MaxBytes+1)); err != nil {
 		return a, err
 	}
-	sum := sha256.Sum256(a.Data)
-	if len(a.Data) != a.Size || hex.EncodeToString(sum[:]) != a.SHA256 {
-		return a, fmt.Errorf("%w: %s changed in the shared folder", ErrNotFound, a.Path)
+	if len(a.Data) > MaxBytes {
+		return a, fmt.Errorf("%w: %s is over %d MB in the shared folder", ErrNotFound, a.Path, MaxBytes>>20)
 	}
+	sum := sha256.Sum256(a.Data)
+	a.Size, a.SHA256 = len(a.Data), hex.EncodeToString(sum[:])
 	return a, nil
 }
 
@@ -177,17 +179,22 @@ type MoveReport struct {
 	Moved, Skipped, Failed int
 }
 
+// moveBatch is the most versions one MoveToVolumes run moves.
+const moveBatch = 200
+
 // MoveToVolumes copies the versions kept in the database into their owners' shared folders (those
-// that are on) and drops the copies from the database; a deliverable whose owner has no folder is
-// skipped. Run again it continues where it stopped.
+// that are on) and drops the copies from the database, moveBatch versions a run; a deliverable
+// whose owner has no ready folder is left for later. Run again it continues where it stopped.
 func (s Store) MoveToVolumes(ctx context.Context, log *slog.Logger) (MoveReport, error) {
 	var rep MoveReport
 	var versions []struct {
 		DeliverableID string
 		Version       int
 	}
-	if err := s.DB.Gorm(ctx).Raw(`SELECT DISTINCT deliverable_id, version FROM at_deliverable_files WHERE NOT in_volume
-		ORDER BY deliverable_id, version`).Scan(&versions).Error; err != nil {
+	if err := s.DB.Gorm(ctx).Raw(`SELECT DISTINCT f.deliverable_id, f.version FROM at_deliverable_files f
+		JOIN at_deliverables d ON d.id = f.deliverable_id JOIN at_projects p ON p.id = d.project_id
+		JOIN at_user_fs u ON u.user_id = p.user_id AND u.state = 'ready'
+		WHERE NOT f.in_volume ORDER BY f.deliverable_id, f.version LIMIT ?`, moveBatch).Scan(&versions).Error; err != nil {
 		return rep, err
 	}
 	for _, v := range versions {

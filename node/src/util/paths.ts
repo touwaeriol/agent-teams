@@ -35,7 +35,7 @@ export function isInside(parent: string, child: string): boolean {
  * realpath of p when it exists; otherwise realpath of its deepest existing ancestor joined with the
  * rest. null when that ancestor is a dangling symlink (its target cannot be checked).
  */
-function realpathLoose(p: string): string | null {
+export function realpathLoose(p: string): string | null {
   const rest: string[] = [];
   let cur = p;
   for (;;) {

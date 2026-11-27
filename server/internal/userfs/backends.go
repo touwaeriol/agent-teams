@@ -112,6 +112,27 @@ func (m *PGMeta) Exists(ctx context.Context, role string) (bool, error) {
 	return ok, err
 }
 
+// Usage implements Meta: JuiceFS keeps the totals in <schema>.jfs_counter.
+func (m *PGMeta) Usage(ctx context.Context, role string) (Usage, error) {
+	var u Usage
+	if !roleRE.MatchString(role) {
+		return u, fmt.Errorf("bad role %q", role)
+	}
+	pool, err := m.open(ctx)
+	if err != nil {
+		return u, err
+	}
+	var formatted bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, role+".jfs_counter").Scan(&formatted); err != nil || !formatted {
+		return u, err
+	}
+	err = pool.QueryRow(ctx, fmt.Sprintf(`SELECT
+	COALESCE(MAX(value) FILTER (WHERE name = 'usedSpace'), 0),
+	COALESCE(MAX(value) FILTER (WHERE name = 'totalInodes'), 0)
+FROM %s.jfs_counter`, role)).Scan(&u.UsedBytes, &u.Inodes)
+	return u, err
+}
+
 // Drop implements Meta.
 func (m *PGMeta) Drop(ctx context.Context, role string) error {
 	if !roleRE.MatchString(role) {

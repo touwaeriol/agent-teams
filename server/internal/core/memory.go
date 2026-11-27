@@ -9,21 +9,22 @@ import (
 // MemoryFiles keeps auto memory in the owners' shared folders (memfiles.Syncer); NoMemoryFiles
 // when the console has none (the rows are then all there is).
 type MemoryFiles interface {
-	// Delete removes a topic file: from the folder first, then its row and index line through q
-	// (the caller's transaction). A MemoryError when the folder is out of reach and the file is there.
-	Delete(ctx context.Context, q store.DB, s store.MemoryScope, name, by string) error
+	// Delete removes a topic file: from the folder first, then its row and index line (committed
+	// on its own, not in the caller's transaction: the file cannot be put back on a rollback). A
+	// MemoryError when the folder is out of reach and the file is there.
+	Delete(ctx context.Context, s store.MemoryScope, name, by string) error
 	// Changed has rows just written stored in the folder soon (call after the commit).
 	Changed(s store.MemoryScope)
 	// Sync reads the folder into the rows and writes pending rows out, now.
 	Sync(ctx context.Context, s store.MemoryScope) error
 }
 
-// NoMemoryFiles is MemoryFiles without shared folders.
-type NoMemoryFiles struct{}
+// NoMemoryFiles is MemoryFiles without shared folders: the rows in DB are all there is.
+type NoMemoryFiles struct{ DB store.DB }
 
 // Delete implements MemoryFiles.
-func (NoMemoryFiles) Delete(ctx context.Context, q store.DB, s store.MemoryScope, name, by string) error {
-	return store.DeleteMemoryFile(ctx, q, s, name, by)
+func (n NoMemoryFiles) Delete(ctx context.Context, s store.MemoryScope, name, by string) error {
+	return store.DeleteMemoryFile(ctx, n.DB, s, name, by)
 }
 
 // Changed implements MemoryFiles.

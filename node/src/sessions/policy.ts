@@ -1,7 +1,7 @@
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { BashPolicy } from "../protocol.js";
-import { isInside } from "../util/paths.js";
+import { isInside, realpathLoose } from "../util/paths.js";
 
 /** Claude's own tools that only talk to the user (shown in the chat); they touch no files. */
 export const CHAT_TOOLS = new Set(["TodoWrite", "AskUserQuestion"]);
@@ -18,8 +18,9 @@ export interface ToolPolicy {
   /** Absolute paths no tool may touch (daemon config, state, runtime logins). */
   secretPaths: string[];
   /**
-   * The shared folder's memory directories (claude.memory_files): the file tools work inside them
-   * even in a read-only or platform-only session. Compared by real path, so a link cannot lead out.
+   * The shared folder's memory directories as real paths (claude.memory_files): the file tools work
+   * inside them even in a read-only or platform-only session. Targets are compared by real path, so
+   * a link cannot lead out.
    */
   memoryDirs?: string[];
 }
@@ -87,20 +88,31 @@ export function decideTool(policy: ToolPolicy, tool: string, input: Record<strin
 }
 
 /**
- * A file tool whose target (real path) is inside one of the memory directories. Glob's pattern
- * must stay below its path too: absolute or with a ".." segment it could list anything.
+ * A file tool whose target is inside one of the memory directories by real path. A target that is
+ * or lies under a dangling link is refused (writing would create its target elsewhere), and so is
+ * a memory directory turned into a link since the session opened. Glob's pattern must stay below its path: absolute or with
+ * ".." anywhere (also inside braces) it could list anything.
  */
 export function inMemoryDirs(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): boolean {
   if (!policy.memoryDirs?.length || !MEMORY_TOOLS.has(tool)) return false;
   const path = filePathOf(tool, input, cwd);
   if (!path || (tool === "Glob" && !patternStaysBelow(input.pattern))) return false;
-  const real = realTarget(path);
-  return policy.memoryDirs.some((d) => isInside(realTarget(d), real));
+  const real = realpathLoose(path);
+  return real !== null && policy.memoryDirs.some((d) => isPlainDir(d) && isInside(d, real));
 }
 
 function patternStaysBelow(pattern: unknown): boolean {
-  return typeof pattern === "string" && !isAbsolute(pattern) && !pattern.split(/[\\/]/).includes("..");
+  return typeof pattern === "string" && !isAbsolute(pattern) && !pattern.startsWith("~") && !pattern.includes("..");
 }
+
+function isPlainDir(p: string): boolean {
+  try {
+    return lstatSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 
 function secretDecision(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): Decision {
   const path = filePathOf(tool, input, cwd);

@@ -132,7 +132,7 @@ func importShared(ctx context.Context, getenv config.Getenv, db *store.Store, bs
 	}
 	failed := rep.Failed
 	if !dryRun {
-		moved, err := (artifacts.Store{DB: db.Pool, Volume: svc}).MoveToVolumes(ctx, log)
+		moved, err := moveAll(ctx, artifacts.Store{DB: db.Pool, Volume: svc}, log)
 		fmt.Fprintf(out, "move-deliverables moved=%d skipped=%d (owner without a shared folder) failed=%d\n", moved.Moved, moved.Skipped, moved.Failed)
 		if err != nil {
 			return err
@@ -143,4 +143,16 @@ func importShared(ctx context.Context, getenv config.Getenv, db *store.Store, bs
 		return fmt.Errorf("%d items failed (listed above)", failed)
 	}
 	return nil
+}
+
+// moveAll runs MoveToVolumes batch after batch until one moves nothing.
+func moveAll(ctx context.Context, a artifacts.Store, log *slog.Logger) (artifacts.MoveReport, error) {
+	var all artifacts.MoveReport
+	for {
+		rep, err := a.MoveToVolumes(ctx, log)
+		all.Moved, all.Skipped, all.Failed = all.Moved+rep.Moved, all.Skipped+rep.Skipped, all.Failed+rep.Failed
+		if err != nil || rep.Moved == 0 {
+			return all, err
+		}
+	}
 }

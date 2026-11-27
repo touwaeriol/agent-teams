@@ -1,6 +1,8 @@
 package memfiles
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -28,7 +30,7 @@ func Render(f store.MemoryFile) []byte {
 	}
 	var b strings.Builder
 	b.WriteString("---\nname: " + strings.TrimSuffix(f.Name, ".md") + "\n")
-	b.WriteString("description: " + f.Description + "\n")
+	b.WriteString("description: " + quoteValue(f.Description) + "\n")
 	if f.Type != "" {
 		b.WriteString("type: " + f.Type + "\n")
 	}
@@ -36,26 +38,35 @@ func Render(f store.MemoryFile) []byte {
 	return []byte(b.String())
 }
 
-// Parsed is a file read back: its frontmatter fields and the content after it.
-type Parsed struct{ Description, Type, Content string }
+// quoteValue quotes a value that would not read back as it is (it starts with a quote).
+func quoteValue(v string) string {
+	if strings.HasPrefix(v, `"`) || strings.HasPrefix(v, "'") {
+		return strconv.Quote(v)
+	}
+	return v
+}
 
-// Parse reads a file: the frontmatter of a topic file (missing or broken frontmatter leaves the
-// whole text as content), MEMORY.md as it is.
+// Parsed is a file read back: its frontmatter fields and the content after it. Frontmatter is
+// false when the file has none (its description and type are then unknown, not empty).
+type Parsed struct {
+	Description, Type, Content string
+	Frontmatter                bool
+}
+
+// Parse reads a file: the frontmatter of a topic file (missing or broken frontmatter, or a
+// leading horizontal rule, leaves the whole text as content), MEMORY.md as it is.
 func Parse(name string, data []byte) Parsed {
 	text := strings.ReplaceAll(strings.TrimPrefix(string(data), "\ufeff"), "\r\n", "\n")
 	if name == store.MemoryIndex {
 		return Parsed{Content: strings.Trim(text, "\n")}
 	}
 	head, body, ok := splitFrontmatter(text)
-	if !ok {
+	if !ok || !isFrontmatter(head) {
 		return Parsed{Content: strings.Trim(text, "\n")}
 	}
-	p := Parsed{Content: strings.Trim(body, "\n")}
+	p := Parsed{Content: strings.Trim(body, "\n"), Frontmatter: true}
 	for _, line := range strings.Split(head, "\n") {
-		key, val, found := strings.Cut(line, ":")
-		if !found {
-			continue
-		}
+		key, val, _ := strings.Cut(line, ":")
 		switch strings.TrimSpace(strings.ToLower(key)) {
 		case "description":
 			p.Description = unquote(val)
@@ -84,9 +95,25 @@ func splitFrontmatter(text string) (head, body string, ok bool) {
 	return rest[:end], rest[end+len("\n---\n"):], true
 }
 
+// isFrontmatter: every line is "key: value" (or blank), so a leading "---" rule is not taken.
+func isFrontmatter(head string) bool {
+	for _, line := range strings.Split(head, "\n") {
+		key, _, found := strings.Cut(line, ":")
+		if strings.TrimSpace(line) != "" && (!found || !frontmatterKey.MatchString(strings.TrimSpace(key))) {
+			return false
+		}
+	}
+	return true
+}
+
+var frontmatterKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
+
 func unquote(v string) string {
 	v = strings.TrimSpace(v)
-	if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
+	if u, err := strconv.Unquote(v); err == nil && strings.HasPrefix(v, `"`) {
+		return u
+	}
+	if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
 		v = v[1 : len(v)-1]
 	}
 	return v

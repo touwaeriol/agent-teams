@@ -1,5 +1,5 @@
 import { lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { SessionOpen } from "../protocol.js";
 import { isInside } from "../util/paths.js";
 
@@ -111,11 +111,20 @@ export function memoryDirs(dirs: SharedDirs): [string, string] {
   return [join(dirs.project, MEMORY_DIR), join(dirs.shared, MEMORY_DIR)];
 }
 
-/** Creates the memory directories when missing; throws when they cannot be. */
+/**
+ * Creates the memory directories when missing and returns their real paths; throws when one cannot
+ * be made or is not a plain directory of its folder (anyone writing the folder could make .memory a
+ * link to elsewhere, which would open that place to the sessions allowed into the memory).
+ */
 export function ensureMemoryDirs(dirs: SharedDirs): string[] {
-  const out = memoryDirs(dirs);
-  for (const d of out) mkdirSync(d, { recursive: true });
-  return out;
+  return memoryDirs(dirs).map((d, i) => {
+    mkdirSync(d, { recursive: true });
+    const parent = realpathSync(i === 0 ? dirs.project : dirs.shared);
+    if (lstatSync(d).isSymbolicLink()) throw new Error(`${d} is a symbolic link`);
+    const real = realpathSync(d);
+    if (dirname(real) !== parent) throw new Error(`${d} is not a directory of its folder`);
+    return real;
+  });
 }
 
 /** What a session with only the memory directories (the coordinator) is told about them. */
@@ -124,8 +133,14 @@ export function memoryFolderPrompt(dirs: SharedDirs): string {
   const [pm, um] = memoryDirs(dirs);
   return [
     "## Memory files",
-    `The memory is files in the user's shared folder: the project's in ${project[0]}/${MEMORY_DIR}/ (${pm}), the user's own in ${user[0]}/${MEMORY_DIR}/ (${um}). Read, Glob, Grep, Edit and Write work there and nowhere else.`,
+    `The memory is files in the user's shared folder: the project's in ${project[0]}/${MEMORY_DIR}/ (${pm}), the user's own in ${user[0]}/${MEMORY_DIR}/ (${um}). Read, Glob, Grep, Edit and Write work there and nowhere else; give Glob and Grep the directory as path.`,
   ].join("\n");
+}
+
+/** What a read-only session with the whole folder is told about the one place it may write. */
+export function memoryWritePrompt(dirs: SharedDirs): string {
+  const [project, user] = sharedLinks(dirs);
+  return `The memory files are the one thing you may change: Edit and Write work in ${project[0]}/${MEMORY_DIR}/ and ${user[0]}/${MEMORY_DIR}/ and nowhere else.`;
 }
 
 /** What the employee is told about the folders (appended to the system prompt). */
@@ -136,7 +151,7 @@ export function sharedFolderPrompt(dirs: SharedDirs): string {
     `- .project-files/ → ${dirs.project} ($AGENT_TEAMS_PROJECT_DIR): this project's files. Put documents, data, reports, exports and anything other employees, threads or later sessions of the project need here, never in a repository unless it belongs to the code. The user sees these files on the project's 共享文件 page.`,
     `- .user-files/ → ${dirs.shared} ($AGENT_TEAMS_SHARED_DIR): files shared by all of the user's projects.`,
     `- .attachments/ → ${sharedAttachmentDir(dirs)}: files the user attached to messages (kept with the project).`,
-    "- .project-files/.deliverables/<id>/v<N>/ holds the published versions of the project's deliverables. The platform keeps it: read from it freely, but never write, move or delete there (a changed file is no longer served). Publish with publish_file and fetch with read_deliverable as usual.",
+    "- .project-files/.deliverables/<id>/v<N>/ holds the published versions of the project's deliverables. The platform keeps it: read from it freely, but do not write, move or delete there (whatever is there is what gets served). Publish with publish_file and fetch with read_deliverable as usual.",
     "Do not put secrets (keys, passwords, tokens) there. Several nodes may use the folder at once: a SQLite database there must be written from one session at a time (rollback journal, not WAL).",
   ].join("\n");
 }

@@ -22,6 +22,7 @@ describe("tool policy", () => {
       mkdirSync(join(root, "cwd"));
       symlinkSync(join(root, "vol/projects/p"), join(root, "cwd/.project-files"), "dir");
       symlinkSync(root, join(mem, "escape"), "dir");
+      symlinkSync(join(root, "nowhere/x.desktop"), join(mem, "dangling.md"));
       const cwd = join(root, "cwd");
       for (const p of [{ ...base, denyNonPlatform: true, memoryDirs: [mem] }, { ...base, readOnly: true, bash: BASH, memoryDirs: [mem] }]) {
         expect(decideTool(p, "Edit", { file_path: ".project-files/.memory/MEMORY.md" }, cwd)).toBeNull();
@@ -30,11 +31,18 @@ describe("tool policy", () => {
         expect(decideTool(p, "Glob", { pattern: "*.md", path: ".project-files/.memory" }, cwd)).toBeNull();
         expect(decideTool(p, "Glob", { pattern: "/home/u/**/*", path: ".project-files/.memory" }, cwd)).not.toBeNull();
         expect(decideTool(p, "Glob", { pattern: "../../**", path: ".project-files/.memory" }, cwd)).not.toBeNull();
+        expect(decideTool(p, "Glob", { pattern: "{..,x}/**", path: ".project-files/.memory" }, cwd)).not.toBeNull();
+        expect(decideTool(p, "Write", { file_path: ".project-files/.memory/dangling.md" }, cwd)).not.toBeNull();
         expect(decideTool(p, "Write", { file_path: ".project-files/notes.md" }, cwd)).not.toBeNull();
         expect(decideTool(p, "Write", { file_path: ".project-files/.memory/escape/x.md" }, cwd)).not.toBeNull();
         expect(decideTool(p, "Bash", { command: "rm -rf .project-files/.memory" }, cwd)).not.toBeNull();
       }
       expect(decideTool({ ...base, denyNonPlatform: true }, "Read", { file_path: join(mem, "MEMORY.md") }, cwd)).not.toBeNull();
+
+      // The memory directory replaced by a link after the session opened: nothing through it.
+      rmSync(mem, { recursive: true });
+      symlinkSync(root, mem, "dir");
+      expect(decideTool({ ...base, denyNonPlatform: true, memoryDirs: [mem] }, "Write", { file_path: join(mem, "cwd/x") }, cwd)).not.toBeNull();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

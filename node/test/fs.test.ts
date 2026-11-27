@@ -259,7 +259,7 @@ describe("safeAttachmentDir", () => {
 describe("sharedFolderPrompt", () => {
   it("names the three links and keeps employees out of the deliverables' folder", () => {
     const p = sharedFolderPrompt({ project: "/mnt/fs/projects/p1", shared: "/mnt/fs/shared" });
-    for (const s of [".project-files/ → /mnt/fs/projects/p1", ".user-files/ → /mnt/fs/shared", ".attachments/ → /mnt/fs/projects/p1/attachments", ".deliverables", "never write"]) expect(p).toContain(s);
+    for (const s of [".project-files/ → /mnt/fs/projects/p1", ".user-files/ → /mnt/fs/shared", ".attachments/ → /mnt/fs/projects/p1/attachments", ".deliverables", "do not write"]) expect(p).toContain(s);
   });
 });
 
@@ -270,7 +270,15 @@ describe("memory directories", () => {
     expect(ensureMemoryDirs(dirs)).toEqual([join(vol, "projects/p1/.memory"), join(vol, "shared/.memory")]);
     expect(existsSync(join(vol, "shared/.memory"))).toBe(true);
     const p = memoryFolderPrompt(dirs);
-    for (const s of [".project-files/.memory/", ".user-files/.memory/", join(vol, "shared/.memory"), "nowhere else"]) expect(p).toContain(s);
+    for (const s of [".project-files/.memory/", ".user-files/.memory/", join(vol, "shared/.memory"), "nowhere else", "as path"]) expect(p).toContain(s);
+  });
+
+  it("refuse a .memory that is a link to elsewhere", () => {
+    const vol = tmp();
+    mkdirSync(join(vol, "projects/p1"), { recursive: true });
+    mkdirSync(join(vol, "shared"));
+    symlinkSync("/", join(vol, "projects/p1/.memory"), "dir");
+    expect(() => ensureMemoryDirs({ project: join(vol, "projects/p1"), shared: join(vol, "shared") })).toThrow(/link/);
   });
 });
 

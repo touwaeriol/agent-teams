@@ -13,6 +13,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -147,22 +149,23 @@ func (m *Syncer) Sweep(ctx context.Context, all bool) {
 	}
 }
 
-// Delete removes a topic file from the folder, then its row and index line through q, under the
-// scope's lock so a sync cannot take the missing file for one deleted on a node. With the folder
-// out of reach a file already written there is refused (it would come back).
-func (m *Syncer) Delete(ctx context.Context, q store.DB, s store.MemoryScope, name, by string) error {
+// Delete removes a topic file from the folder, then commits the removal of its row and index line,
+// all under the scope's lock: a sync never sees the file gone with the row still there (it would
+// take that for a delete on a node, or write a pending row back). With the folder out of reach a
+// file already written there is refused (it would come back).
+func (m *Syncer) Delete(ctx context.Context, s store.MemoryScope, name, by string) error {
 	name, err := store.MemoryName(name)
 	if err != nil {
 		return err
 	}
 	if name == store.MemoryIndex {
-		return store.DeleteMemoryFile(ctx, q, s, name, by) // refused, nothing to remove
+		return store.DeleteMemoryFile(ctx, m.DB, s, name, by) // refused, nothing to remove
 	}
 	defer m.lock(s)()
 	if err := m.remove(ctx, s, name); err != nil {
 		return err
 	}
-	return store.DeleteMemoryFile(ctx, q, s, name, by)
+	return store.DeleteMemoryFile(ctx, m.DB, s, name, by)
 }
 
 func (m *Syncer) remove(ctx context.Context, s store.MemoryScope, name string) error {
@@ -204,8 +207,10 @@ func (m *Syncer) Sync(ctx context.Context, s store.MemoryScope) error {
 	if err != nil {
 		return err
 	}
-	for name, e := range disk {
-		m.skip(s, name, m.pull(ctx, s, files, name, e, rows, touches))
+	// MEMORY.md first: a topic file read back edits the index row, which must already hold the
+	// index as the folder has it.
+	for _, name := range indexFirst(disk) {
+		m.skip(s, name, m.pull(ctx, s, files, name, disk[name], rows, touches))
 	}
 	for name, r := range rows {
 		if _, on := disk[name]; !on {
@@ -213,6 +218,14 @@ func (m *Syncer) Sync(ctx context.Context, s store.MemoryScope) error {
 		}
 	}
 	return m.push(ctx, s, files)
+}
+
+func indexFirst(disk map[string]userfs.Entry) []string {
+	names := slices.Sorted(maps.Keys(disk))
+	if i := slices.Index(names, store.MemoryIndex); i > 0 {
+		names = append([]string{store.MemoryIndex}, slices.Delete(names, i, i+1)...)
+	}
+	return names
 }
 
 func (m *Syncer) skip(s store.MemoryScope, name string, err error) {
@@ -267,14 +280,22 @@ func (m *Syncer) pull(ctx context.Context, s store.MemoryScope, files userfs.Fil
 		return err
 	}
 	p := Parse(name, data)
+	if known && !p.Frontmatter { // rewritten as plain Markdown: keep what the row knows about it
+		f, err := store.GetMemoryFile(ctx, m.DB, s, name)
+		if err != nil {
+			return err
+		}
+		p.Description, p.Type = f.Description, f.Type
+	}
 	by := credit(touches, name)
 	ok, err := store.ImportMemoryFile(ctx, m.DB, s, store.MemoryImport{Name: name, Description: p.Description, Type: p.Type,
 		Content: p.Content, By: by, ModTime: e.ModTime, Size: e.Size})
 	if err != nil {
 		return err
 	}
-	if !ok && !known {
-		m.Log.Warn("memory file in the folder not taken (too many files, or MEMORY.md is full)", "scope", s.Kind, "id", s.ID, "name", name)
+	if !ok {
+		m.Log.Warn("memory file in the folder not taken (written here meanwhile, too long, too many files, or no room in MEMORY.md)",
+			"scope", s.Kind, "id", s.ID, "name", name)
 	}
 	if ok {
 		m.changed(ctx, s, name, "write", by)
@@ -328,6 +349,9 @@ func (m *Syncer) push(ctx context.Context, s store.MemoryScope, files userfs.Fil
 		e, ok := disk[f.Name]
 		if !ok {
 			continue
+		}
+		if e.Size != int64(len(Render(f))) {
+			e.ModTime = time.Time{} // changed on a node since the write: read it back next
 		}
 		if err := store.MarkMemoryFlushed(ctx, m.DB, s, f.Name, f.UpdatedAt, e.ModTime, e.Size); err != nil {
 			return err

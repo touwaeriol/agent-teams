@@ -50,6 +50,10 @@ func (f *fakeMeta) Exists(_ context.Context, role string) (bool, error) {
 	return ok, nil
 }
 
+func (f *fakeMeta) Usage(context.Context, string) (Usage, error) {
+	return Usage{UsedBytes: 4096, Inodes: 2}, nil
+}
+
 type fakeIAM struct {
 	mu    sync.Mutex
 	users map[string]string
@@ -81,12 +85,17 @@ type fakeVolumes struct {
 	closed    []string
 	opened    []string // metaURL of each Files
 	destroyAt []string // metaURL of each Destroy
+	filesErr  error    // Files fails with it (the volume cannot be reached)
 }
 
 func (f *fakeVolumes) Files(_ context.Context, volume, metaURL, _ string) (Files, error) {
 	f.mu.Lock()
 	f.opened = append(f.opened, metaURL)
+	ferr := f.filesErr
 	f.mu.Unlock()
+	if ferr != nil {
+		return nil, ferr
+	}
 	return DirFiles{Root: filepath.Join(f.root, volume)}, os.MkdirAll(filepath.Join(f.root, volume), 0o755)
 }
 func (f *fakeVolumes) Close(volume string) {
@@ -258,6 +267,16 @@ func TestPGMeta(t *testing.T) {
 	}
 	if _, err := conn.Exec(ctx, `CREATE TABLE jfs_probe (x int)`); err != nil {
 		t.Fatalf("create in own schema: %v", err)
+	}
+	if got, err := m.Usage(ctx, role); err != nil || got != (Usage{}) {
+		t.Fatalf("usage before format = %+v %v", got, err)
+	}
+	if _, err := conn.Exec(ctx, `CREATE TABLE jfs_counter (name varchar(255) PRIMARY KEY, value bigint NOT NULL);
+INSERT INTO jfs_counter VALUES ('usedSpace', 8192), ('totalInodes', 3), ('nextInode', 9)`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := m.Usage(ctx, role); err != nil || got != (Usage{UsedBytes: 8192, Inodes: 3}) {
+		t.Fatalf("usage = %+v %v", got, err)
 	}
 	var schema string
 	if err := conn.QueryRow(ctx, `SELECT table_schema FROM information_schema.tables WHERE table_name = 'jfs_probe'`).Scan(&schema); err != nil || schema != role {

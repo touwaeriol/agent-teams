@@ -47,7 +47,7 @@ func (o *Orchestrator) checkOpened(ctx context.Context, tx *core.Tx, e core.Empl
 	if m.Init != nil {
 		tools = m.Init.Tools
 	}
-	memoryFiles, err := MemoryFilesOn(ctx, tx, s)
+	memoryFiles, err := MemoryFilesOn(ctx, tx, e, s, tools)
 	if err != nil {
 		return err
 	}

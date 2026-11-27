@@ -41,10 +41,15 @@ func PendingMemory(ctx context.Context, q DB, s MemoryScope) ([]MemoryFile, erro
 }
 
 // MarkMemoryFlushed records that a pending file is in the folder as written (mtime, size as the
-// folder reports them). A row changed again since it was read (updated_at moved) stays pending.
+// folder reports them; a zero mtime: the file is not what was written, read it back). A row
+// changed again since it was read (updated_at moved) stays pending.
 func MarkMemoryFlushed(ctx context.Context, q DB, s MemoryScope, name string, updatedAt, mtime time.Time, size int64) error {
+	var at *time.Time
+	if !mtime.IsZero() {
+		at = &mtime
+	}
 	return memoryRows(ctx, q, s).Where("name = ? AND pending AND updated_at = ?", name, updatedAt).
-		Updates(map[string]any{"pending": false, "file_mtime": mtime, "file_size": size}).Error
+		Updates(map[string]any{"pending": false, "file_mtime": at, "file_size": size}).Error
 }
 
 // MarkMemoryPending has a file written out again (MEMORY.md removed from the folder).
@@ -61,12 +66,15 @@ type MemoryImport struct {
 
 // ImportMemoryFile stores a file read back (a topic file also gets its index line). It leaves a
 // row alone that was written here meanwhile (pending: that write is newer); ok is false when the
-// row does not hold the file: written here meanwhile, a new file past the limit, or no room for
-// its line in MEMORY.md.
+// row does not hold the file: written here meanwhile, content too long (never cut: a later write
+// here would put the cut text over the file), a new file past the limit, or no room for its line
+// in MEMORY.md.
 func ImportMemoryFile(ctx context.Context, q DB, s MemoryScope, in MemoryImport) (ok bool, err error) {
 	in.Description, in.Type = normalizeMemory(in.Name, in.Description, in.Type)
 	in.Description = clipRunes(in.Description, MemoryDescMax)
-	in.Content = clipRunes(in.Content, MemoryContentMax)
+	if utf8.RuneCountInString(in.Content) > MemoryContentMax {
+		return false, nil
+	}
 	err = InTx(ctx, q, func(tx DB) error {
 		var e error
 		if ok, e = importRow(ctx, tx, s, in); e != nil || !ok || in.Name == MemoryIndex {

@@ -2,7 +2,6 @@ package userfs
 
 import (
 	"context"
-	"errors"
 
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -30,21 +29,8 @@ func (s *Service) DeliverableFolder(ctx context.Context, q store.DB, deliverable
 	return f, ProjectDir(row.ProjectID) + "/" + DeliverablesDir + "/" + deliverableID, true, nil
 }
 
-// RemoveProject deletes a deleted project's folder (projects/<pid>) from its owner's volume;
-// nothing when the owner has no ready shared folder or the folder is not there.
+// RemoveProject deletes a deleted project's folder (projects/<pid>) from its owner's volume
+// (Remove: a failure is retried by the shared-folder sweep).
 func (s *Service) RemoveProject(ctx context.Context, userID, projectID string) error {
-	if s == nil {
-		return nil
-	}
-	f, err := s.Files(ctx, userID)
-	if Unavailable(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if err := f.Remove(ctx, ProjectDir(projectID)); err != nil && !errors.Is(err, ErrNoFile) {
-		return err
-	}
-	return nil
+	return s.Remove(ctx, userID, ProjectDir(projectID))
 }

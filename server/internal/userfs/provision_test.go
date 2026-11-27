@@ -174,12 +174,13 @@ func TestDisableWithoutMetadata(t *testing.T) {
 	}
 }
 
-// TestProvisionAll: the folder is on by default: every user without one gets it; a failed attempt
-// waits retryAfter before the next sweep tries again.
+// TestProvisionAll: the folder is on by default: every active user without one gets it; a failed
+// attempt waits retryAfter before the next sweep tries again; a deactivated account gets none.
 func TestProvisionAll(t *testing.T) {
 	s, m, _, _, st := newTest(t)
 	ctx := context.Background()
-	if _, err := store.Exec(ctx, st.Pool, `INSERT INTO at_users (id, email, password_hash) VALUES ('u2', 'b@example.com', 'x')`); err != nil {
+	if _, err := store.Exec(ctx, st.Pool, `INSERT INTO at_users (id, email, password_hash) VALUES ('u2', 'b@example.com', 'x');
+		INSERT INTO at_users (id, email, password_hash, active) VALUES ('u3', 'c@example.com', 'x', false)`); err != nil {
 		t.Fatal(err)
 	}
 	m.fail = errors.New("connection refused")
@@ -203,6 +204,9 @@ func TestProvisionAll(t *testing.T) {
 	}
 	if n, err := s.ProvisionAll(ctx); err != nil || n != 0 {
 		t.Fatalf("nothing left: %d %v", n, err)
+	}
+	if _, err := s.Get(ctx, "u3"); !IsNotFound(err) {
+		t.Fatalf("a deactivated account got a folder: %v", err)
 	}
 }
 

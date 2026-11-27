@@ -24,18 +24,18 @@ function reset() {
   const f = file.data.value;
   draft.value = { name: props.name, description: f?.description ?? "", content: f?.content ?? "" };
 }
-watch(() => file.data.value, reset, { immediate: true });
+// A change from elsewhere (an employee, the coordinator) shows when reading, never over an edit.
+watch(() => file.data.value, () => !editing.value && reset(), { immediate: true });
 
-const invalidate = src.invalidate;
 const target = computed(() => (isNew.value ? memoryFileName(draft.value.name) : props.name));
 // The type is kept as it is (the page does not edit it).
 const body = (): MemoryBody => ({ description: draft.value.description, content: draft.value.content, type: (file.data.value?.type ?? "") as MemoryBody["type"] });
 const save = useAction(() => src.put(target.value, body()), {
-  invalidate,
+  invalidate: src.invalidate,
   success: "已保存，新开的会话会读到",
   onSuccess: () => emit("close"),
 });
-const remove = useAction(() => src.remove(props.name), { invalidate, success: "已删除", onSuccess: () => emit("close") });
+const remove = useAction(() => src.remove(props.name), { invalidate: src.invalidate, success: "已删除", onSuccess: () => emit("close") });
 const canSave = computed(() => Boolean(target.value) && (isIndex.value || draft.value.description.trim() !== "") && !save.isPending.value);
 const close = (o: boolean) => !o && emit("close");
 const title = computed(() => (isNew.value ? "新建记忆文件" : props.name));

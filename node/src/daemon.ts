@@ -43,7 +43,7 @@ import { absPath } from "./sessions/claude/options.js";
 import { consoleImageFetcher } from "./sessions/images.js";
 import { consoleHttp, type AttachmentOptions, type ConsoleHttp } from "./sessions/attachments.js";
 import { SharedFs, type SharedFsOptions } from "./fs/shared.js";
-import { ensureMemoryDirs, linkSharedDirs, memoryFolderPrompt, safeAttachmentDir, sharedAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs, type SharedDirs } from "./fs/session.js";
+import { ensureMemoryDirs, linkSharedDirs, memoryFolderPrompt, memoryWritePrompt, safeAttachmentDir, sharedAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs, type SharedDirs } from "./fs/session.js";
 import { EXIT_FS_LOST } from "./release.js";
 import { DAEMON_BUILD, DAEMON_RELEASE, DAEMON_VERSION, PROTOCOLS } from "./version.js";
 
@@ -474,16 +474,19 @@ export class Daemon {
    * the whole folder; the coordinator only its memory directories (claude.memory_files), or nothing.
    */
   private sessionFolders(open: SessionOpen, absCwd: string): { dirs: SharedDirs | null; memory: string[]; extraDirs: string[]; prompt: string } {
-    const none = { dirs: null, memory: [], extraDirs: [], prompt: "" };
-    const fsDirs = this.sharedFs.sessionDirs(open.fs);
-    const memory = open.claude?.memory_files && fsDirs ? this.memoryDirsOf(fsDirs) : [];
-    if (!fsDirs || (open.employee.tier === "coordinator" && !memory.length)) {
+    const coordinator = open.employee.tier === "coordinator";
+    const memoryFiles = open.claude?.memory_files === true;
+    const fsDirs = coordinator && !memoryFiles ? null : this.sharedFs.sessionDirs(open.fs);
+    // Only sessions that may not write otherwise need the memory exception.
+    const memory = fsDirs && memoryFiles && (coordinator || open.claude?.read_only) ? this.memoryDirsOf(fsDirs) : [];
+    if (!fsDirs || (coordinator && !memory.length)) {
       this.unlinkShared(absCwd);
-      return none;
+      return { dirs: null, memory: [], extraDirs: [], prompt: "" };
     }
     this.linkShared(absCwd, fsDirs);
-    if (open.employee.tier === "coordinator") return { dirs: null, memory, extraDirs: memory, prompt: memoryFolderPrompt(fsDirs) };
-    return { dirs: fsDirs, memory, extraDirs: [fsDirs.project, fsDirs.shared], prompt: sharedFolderPrompt(fsDirs) };
+    if (coordinator) return { dirs: null, memory, extraDirs: memory, prompt: memoryFolderPrompt(fsDirs) };
+    const prompt = [sharedFolderPrompt(fsDirs), memory.length ? memoryWritePrompt(fsDirs) : ""].filter(Boolean).join("\n");
+    return { dirs: fsDirs, memory, extraDirs: [fsDirs.project, fsDirs.shared], prompt };
   }
 
   /** The memory directories, created when missing; none (logged) when they cannot be. */

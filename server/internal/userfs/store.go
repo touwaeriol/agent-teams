@@ -146,9 +146,9 @@ const retryAfter = "10 minutes"
 func usersToProvision(ctx context.Context, q store.DB, limit int) ([]string, error) {
 	var ids []string
 	err := q.Gorm(ctx).Raw(`SELECT u.id FROM at_users u LEFT JOIN at_user_fs f ON f.user_id = u.id
-		WHERE f.user_id IS NULL
+		WHERE u.active AND (f.user_id IS NULL
 		   OR (f.state = 'error' AND f.updated_at < now() - ?::interval)
-		   OR (f.state = 'provisioning' AND f.updated_at < now() - ?::interval)
+		   OR (f.state = 'provisioning' AND f.updated_at < now() - ?::interval))
 		ORDER BY u.created_at LIMIT ?`, retryAfter, staleAfter, limit).Scan(&ids).Error
 	return ids, err
 }
