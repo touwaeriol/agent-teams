@@ -1,11 +1,13 @@
 <script setup lang="ts">
-/** A memory file: read it (Markdown), edit name / description / content, delete a topic file.
- * `name` "" starts a new file in edit mode. MEMORY.md has no description and cannot be deleted. */
+/** A memory file of a project (pid) or my own (pid null): read it (Markdown), edit name /
+ * description / content, delete a topic file. `name` "" starts a new file in edit mode. MEMORY.md
+ * has no description and cannot be deleted; a topic file keeps its type. */
 import { Pencil, Trash2 } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
-import { projects } from "@/api/actions";
+import { projects, userMemory } from "@/api/actions";
 import { useAction } from "@/api/mutations";
-import { keys, useMemoryFile } from "@/api/queries";
+import { keys, useMemoryFile, useUserMemoryFile } from "@/api/queries";
+import type { components } from "@/api/schema";
 import ConfirmAction from "@/components/common/ConfirmAction.vue";
 import Field from "@/components/common/Field.vue";
 import Loading from "@/components/common/Loading.vue";
@@ -13,11 +15,15 @@ import Markdown from "@/components/Markdown.vue";
 import { timeAgo } from "@/lib/utils";
 import { MEMORY_INDEX, memoryFileName, memoryWriter } from "./logic";
 
-const props = defineProps<{ pid: string; name: string }>();
+type Body = components["schemas"]["MemoryBody"];
+const props = defineProps<{ pid: string | null; name: string }>();
 const emit = defineEmits<{ close: [] }>();
+const pid = props.pid;
 const isNew = computed(() => props.name === "");
 const isIndex = computed(() => props.name === MEMORY_INDEX);
-const file = useMemoryFile(() => props.pid, () => props.name);
+const file = pid ? useMemoryFile(() => pid, () => props.name) : useUserMemoryFile(() => props.name);
+const put = (name: string, body: Body) => (pid ? projects.putMemory(pid, name, body) : userMemory.put(name, body));
+const del = (name: string) => (pid ? projects.removeMemory(pid, name) : userMemory.remove(name));
 const editing = ref(isNew.value);
 const draft = ref({ name: "", description: "", content: "" });
 function reset() {
@@ -26,14 +32,18 @@ function reset() {
 }
 watch(() => file.data.value, reset, { immediate: true });
 
-const invalidate = () => [keys.memory(props.pid), keys.overview(props.pid)];
+const invalidate = () => (pid ? [keys.memory(pid), keys.overview(pid)] : [keys.userMemory]);
 const target = computed(() => (isNew.value ? memoryFileName(draft.value.name) : props.name));
-const save = useAction(() => projects.putMemory(props.pid, target.value, { description: draft.value.description, content: draft.value.content }), {
+const body = (): Body => {
+  const type = file.data.value?.type as Body["type"];
+  return { description: draft.value.description, content: draft.value.content, ...(type ? { type } : {}) };
+};
+const save = useAction(() => put(target.value, body()), {
   invalidate,
   success: "已保存，新开的会话会读到",
   onSuccess: () => emit("close"),
 });
-const remove = useAction(() => projects.removeMemory(props.pid, props.name), { invalidate, success: "已删除", onSuccess: () => emit("close") });
+const remove = useAction(() => del(props.name), { invalidate, success: "已删除", onSuccess: () => emit("close") });
 const canSave = computed(() => Boolean(target.value) && (isIndex.value || draft.value.description.trim() !== "") && !save.isPending.value);
 const close = (o: boolean) => !o && emit("close");
 const title = computed(() => (isNew.value ? "新建记忆文件" : props.name));

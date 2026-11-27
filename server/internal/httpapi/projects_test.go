@@ -144,6 +144,38 @@ func TestAutoApproveAnyNode(t *testing.T) {
 	}
 }
 
+// TestUserMemory: my own memory is mine alone (another user sees an empty list), keeps its index
+// like a project's and takes a type.
+func TestUserMemory(t *testing.T) {
+	h := newHarness(t)
+	c, _ := h.signUp("a@example.com")
+	other, _ := h.signUp("b@example.com")
+	var f struct {
+		Name, Type, Content string
+	}
+	c.must(200, "PUT", "/api/me/memory/style", map[string]string{"description": "写作风格", "type": "feedback", "content": "简洁"}, &f)
+	if f.Name != "style.md" || f.Type != "feedback" {
+		t.Fatalf("file %+v", f)
+	}
+	c.must(200, "GET", "/api/me/memory/MEMORY.md", nil, &f)
+	if !strings.HasPrefix(f.Content, "# 用户记忆\n") || !strings.Contains(f.Content, "- [style.md](style.md) — 写作风格") {
+		t.Fatalf("index %q", f.Content)
+	}
+	var list []struct{ Name string }
+	other.must(200, "GET", "/api/me/memory", nil, &list)
+	if len(list) != 0 {
+		t.Fatalf("another user's memory %+v", list)
+	}
+	if r := other.do("GET", "/api/me/memory/style.md", nil); r.Status != 404 {
+		t.Fatalf("another user reads it: %d", r.Status)
+	}
+	c.must(204, "DELETE", "/api/me/memory/style.md", nil, nil)
+	c.must(200, "GET", "/api/me/memory", nil, &list)
+	if len(list) != 1 || list[0].Name != "MEMORY.md" {
+		t.Fatalf("after delete %+v", list)
+	}
+}
+
 // TestMemory: memory files are the owner's only; a topic file keeps its line in MEMORY.md,
 // deleting it drops the line; MEMORY.md cannot be deleted; bad names and missing descriptions are 422.
 func TestMemory(t *testing.T) {

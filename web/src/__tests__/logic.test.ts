@@ -166,6 +166,9 @@ describe("events → cache", () => {
     const qc = new QueryClient();
     expect(applyUserEvent(qc, "notice", { text: "你好" })).toBe("你好");
     expect(applyUserEvent(qc, "project", {})).toBeUndefined();
+    qc.setQueryData(keys.userMemory, []);
+    applyUserEvent(qc, "memory", { op: "write", name: "MEMORY.md" });
+    expect(qc.getQueryState(keys.userMemory)?.isInvalidated).toBe(true);
   });
 });
 

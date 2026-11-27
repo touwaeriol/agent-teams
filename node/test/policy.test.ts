@@ -14,6 +14,29 @@ const BASH = {
 const base: ToolPolicy = { denyNonPlatform: false, readOnly: false, bash: null, readRoots: ["/w/lead", "/w/repo/.git"], secretPaths: ["/home/u/.config/agent-teams", "/home/u/.claude/.credentials.json"] };
 
 describe("tool policy", () => {
+  it("lets coordinator and read-only sessions use the file tools inside the memory directories only (by real path)", () => {
+    const root = mkdtempSync(join(tmpdir(), "mem-"));
+    try {
+      const mem = join(root, "vol/projects/p/.memory");
+      mkdirSync(mem, { recursive: true });
+      mkdirSync(join(root, "cwd"));
+      symlinkSync(join(root, "vol/projects/p"), join(root, "cwd/.project-files"), "dir");
+      symlinkSync(root, join(mem, "escape"), "dir");
+      const cwd = join(root, "cwd");
+      for (const p of [{ ...base, denyNonPlatform: true, memoryDirs: [mem] }, { ...base, readOnly: true, bash: BASH, memoryDirs: [mem] }]) {
+        expect(decideTool(p, "Edit", { file_path: ".project-files/.memory/MEMORY.md" }, cwd)).toBeNull();
+        expect(decideTool(p, "Write", { file_path: join(mem, "testing.md") }, cwd)).toBeNull();
+        expect(decideTool(p, "Grep", { pattern: "x", path: ".project-files/.memory" }, cwd)).toBeNull();
+        expect(decideTool(p, "Write", { file_path: ".project-files/notes.md" }, cwd)).not.toBeNull();
+        expect(decideTool(p, "Write", { file_path: ".project-files/.memory/escape/x.md" }, cwd)).not.toBeNull();
+        expect(decideTool(p, "Bash", { command: "rm -rf .project-files/.memory" }, cwd)).not.toBeNull();
+      }
+      expect(decideTool({ ...base, denyNonPlatform: true }, "Read", { file_path: join(mem, "MEMORY.md") }, cwd)).not.toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("lets the coordinator use only platform tools", () => {
     const p = { ...base, denyNonPlatform: true };
     expect(decideTool(p, "mcp__platform__open_thread", {}, "/w")).toBeNull();

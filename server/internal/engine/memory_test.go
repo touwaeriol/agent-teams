@@ -9,9 +9,10 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw/nodetest"
 )
 
-// TestMemoryTools: leads write and delete memory files (the index line follows), members only
-// read, rejected writes come back as tool errors, and a session opened afterwards gets the
-// project instructions and the current MEMORY.md in its system prompt.
+// TestMemoryTools: leads write, edit and delete memory files (the index line follows), members
+// have no write tools, rejected writes come back as tool errors, the user's own memory is written
+// with scope user, and a session opened afterwards gets the project instructions, the user's
+// MEMORY.md and the project's in its system prompt.
 func TestMemoryTools(t *testing.T) {
 	tm := startTeam(t)
 	res := tm.lead.mustCall("memory_write", map[string]string{"name": "testing", "description": "怎么跑测试", "content": "用 docker 跑 make test"})
@@ -33,6 +34,20 @@ func TestMemoryTools(t *testing.T) {
 	if res := tm.dev.call("memory_read", map[string]string{"name": "nope"}); res.Ok {
 		t.Fatal("read a missing file")
 	}
+	res = tm.lead.mustCall("memory_edit", map[string]any{"name": "testing.md", "old_string": "make test", "new_string": "make test-all"})
+	if !strings.Contains(text(res), "1 处") {
+		t.Fatalf("edit %q", text(res))
+	}
+	if res := tm.lead.call("memory_edit", map[string]any{"name": "testing.md", "old_string": "nope", "new_string": "x"}); res.Ok || !strings.Contains(text(res), "old_string") {
+		t.Fatalf("edit of missing text: %+v", res)
+	}
+	if res := tm.dev.mustCall("memory_read", map[string]string{"name": "testing.md"}); text(res) != "用 docker 跑 make test-all" {
+		t.Fatalf("after edit %q", text(res))
+	}
+	tm.lead.mustCall("memory_write", map[string]any{"name": "MEMORY.md", "content": "# 用户记忆\n- 回复都用中文", "scope": "user"})
+	if res := tm.dev.mustCall("memory_read", map[string]any{"name": "MEMORY.md", "scope": "user"}); !strings.Contains(text(res), "- 回复都用中文") {
+		t.Fatalf("user memory %q", text(res))
+	}
 	tm.lead.mustCall("memory_write", map[string]string{"name": "deploy.md", "description": "发布", "content": "滚动发布"})
 	tm.lead.mustCall("memory_delete", map[string]string{"name": "deploy.md"})
 	if res := tm.lead.mustCall("memory_list", map[string]any{}); strings.Contains(text(res), "deploy.md") || !strings.Contains(text(res), "testing.md") {
@@ -53,7 +68,7 @@ func TestMemoryTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	sys := *open.Claude.SystemAppend
-	for _, want := range []string{"## 项目指令", "回答都以【测】开头", "## 项目记忆", "### MEMORY.md", "- [testing.md](testing.md) — 怎么跑测试", "memory_write(name, description, content)"} {
+	for _, want := range []string{"## 项目指令", "回答都以【测】开头", "## 用户记忆", "- 回复都用中文", "## 项目记忆", "### MEMORY.md", "- [testing.md](testing.md) — 怎么跑测试", "memory_write(name, description, content)"} {
 		if !strings.Contains(sys, want) {
 			t.Fatalf("new lead prompt misses %q:\n%s", want, sys)
 		}

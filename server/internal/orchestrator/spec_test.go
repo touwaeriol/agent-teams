@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -128,17 +129,42 @@ func TestCodexOptions(t *testing.T) {
 }
 
 func TestToolsAllowed(t *testing.T) {
-	if ok, bad := ToolsAllowed(emp("coordinator", "coordinator", store.Role{}), []string{"mcp__platform__open_thread", "Read"}); ok || bad != "Read" {
-		t.Fatal("coordinator may only have platform tools")
+	if ok, bad := ToolsAllowed(emp("coordinator", "coordinator", store.Role{}), []string{"mcp__platform__open_thread", "Read", "Edit", "Bash"}); ok || bad != "Bash" {
+		t.Fatal("coordinator may only have platform tools and the memory file tools")
 	}
 	if ok, _ := ToolsAllowed(emp("lead", "lead", store.Role{}), []string{"Read", "Bash", "mcp__platform__assign_task"}); !ok {
 		t.Fatal("lead read tools are fine")
 	}
-	if ok, bad := ToolsAllowed(emp("lead", "lead", store.Role{}), []string{"Edit"}); ok || bad != "Edit" {
-		t.Fatal("lead must not edit")
+	if ok, bad := ToolsAllowed(emp("lead", "lead", store.Role{}), []string{"Edit", "Write", "NotebookEdit"}); ok || bad != "NotebookEdit" {
+		t.Fatal("lead may only have the memory file tools among the write tools")
 	}
 	if ok, _ := ToolsAllowed(emp("member", "dev", store.Role{}), []string{"Edit", "Write"}); !ok {
 		t.Fatal("members edit")
+	}
+}
+
+// TestAllowMemoryFiles: a coordinator or read-only Claude session gets the file tools for the
+// memory directories (and claude.memory_files); a member's options stay as they are.
+func TestAllowMemoryFiles(t *testing.T) {
+	coord := emp("coordinator", "coordinator", store.Role{})
+	o, _ := buildOpen(open(t, coord, store.Node{}))
+	allowMemoryFiles(coord, o.Claude)
+	c := o.Claude
+	if c.MemoryFiles == nil || !*c.MemoryFiles || !slices.Contains(c.Tools, "Edit") || !slices.Contains(c.AllowedTools, "Write") ||
+		slices.Contains(c.DisallowedTools, "Read") || !slices.Contains(c.DisallowedTools, "Bash") || c.DenyNonPlatformTools == nil {
+		t.Fatalf("coordinator %+v", c)
+	}
+	lead := emp("lead", "lead", store.Role{})
+	o, _ = buildOpen(open(t, lead, store.Node{}))
+	allowMemoryFiles(lead, o.Claude)
+	if o.Claude.MemoryFiles == nil || slices.Contains(o.Claude.DisallowedTools, "Edit") || !slices.Contains(o.Claude.DisallowedTools, "NotebookEdit") {
+		t.Fatalf("lead %+v", o.Claude)
+	}
+	member := emp("member", "dev", store.Role{})
+	o, _ = buildOpen(open(t, member, store.Node{}))
+	allowMemoryFiles(member, o.Claude)
+	if o.Claude.MemoryFiles != nil {
+		t.Fatal("a member needs no memory_files")
 	}
 }
 

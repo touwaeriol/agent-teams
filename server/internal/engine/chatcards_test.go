@@ -195,7 +195,7 @@ func TestCoordinatorRecapAndResume(t *testing.T) {
 	c, open := expectOpen(t, tm.w, tm.n, "coordinator")
 	c.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(c.session), MsgID: open.FirstMessage.MsgID})
 	c.event("text", func(ev *protocol.SessionEvent) { s, f := "好的，记下 kestrel-7", true; ev.Text, ev.Final = &s, &f })
-	if err := store.AppendMemoryNote(tm.w.ctx, tm.w.e.Core.Pool, tm.projectID, "部署走滚动发布", "test"); err != nil {
+	if err := store.AppendMemoryNote(tm.w.ctx, tm.w.e.Core.Pool, store.ProjectMemory(tm.projectID), "部署走滚动发布", "test"); err != nil {
 		t.Fatal(err)
 	}
 	failed := true

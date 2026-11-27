@@ -24,6 +24,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/github"
 	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
 	"github.com/touwaeriol/agent-teams/server/internal/kv"
+	"github.com/touwaeriol/agent-teams/server/internal/memfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
@@ -81,6 +82,10 @@ type Engine struct {
 	SSH       *sshgw.Gateway
 	FS        *userfs.Service
 	log       *slog.Logger
+	// memory keeps auto memory in the shared folders (nil: rows only); memoryFullAt is when the
+	// sweep last read every folder (the leader's loop only).
+	memory       *memfiles.Syncer
+	memoryFullAt time.Time
 }
 
 // New wires the engines together.
@@ -129,6 +134,9 @@ func New(d Deps) (*Engine, error) {
 
 // Start runs the background loops until ctx ends.
 func (e *Engine) Start(ctx context.Context) {
+	if e.memory != nil {
+		e.memory.Start(ctx)
+	}
 	go e.Fan.Run(ctx)
 	go e.Sched.Run(ctx)
 	go e.Delivery.Run(ctx)

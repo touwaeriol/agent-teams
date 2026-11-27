@@ -859,6 +859,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My own memory files (every project reads them), MEMORY.md first (no content) */
+        get: operations["list-user-memory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/memory/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get-user-memory-file"];
+        /** Create or replace one of my memory files */
+        put: operations["put-user-memory-file"];
+        post?: never;
+        delete: operations["delete-user-memory-file"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/password": {
         parameters: {
             query?: never;
@@ -3559,6 +3593,16 @@ export interface components {
             runtime: string;
             tier: string;
         };
+        MemoryBody: {
+            content: string;
+            /** @description One line listed in MEMORY.md; required except for MEMORY.md */
+            description?: string;
+            /**
+             * @description Optional kind of a topic file
+             * @enum {string}
+             */
+            type?: "project" | "feedback" | "reference" | "user" | "";
+        };
         MemoryBrief: {
             description: string;
             name: string;
@@ -3567,6 +3611,7 @@ export interface components {
              * @description Characters of content
              */
             size: number;
+            type: string;
             /** Format: date-time */
             updated_at: string;
             updated_by: string;
@@ -3577,14 +3622,13 @@ export interface components {
             created_at: string;
             description: string;
             name: string;
+            /** @description Changed here and not yet written into the shared folder */
+            pending: boolean;
+            /** @description Optional kind of a topic file: project, feedback, reference, user */
+            type: string;
             /** Format: date-time */
             updated_at: string;
             updated_by: string;
-        };
-        MemoryPutInputBody: {
-            content: string;
-            /** @description One line listed in MEMORY.md; required except for MEMORY.md */
-            description?: string;
         };
         MergeEntryView: {
             /** Format: int64 */
@@ -7623,6 +7667,132 @@ export interface operations {
             };
         };
     };
+    "list-user-memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryBrief"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "get-user-memory-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description File name, e.g. MEMORY.md or style.md */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryFile"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "put-user-memory-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryFile"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-user-memory-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description File name, e.g. MEMORY.md or style.md */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "change-password": {
         parameters: {
             query?: never;
@@ -9058,7 +9228,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MemoryPutInputBody"];
+                "application/json": components["schemas"]["MemoryBody"];
             };
         };
         responses: {

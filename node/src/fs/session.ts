@@ -103,6 +103,25 @@ function lstatOrNull(p: string) {
   }
 }
 
+/** The memory directories of a session's folders, created when missing (none if they cannot be). */
+export function memoryDirs(dirs: SharedDirs): string[] {
+  const out = [join(dirs.project, ".memory"), join(dirs.shared, ".memory")];
+  try {
+    for (const d of out) mkdirSync(d, { recursive: true });
+  } catch {
+    return [];
+  }
+  return out;
+}
+
+/** What a session with only the memory directories (the coordinator) is told about them. */
+export function memoryFolderPrompt(memory: string[]): string {
+  return [
+    "## Memory files",
+    `The memory is files in the user's shared folder: the project's in .project-files/.memory/ (${memory[0]}), the user's own in .user-files/.memory/ (${memory[1]}). Read, Glob, Grep, Edit and Write work there and nowhere else.`,
+  ].join("\n");
+}
+
 /** What the employee is told about the folders (appended to the system prompt). */
 export function sharedFolderPrompt(dirs: SharedDirs): string {
   return [

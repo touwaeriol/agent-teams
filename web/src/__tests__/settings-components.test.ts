@@ -22,6 +22,7 @@ import NumberSetting from "@/pages/admin/NumberSetting.vue";
 import EnvironmentSection from "@/pages/projectSettings/EnvironmentSection.vue";
 import GeneralSection from "@/pages/projectSettings/GeneralSection.vue";
 import MemorySection from "@/pages/projectSettings/MemorySection.vue";
+import UserMemoryPage from "@/pages/settings/Memory.vue";
 import ConnectionCard from "@/pages/settings/github/ConnectionCard.vue";
 import Team from "@/pages/settings/Team.vue";
 import ModelFields from "@/pages/projectSettings/ModelFields.vue";
@@ -522,6 +523,25 @@ describe("Project settings · 记忆", () => {
     [...document.body.querySelectorAll<HTMLButtonElement>("button")].filter((b) => b.textContent?.trim() === "删除").at(-1)!.click();
     await flushPromises();
     expect(calls(spy, "DELETE", /\/memory\/testing\.md$/)).toHaveLength(1);
+  });
+
+  it("我的记忆 lists and edits my own memory through /api/me/memory", async () => {
+    const spy = api([
+      ["GET", /\/api\/me\/memory$/, [{ name: "MEMORY.md", description: "", type: "", size: 8, updated_by: "coordinator", updated_at: "2026-11-27T00:00:00Z" }]],
+      ["GET", /\/api\/me\/memory\/MEMORY\.md$/, { name: "MEMORY.md", description: "", type: "", content: "- 回复用中文", updated_by: "coordinator", pending: false, created_at: "", updated_at: "" }],
+      ["PUT", /\/api\/me\/memory\/MEMORY\.md$/, {}],
+    ]);
+    const w = mountWith(UserMemoryPage, {});
+    await flushPromises();
+    expect(w.text()).toContain("我的记忆");
+    await w.get("[aria-label='打开 MEMORY.md']").trigger("click");
+    await flushPromises();
+    expect(document.body.textContent).toContain("回复用中文");
+    [...document.body.querySelectorAll("button")].find((b) => b.textContent?.includes("编辑"))!.click();
+    await flushPromises();
+    [...document.body.querySelectorAll<HTMLButtonElement>(".el-dialog button")].find((b) => b.textContent?.trim() === "保存")!.click();
+    await flushPromises();
+    expect(await calls(spy, "PUT", /\/api\/me\/memory\/MEMORY\.md$/)[0].json()).toEqual({ description: "", content: "- 回复用中文" });
   });
 
   it("shows 暂无其他文件 when only MEMORY.md exists", async () => {

@@ -48,6 +48,9 @@ func (h *Hooks) ProjectDeleted(ctx context.Context, userID, projectID string) {
 	}
 }
 
+// MemoryFiles keeps memory in the owners' shared folders.
+func (h *Hooks) MemoryFiles() store.MemoryFiles { return h.e.Core.Memory }
+
 // UserDeleting destroys the user's shared folder (in the background, from the volume as it stands
 // now: the row goes with the user). Not having one is fine.
 func (h *Hooks) UserDeleting(ctx context.Context, userID string) {

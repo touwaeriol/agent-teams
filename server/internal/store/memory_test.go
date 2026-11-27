@@ -35,44 +35,44 @@ func TestMemoryFiles(t *testing.T) {
 	ctx := context.Background()
 	s, pid := memoryProject(t)
 	q := s.Pool
-	if p, _ := store.MemoryPrompt(ctx, q, pid); p != "" {
+	if p, _ := store.MemoryPrompt(ctx, q, store.ProjectMemory(pid)); p != "" {
 		t.Fatalf("empty project prompt %q", p)
 	}
-	f, created, err := store.WriteMemoryFile(ctx, q, pid, store.MemoryWrite{Name: " build ", Description: "怎么\n构建", Content: "make", By: "lead-1 · #2"})
+	f, created, err := store.WriteMemoryFile(ctx, q, store.ProjectMemory(pid), store.MemoryWrite{Name: " build ", Description: "怎么\n构建", Content: "make", By: "lead-1 · #2"})
 	if err != nil || !created || f.Name != "build.md" || f.UpdatedBy != "lead-1 · #2" {
 		t.Fatalf("write %+v %v %v", f, created, err)
 	}
-	if _, created, _ = store.WriteMemoryFile(ctx, q, pid, store.MemoryWrite{Name: "build.md", Description: "构建步骤", Content: "make all"}); created {
+	if _, created, _ = store.WriteMemoryFile(ctx, q, store.ProjectMemory(pid), store.MemoryWrite{Name: "build.md", Description: "构建步骤", Content: "make all"}); created {
 		t.Fatal("rewrite reported as created")
 	}
-	if err := store.AppendMemoryNote(ctx, q, pid, "用户喜欢小 PR", "coordinator"); err != nil {
+	if err := store.AppendMemoryNote(ctx, q, store.ProjectMemory(pid), "用户喜欢小 PR", "coordinator"); err != nil {
 		t.Fatal(err)
 	}
-	idx, _ := store.GetMemoryFile(ctx, q, pid, "memory.md")
+	idx, _ := store.GetMemoryFile(ctx, q, store.ProjectMemory(pid), "memory.md")
 	if idx.Content != "# 项目记忆\n- [build.md](build.md) — 构建步骤\n- 用户喜欢小 PR\n" {
 		t.Fatalf("index %q", idx.Content)
 	}
 	for _, bad := range []store.MemoryWrite{{Name: "a/b", Description: "x"}, {Name: "../x", Description: "x"}, {Name: "x", Description: ""},
 		{Name: "x", Description: "x", Content: strings.Repeat("字", store.MemoryContentMax+1)}} {
-		if _, _, err := store.WriteMemoryFile(ctx, q, pid, bad); !store.IsMemoryError(err) {
+		if _, _, err := store.WriteMemoryFile(ctx, q, store.ProjectMemory(pid), bad); !store.IsMemoryError(err) {
 			t.Fatalf("write %q accepted: %v", bad.Name, err)
 		}
 	}
 	// A file the index does not link (the user removed its line) is still listed in the prompt.
-	if _, _, err := store.WriteMemoryFile(ctx, q, pid, store.MemoryWrite{Name: store.MemoryIndex, Content: "# 项目记忆\n- 用户喜欢小 PR\n"}); err != nil {
+	if _, _, err := store.WriteMemoryFile(ctx, q, store.ProjectMemory(pid), store.MemoryWrite{Name: store.MemoryIndex, Content: "# 项目记忆\n- 用户喜欢小 PR\n"}); err != nil {
 		t.Fatal(err)
 	}
-	prompt, _ := store.MemoryPrompt(ctx, q, pid)
+	prompt, _ := store.MemoryPrompt(ctx, q, store.ProjectMemory(pid))
 	if !strings.Contains(prompt, "### MEMORY.md\n# 项目记忆\n- 用户喜欢小 PR") || !strings.Contains(prompt, "其他记忆文件：\n- build.md — 构建步骤") {
 		t.Fatalf("prompt %q", prompt)
 	}
-	if err := store.DeleteMemoryFile(ctx, q, pid, "MEMORY.md", "user"); !store.IsMemoryError(err) {
+	if err := store.DeleteMemoryFile(ctx, q, store.ProjectMemory(pid), "MEMORY.md", "user"); !store.IsMemoryError(err) {
 		t.Fatalf("deleted the index: %v", err)
 	}
-	if err := store.DeleteMemoryFile(ctx, q, pid, "build", "user"); err != nil {
+	if err := store.DeleteMemoryFile(ctx, q, store.ProjectMemory(pid), "build", "user"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DeleteMemoryFile(ctx, q, pid, "build", "user"); err == nil {
+	if err := store.DeleteMemoryFile(ctx, q, store.ProjectMemory(pid), "build", "user"); err == nil {
 		t.Fatal("deleted twice")
 	}
 	for i := 1; i <= 32; i++ {
@@ -80,15 +80,15 @@ func TestMemoryFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sum, _ := store.GetMemoryFile(ctx, q, pid, store.ThreadSummaries)
+	sum, _ := store.GetMemoryFile(ctx, q, store.ProjectMemory(pid), store.ThreadSummaries)
 	if strings.Contains(sum.Content, "## #2 T2\n") || !strings.HasPrefix(sum.Content, "## #3 T3\n总结") || !strings.HasSuffix(sum.Content, "## #32 T32\n总结") {
 		t.Fatalf("summaries keep the latest 30: %q", sum.Content[:40])
 	}
-	idx, _ = store.GetMemoryFile(ctx, q, pid, store.MemoryIndex)
+	idx, _ = store.GetMemoryFile(ctx, q, store.ProjectMemory(pid), store.MemoryIndex)
 	if strings.Count(idx.Content, "](thread-summaries.md)") != 1 {
 		t.Fatalf("index %q", idx.Content)
 	}
-	list, _ := store.ListMemoryFiles(ctx, q, pid)
+	list, _ := store.ListMemoryFiles(ctx, q, store.ProjectMemory(pid))
 	if len(list) != 2 || list[0].Name != store.MemoryIndex {
 		t.Fatalf("list %+v", list)
 	}
@@ -102,10 +102,10 @@ func TestMemoryPromptBounds(t *testing.T) {
 	for i := 0; i < 300; i++ {
 		fmt.Fprintf(&b, "- 第 %d 条\n", i)
 	}
-	if _, _, err := store.WriteMemoryFile(ctx, s.Pool, pid, store.MemoryWrite{Name: "MEMORY.md", Content: b.String()}); err != nil {
+	if _, _, err := store.WriteMemoryFile(ctx, s.Pool, store.ProjectMemory(pid), store.MemoryWrite{Name: "MEMORY.md", Content: b.String()}); err != nil {
 		t.Fatal(err)
 	}
-	p, _ := store.MemoryPrompt(ctx, s.Pool, pid)
+	p, _ := store.MemoryPrompt(ctx, s.Pool, store.ProjectMemory(pid))
 	if !strings.Contains(p, "- 第 199 条") || strings.Contains(p, "- 第 200 条") || !strings.Contains(p, `memory_read("MEMORY.md")`) {
 		t.Fatalf("prompt not bounded: …%s", p[len(p)-200:])
 	}

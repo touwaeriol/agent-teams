@@ -1255,7 +1255,8 @@ type ClaudeSessionOptions struct {
 	// BashPolicy corresponds to the JSON schema field "bash_policy".
 	BashPolicy *BashPolicy `json:"bash_policy,omitempty,omitzero"`
 
-	// Coordinator: PreToolUse hook rejects everything except mcp__platform__*.
+	// Coordinator: PreToolUse hook rejects everything except mcp__platform__* (and,
+	// with memory_files, the file tools inside the memory directories).
 	DenyNonPlatformTools *bool `json:"deny_non_platform_tools,omitempty,omitzero"`
 
 	// DisallowedTools corresponds to the JSON schema field "disallowed_tools".
@@ -1269,6 +1270,11 @@ type ClaudeSessionOptions struct {
 
 	// MaxTurns corresponds to the JSON schema field "max_turns".
 	MaxTurns *int `json:"max_turns,omitempty,omitzero"`
+
+	// The file tools (Read, Glob, Grep, Edit, Write) may also work inside the shared
+	// folder's memory directories (<project dir>/.memory and <shared dir>/.memory)
+	// even in a read-only or platform-only session; set only with fs.
+	MemoryFiles *bool `json:"memory_files,omitempty,omitzero"`
 
 	// Model corresponds to the JSON schema field "model".
 	Model string `json:"model"`
@@ -4892,6 +4898,9 @@ func (j *McpServerStatus) UnmarshalJSON(value []byte) error {
 type MemoryDeleteInput struct {
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
+
+	// Scope corresponds to the JSON schema field "scope".
+	Scope *MemoryScope `json:"scope,omitempty,omitzero"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -4915,6 +4924,93 @@ func (j *MemoryDeleteInput) UnmarshalJSON(value []byte) error {
 		return fmt.Errorf("field %s length: must be <= %d", "name", 100)
 	}
 	*j = MemoryDeleteInput(plain)
+	return nil
+}
+
+// Change part of a memory file: replace old_string (which must occur exactly once,
+// unless replace_all) with new_string, keeping the rest. Read the file first.
+type MemoryEditInput struct {
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// NewString corresponds to the JSON schema field "new_string".
+	NewString string `json:"new_string"`
+
+	// OldString corresponds to the JSON schema field "old_string".
+	OldString string `json:"old_string"`
+
+	// Replace every occurrence.
+	ReplaceAll *bool `json:"replace_all,omitempty,omitzero"`
+
+	// Scope corresponds to the JSON schema field "scope".
+	Scope *MemoryScope `json:"scope,omitempty,omitzero"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryEditInput) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in MemoryEditInput: required")
+	}
+	if _, ok := raw["new_string"]; raw != nil && !ok {
+		return fmt.Errorf("field new_string in MemoryEditInput: required")
+	}
+	if _, ok := raw["old_string"]; raw != nil && !ok {
+		return fmt.Errorf("field old_string in MemoryEditInput: required")
+	}
+	type Plain MemoryEditInput
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	if utf8.RuneCountInString(string(plain.Name)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "name", 1)
+	}
+	if utf8.RuneCountInString(string(plain.Name)) > 100 {
+		return fmt.Errorf("field %s length: must be <= %d", "name", 100)
+	}
+	if utf8.RuneCountInString(string(plain.NewString)) > 32000 {
+		return fmt.Errorf("field %s length: must be <= %d", "new_string", 32000)
+	}
+	if utf8.RuneCountInString(string(plain.OldString)) < 1 {
+		return fmt.Errorf("field %s length: must be >= %d", "old_string", 1)
+	}
+	if utf8.RuneCountInString(string(plain.OldString)) > 32000 {
+		return fmt.Errorf("field %s length: must be <= %d", "old_string", 32000)
+	}
+	*j = MemoryEditInput(plain)
+	return nil
+}
+
+type MemoryEditResult struct {
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Replaced corresponds to the JSON schema field "replaced".
+	Replaced int `json:"replaced"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryEditResult) UnmarshalJSON(value []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	if _, ok := raw["name"]; raw != nil && !ok {
+		return fmt.Errorf("field name in MemoryEditResult: required")
+	}
+	if _, ok := raw["replaced"]; raw != nil && !ok {
+		return fmt.Errorf("field replaced in MemoryEditResult: required")
+	}
+	type Plain MemoryEditResult
+	var plain Plain
+	if err := json.Unmarshal(value, &plain); err != nil {
+		return err
+	}
+	*j = MemoryEditResult(plain)
 	return nil
 }
 
@@ -4970,7 +5066,10 @@ func (j *MemoryFileBrief) UnmarshalJSON(value []byte) error {
 
 // List the project's memory files (MEMORY.md and topic files) with their
 // descriptions.
-type MemoryListInput map[string]interface{}
+type MemoryListInput struct {
+	// Scope corresponds to the JSON schema field "scope".
+	Scope *MemoryScope `json:"scope,omitempty,omitzero"`
+}
 
 type MemoryListResult struct {
 	// Files corresponds to the JSON schema field "files".
@@ -4999,6 +5098,9 @@ func (j *MemoryListResult) UnmarshalJSON(value []byte) error {
 type MemoryReadInput struct {
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
+
+	// Scope corresponds to the JSON schema field "scope".
+	Scope *MemoryScope `json:"scope,omitempty,omitzero"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -5072,9 +5174,40 @@ func (j *MemoryReadResult) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Create or replace a project memory file. A topic file (e.g. testing.md) needs a
-// one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md
-// rewrites the index itself.
+type MemoryScope string
+
+const MemoryScopeProject MemoryScope = "project"
+const MemoryScopeUser MemoryScope = "user"
+
+var enumValues_MemoryScope = []interface{}{
+	"project",
+	"user",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryScope) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_MemoryScope {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_MemoryScope, v)
+	}
+	*j = MemoryScope(v)
+	return nil
+}
+
+// Create or replace a memory file (the project's, or with scope user the user's
+// own). A topic file (e.g. testing.md) needs a one-line description; the platform
+// keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself. To change
+// part of a file use memory_edit.
 type MemoryWriteInput struct {
 	// Content corresponds to the JSON schema field "content".
 	Content string `json:"content"`
@@ -5084,6 +5217,46 @@ type MemoryWriteInput struct {
 
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
+
+	// Scope corresponds to the JSON schema field "scope".
+	Scope *MemoryScope `json:"scope,omitempty,omitzero"`
+
+	// Optional kind of a topic file (written into its frontmatter).
+	Type *MemoryWriteInputType `json:"type,omitempty,omitzero"`
+}
+
+type MemoryWriteInputType string
+
+const MemoryWriteInputTypeFeedback MemoryWriteInputType = "feedback"
+const MemoryWriteInputTypeProject MemoryWriteInputType = "project"
+const MemoryWriteInputTypeReference MemoryWriteInputType = "reference"
+const MemoryWriteInputTypeUser MemoryWriteInputType = "user"
+
+var enumValues_MemoryWriteInputType = []interface{}{
+	"project",
+	"feedback",
+	"reference",
+	"user",
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (j *MemoryWriteInputType) UnmarshalJSON(value []byte) error {
+	var v string
+	if err := json.Unmarshal(value, &v); err != nil {
+		return err
+	}
+	var ok bool
+	for _, expected := range enumValues_MemoryWriteInputType {
+		if reflect.DeepEqual(v, expected) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("invalid value (expected one of %#v): %#v", enumValues_MemoryWriteInputType, v)
+	}
+	*j = MemoryWriteInputType(v)
+	return nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -7108,6 +7281,9 @@ func (j *RelPath) UnmarshalJSON(value []byte) error {
 // Append a one-line note to the project memory index MEMORY.md (shortcut for small
 // facts).
 type RememberInput struct {
+	// Scope corresponds to the JSON schema field "scope".
+	Scope *MemoryScope `json:"scope,omitempty,omitzero"`
+
 	// Text corresponds to the JSON schema field "text".
 	Text string `json:"text"`
 }

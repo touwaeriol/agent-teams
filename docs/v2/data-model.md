@@ -680,11 +680,22 @@ CREATE TABLE at_memory_files (
   name        TEXT NOT NULL,                       -- MEMORY.md（索引）| testing.md | thread-summaries.md …
   description TEXT NOT NULL DEFAULT '',            -- 一句话，MEMORY.md 的索引行用它；MEMORY.md 自己为空
   content     TEXT NOT NULL DEFAULT '',            -- Markdown，最多 32,000 字（应用层检查）
-  updated_by  TEXT NOT NULL DEFAULT '',            -- user | platform | coordinator | lead-1 · #3
+  updated_by  TEXT NOT NULL DEFAULT '',            -- user | platform | coordinator | lead-1 · #3 | 节点上直接修改
+  type        TEXT NOT NULL DEFAULT '',            -- 00500：frontmatter 的 type（project | feedback | reference | user）
+  pending     BOOLEAN NOT NULL DEFAULT false,      -- 00500：平台写了、还没写进共享文件夹
+  file_mtime  TIMESTAMPTZ,                         -- 00500：上次看到的文件（mtime、大小），用来发现节点上的修改
+  file_size   BIGINT NOT NULL DEFAULT 0,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (project_id, name)
 );
+
+-- 00500：开了共享文件夹时文件（projects/<pid>/.memory/）是正本，这两张表是缓存（memfiles）。
+-- 用户记忆：所有项目共用，文件在 shared/.memory/，列同上。
+CREATE TABLE at_user_memory_files (user_id TEXT REFERENCES at_users(id) ON DELETE CASCADE, name TEXT, …同上…, PRIMARY KEY (user_id, name));
+-- 员工的工具调用点到 .memory/ 下的文件时记一笔（10 分钟内有效）：同步把下一次修改记在它名下。
+CREATE TABLE at_memory_touches (scope TEXT CHECK (scope IN ('project','user')), scope_id TEXT, name TEXT, by TEXT, at TIMESTAMPTZ,
+  PRIMARY KEY (scope, scope_id, name));
 ```
 
 ### 2.9 事件与办公室
@@ -1031,6 +1042,8 @@ ALTER TABLE at_deliverable_comments ADD COLUMN attachments JSONB NOT NULL DEFAUL
 `00095_thread_lifecycle_images.sql`：`at_threads.archived_from`、`at_attachments`（§2.11）。
 
 `00312_shared_files.sql`：`at_shared_files`（§2.13，项目共享文件）；Down 删表。
+
+`00500_memory_in_folder.sql`：记忆进共享文件夹——`at_memory_files` 加 type / pending / file_mtime / file_size，存量行全标 pending（第一次同步写进文件夹）；新建 `at_user_memory_files`（用户记忆，随用户删除）和 `at_memory_touches`。Down 删掉它们。
 
 `00460_blob_storage.sql`、`00470_attachments_unowned.sql`（#58）：附件和共享文件改存对象存储、附件保留期、进行中的共享文件上传、删除队列、任务 / 会话首条消息 / 批注带附件（§2.15）。两个一起上线，上线前 pg_dump（存量附件 24 小时未用即删除，见 `attachments-rollout.md`）。
 

@@ -3256,6 +3256,35 @@
         ],
         "type": "object"
       },
+      "MemoryBody": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "maxLength": 32000,
+            "type": "string"
+          },
+          "description": {
+            "description": "One line listed in MEMORY.md; required except for MEMORY.md",
+            "maxLength": 300,
+            "type": "string"
+          },
+          "type": {
+            "description": "Optional kind of a topic file",
+            "enum": [
+              "project",
+              "feedback",
+              "reference",
+              "user",
+              ""
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "type": "object"
+      },
       "MemoryBrief": {
         "additionalProperties": false,
         "properties": {
@@ -3270,6 +3299,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "type": {
+            "type": "string"
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -3281,6 +3313,7 @@
         "required": [
           "name",
           "description",
+          "type",
           "size",
           "updated_by",
           "updated_at"
@@ -3303,6 +3336,14 @@
           "name": {
             "type": "string"
           },
+          "pending": {
+            "description": "Changed here and not yet written into the shared folder",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "Optional kind of a topic file: project, feedback, reference, user",
+            "type": "string"
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -3314,28 +3355,12 @@
         "required": [
           "name",
           "description",
+          "type",
           "content",
           "updated_by",
+          "pending",
           "created_at",
           "updated_at"
-        ],
-        "type": "object"
-      },
-      "MemoryPutInputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "content": {
-            "maxLength": 32000,
-            "type": "string"
-          },
-          "description": {
-            "description": "One line listed in MEMORY.md; required except for MEMORY.md",
-            "maxLength": 300,
-            "type": "string"
-          }
-        },
-        "required": [
-          "content"
         ],
         "type": "object"
       },
@@ -12397,6 +12422,170 @@
         ]
       }
     },
+    "/api/me/memory": {
+      "get": {
+        "operationId": "list-user-memory",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryBrief"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "My own memory files (every project reads them), MEMORY.md first (no content)",
+        "tags": [
+          "me"
+        ]
+      }
+    },
+    "/api/me/memory/{name}": {
+      "delete": {
+        "operationId": "delete-user-memory-file",
+        "parameters": [
+          {
+            "description": "File name, e.g. MEMORY.md or style.md",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "File name, e.g. MEMORY.md or style.md",
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "me"
+        ]
+      },
+      "get": {
+        "operationId": "get-user-memory-file",
+        "parameters": [
+          {
+            "description": "File name, e.g. MEMORY.md or style.md",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "File name, e.g. MEMORY.md or style.md",
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryFile"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "tags": [
+          "me"
+        ]
+      },
+      "put": {
+        "operationId": "put-user-memory-file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryFile"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Create or replace one of my memory files",
+        "tags": [
+          "me"
+        ]
+      }
+    },
     "/api/me/password": {
       "post": {
         "operationId": "change-password",
@@ -14554,7 +14743,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MemoryPutInputBody"
+                "$ref": "#/components/schemas/MemoryBody"
               }
             }
           },

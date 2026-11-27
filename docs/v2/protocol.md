@@ -169,6 +169,7 @@
                     "deny_metachar": true},        // 仅 read_only 会话；argv 解析，不是正则
     "sandbox": {"enabled": true, "write_paths": ["."], "extra_write_paths": ["<shared>/.git"], "deny_read": ["…"]},  // 按节点隔离级别生成（§10.3）；read_only 时 write_paths = []
     "deny_non_platform_tools": false,              // 统筹 = true（PreToolUse 钩子拒绝非 mcp__platform__*）
+    "memory_files": false,                         // 有 fs 且节点报 memory_files 特性时，统筹和只读会话 = true：Read/Glob/Grep/Edit/Write 只在 <project>/.memory 和 <shared>/.memory 里放行（按真实路径）
     "protected_refs": ["thread/12-employee-comms", "main"]  // 写进平台 pre-push 钩子（纵深防护；员工本就没有写令牌）
   },
   "codex": null,                                   // runtime=codex 时：{"model","sandbox","approval_policy","developer_instructions","config":{…}}（model 可为 ""：节点不传给 thread/start，用 Codex 自己的默认，init.model 报实际解析出的模型）；

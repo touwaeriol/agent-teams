@@ -446,7 +446,11 @@
           "$ref": "#/$defs/SandboxPolicy"
         },
         "deny_non_platform_tools": {
-          "description": "Coordinator: PreToolUse hook rejects everything except mcp__platform__*.",
+          "description": "Coordinator: PreToolUse hook rejects everything except mcp__platform__* (and, with memory_files, the file tools inside the memory directories).",
+          "type": "boolean"
+        },
+        "memory_files": {
+          "description": "The file tools (Read, Glob, Grep, Edit, Write) may also work inside the shared folder's memory directories (<project dir>/.memory and <shared dir>/.memory) even in a read-only or platform-only session; set only with fs.",
           "type": "boolean"
         },
         "protected_refs": {

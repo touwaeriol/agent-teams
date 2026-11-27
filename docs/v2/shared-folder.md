@@ -11,7 +11,9 @@ One JuiceFS volume per user, `at-<id>` (`id` = first 16 hex of sha256("agent-tea
 /projects/<project_id>/                     one per project ($AGENT_TEAMS_PROJECT_DIR)
 /projects/<project_id>/attachments/         attachments fetched with read_attachment
 /projects/<project_id>/.deliverables/<id>/v<N>/   published deliverable versions (platform-kept)
+/projects/<project_id>/.memory/             the project's auto memory (MEMORY.md + topic files)
 /shared/                                    every project of the user ($AGENT_TEAMS_SHARED_DIR)
+/shared/.memory/                            the user's own memory, read by every project
 ```
 
 Every session's working directory (`projects/<pid>/threads/<no>/<emp>/` on the node) holds the
@@ -97,6 +99,36 @@ is ready and the node reports that volume mounted at its current generation (an 
 reported without them, counts unless it names another volume). The daemon creates both directories, adds them to Claude's
 `additionalDirectories` and sandbox `allowWrite`, and to Codex's workspace-write `writable_roots`,
 exports the two variables, and appends a short note to the system prompt.
+
+## Memory
+
+Auto memory (architecture.md §6.7) lives in the folder: a project's in `projects/<pid>/.memory/`,
+the user's own (preferences every project reads) in `shared/.memory/`. Each is flat Markdown:
+`MEMORY.md` (the index every session reads at start) and topic files that start with frontmatter
+(`name`, a one-line `description`, optional `type: project|feedback|reference|user`).
+
+- **The files are the source.** Every tier edits them with its own file tools: members as any file;
+  the coordinator and read-only leads through `claude.memory_files` (the daemon's PreToolUse hook
+  allows Read/Glob/Grep/Edit/Write only inside the two `.memory/` directories, by real path; the
+  coordinator gets just those, linked into its working directory). Codex leads (read-only sandbox)
+  and sessions without the folder use the `memory_*` tools (`memory_edit` replaces part of a file;
+  `scope: "user"` for the user's own).
+- **The rows are the cache** (`at_memory_files`, `at_user_memory_files`): session prompts, the web
+  pages and a folder out of reach read them. A write through the platform (tools, thread summaries,
+  the web page) lands there as `pending` and is written out by `memfiles.Syncer` right after (and by
+  the minute sweep); a pending row wins over a file changed meanwhile.
+- **Changes on a node come back** with the sweep: a file whose mtime or size differs from what the
+  row last saw is read (frontmatter parsed, content clipped to 32,000 characters), a new topic file
+  gets its index line in MEMORY.md, a deleted one loses it (MEMORY.md itself is written again). The
+  sweep reads the scopes with pending rows or a fresh touch every minute, every ready folder once an
+  hour, and the web page reads its scope before listing.
+- **Who changed it**: an employee's tool call whose summary names a `.memory/` file records a touch
+  (`at_memory_touches`, 10 minutes) and has the folder read 5 seconds later; the change is credited
+  to that employee, otherwise to `节点上直接修改`.
+- Deleting through the platform removes the file first; with the folder out of reach a file already
+  written out is refused (it would come back).
+- Moving over: migration 00500 marks every existing row pending, so the first sweep writes all
+  memory into the folders.
 
 ## Console access
 

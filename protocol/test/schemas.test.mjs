@@ -33,12 +33,12 @@ const EXPECTED_TYPES = {
 const EXPECTED_TOOLS = {
   coordinator: ["open_thread", "list_threads", "thread_status", "message_thread", "forward_to_thread", "ask_user", "close_question", "remember", "set_status",
     "schedule_create", "schedule_list", "schedule_update", "schedule_cancel",
-    "memory_list", "memory_read", "memory_write", "memory_delete", "list_deliverables", "read_attachment"],
+    "memory_list", "memory_read", "memory_write", "memory_edit", "memory_delete", "list_deliverables", "read_attachment"],
   lead: [
     "update_plan", "assign_task", "list_tasks", "cancel_task", "reply_to", "review_permission", "broadcast", "send_message", "ask_user", "close_question",
     "schedule_create", "schedule_list", "schedule_update", "schedule_cancel",
     "enqueue_merge", "open_pr", "finish", "publish_deliverable", "publish_file", "set_status", "tell_user",
-    "memory_list", "memory_read", "memory_write", "memory_delete", "list_deliverables", "read_deliverable",
+    "memory_list", "memory_read", "memory_write", "memory_edit", "memory_delete", "list_deliverables", "read_deliverable",
     "read_attachment",
     "open_subthread", "close_subthread", "list_threads", "thread_status", "message_thread", "message_coordinator",
   ],

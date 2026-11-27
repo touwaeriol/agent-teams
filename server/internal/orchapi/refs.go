@@ -118,7 +118,7 @@ func (a *API) deliverableRefs(ctx context.Context, pid, q string, out []RefCandi
 }
 
 func (a *API) memoryRefs(ctx context.Context, pid, q string, out []RefCandidate) ([]RefCandidate, error) {
-	files, err := store.ListMemoryFiles(ctx, a.e.Core.Pool, pid)
+	files, err := store.ListMemoryFiles(ctx, a.e.Core.Pool, store.ProjectMemory(pid))
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +447,7 @@ func binaryKind(path string) string {
 }
 
 func (a *API) memoryRef(ctx context.Context, p store.Project, r MessageRef) (string, map[string]any, error) {
-	f, err := store.GetMemoryFile(ctx, a.e.Core.Pool, p.ID, r.Name)
+	f, err := store.GetMemoryFile(ctx, a.e.Core.Pool, store.ProjectMemory(p.ID), r.Name)
 	if errors.Is(err, store.ErrNotFound) || errors.Is(err, core.ErrNotFound) || store.IsMemoryError(err) {
 		return "", nil, httpapi.Invalid("refs", "没有记忆文件 "+r.Name)
 	}

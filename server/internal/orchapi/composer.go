@@ -255,7 +255,7 @@ func (a *API) context(ctx context.Context, in *cidInput) (*contextOutput, error)
 }
 
 func (a *API) memorySize(ctx context.Context, pid string, out *ComposerContext) error {
-	files, err := store.ListMemoryFiles(ctx, a.e.Core.Pool, pid)
+	files, err := store.ListMemoryFiles(ctx, a.e.Core.Pool, store.ProjectMemory(pid))
 	if err != nil {
 		return err
 	}

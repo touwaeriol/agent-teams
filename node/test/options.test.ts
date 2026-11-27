@@ -19,6 +19,7 @@ describe("Claude options", () => {
     expect(o.resume).toBeUndefined();
     expect(o.systemPrompt).toEqual({ type: "preset", preset: "claude_code", append: "" });
     expect(buildClaudeOptions({ ...base, resume: true, claude: claude() }).resume).toBe("u1");
+    expect(buildClaudeOptions({ ...base, claude: claude({ read_only: true, memory_files: true }) }).disallowedTools).toEqual(["NotebookEdit"]);
   });
 
   it("passes the role's permission mode through: default (ask) and bypass, which always gets the SDK's skip flag", () => {

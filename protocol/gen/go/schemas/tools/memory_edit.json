@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-teams.dev/schemas/tools/memory_edit.json",
+  "title": "MemoryEditInput",
+  "description": "Change part of a memory file: replace old_string (which must occur exactly once, unless replace_all) with new_string, keeping the rest. Read the file first.",
+  "x-tool": {
+    "tiers": [
+      "coordinator",
+      "lead"
+    ],
+    "blocking": []
+  },
+  "type": "object",
+  "required": [
+    "name",
+    "old_string",
+    "new_string"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "old_string": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32000
+    },
+    "new_string": {
+      "type": "string",
+      "maxLength": 32000
+    },
+    "replace_all": {
+      "description": "Replace every occurrence.",
+      "type": "boolean"
+    },
+    "scope": {
+      "$ref": "common.json#/$defs/MemoryScope"
+    }
+  },
+  "$defs": {
+    "MemoryEditResult": {
+      "title": "MemoryEditResult",
+      "type": "object",
+      "required": [
+        "name",
+        "replaced"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "replaced": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

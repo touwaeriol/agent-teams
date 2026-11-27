@@ -42,6 +42,7 @@ func readFsStatus(ctx context.Context, q core.DB, nodeID string) (nodeFsStatus, 
 // UseSharedFolder wires the shared-folder service (nil: none): volume changes reach the user's
 // nodes and session.open carries the folders.
 func (e *Engine) UseSharedFolder(s *userfs.Service) {
+	e.useMemoryFiles(s)
 	if e.FS = s; s == nil {
 		e.Orch.SharedFolder = nil
 		e.Core.Volume = nil
@@ -58,8 +59,9 @@ func (e *Engine) UseSharedFolder(s *userfs.Service) {
 const fsSweepEvery = time.Minute
 
 // runSharedFolders keeps every user's shared folder on (it is on by default): at start and every
-// fsSweepEvery it provisions the missing ones, then moves deliverable versions still kept in the
-// database into their owners' folders. One replica runs it (leader lock).
+// fsSweepEvery it provisions the missing ones, moves deliverable versions still kept in the
+// database into their owners' folders and keeps memory and its folders in step. One replica runs
+// it (leader lock).
 func (e *Engine) runSharedFolders(ctx context.Context) {
 	if !e.FS.Enabled() {
 		return
@@ -86,6 +88,7 @@ func (e *Engine) sweepSharedFolders(ctx context.Context) {
 	} else if rep.Moved > 0 || rep.Failed > 0 {
 		e.log.Info("shared folders: deliverables moved into the folders", "moved", rep.Moved, "failed", rep.Failed)
 	}
+	e.sweepMemory(ctx)
 }
 
 // sharedFolder is session.open fs: the project's folder and the user's shared folder, when the

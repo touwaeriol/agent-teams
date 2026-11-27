@@ -161,6 +161,8 @@ type Hooks interface {
 	SessionCreated(ctx context.Context, p store.Project, s SessionStart) (SessionThread, error)
 	// SessionReposChanged runs after PUT /api/sessions/{pid}/repos saved the repositories.
 	SessionReposChanged(ctx context.Context, projectID string, added []SessionRepo, removed []string) error
+	// MemoryFiles keeps memory in the owners' shared folders (store.NoMemoryFiles: none).
+	MemoryFiles() store.MemoryFiles
 }
 
 // SessionStart is what POST /api/sessions asks for besides the project.
@@ -259,6 +261,9 @@ type NoHooks struct{}
 func (NoHooks) SessionCreated(context.Context, store.Project, SessionStart) (SessionThread, error) {
 	return SessionThread{}, nil
 }
+
+// MemoryFiles implements Hooks.
+func (NoHooks) MemoryFiles() store.MemoryFiles { return store.NoMemoryFiles{} }
 
 // SessionReposChanged implements Hooks.
 func (NoHooks) SessionReposChanged(context.Context, string, []SessionRepo, []string) error {

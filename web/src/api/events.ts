@@ -43,7 +43,7 @@ export const PROJECT_EVENTS = [
 ] as const;
 export type ProjectEventType = (typeof PROJECT_EVENTS)[number];
 
-export const USER_EVENTS = ["project", "node", "notice", "reset"] as const;
+export const USER_EVENTS = ["project", "node", "memory", "notice", "reset"] as const;
 
 export interface StatusFrame {
   seq: number;
@@ -316,6 +316,7 @@ export function applyProjectEvent(qc: QueryClient, pid: string, type: string, da
 export function applyUserEvent(qc: QueryClient, type: string, data: unknown): string | undefined {
   if (type === "project" || type === "reset") qc.invalidateQueries({ queryKey: keys.projects });
   if (type === "node" || type === "reset") qc.invalidateQueries({ queryKey: keys.nodes });
+  if (type === "memory" || type === "reset") qc.invalidateQueries({ queryKey: keys.userMemory });
   if (type === "notice") return (data as { text?: string })?.text;
   return undefined;
 }

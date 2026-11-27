@@ -29,6 +29,7 @@ export interface OptionInputs {
 }
 
 const WRITE_TOOLS = ["Edit", "Write", "NotebookEdit"];
+const MEMORY_WRITE_TOOLS = ["Edit", "Write"];
 
 /** SDK options for one employee session (architecture.md §6.1, protocol.md §4.1 step 2). */
 export function buildClaudeOptions(i: OptionInputs): Options {
@@ -82,7 +83,9 @@ function pluginOptions(skills: OptionInputs["skills"], plugins: MaterializedPlug
 
 function disallowed(c: ClaudeSessionOptions): string[] {
   const list = [...(c.disallowed_tools ?? [])];
-  if (c.read_only) for (const t of WRITE_TOOLS) if (!list.includes(t)) list.push(t);
+  // memory_files keeps Edit / Write: the PreToolUse hook holds them inside the memory directories.
+  const write = c.memory_files ? WRITE_TOOLS.filter((t) => !MEMORY_WRITE_TOOLS.includes(t)) : WRITE_TOOLS;
+  if (c.read_only) for (const t of write) if (!list.includes(t)) list.push(t);
   return list;
 }
 

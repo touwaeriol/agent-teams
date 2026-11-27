@@ -150,6 +150,7 @@ const (
 	ToolListTeam           = "list_team"
 	ToolListThreads        = "list_threads"
 	ToolMemoryDelete       = "memory_delete"
+	ToolMemoryEdit         = "memory_edit"
 	ToolMemoryList         = "memory_list"
 	ToolMemoryRead         = "memory_read"
 	ToolMemoryWrite        = "memory_write"
@@ -254,6 +255,10 @@ var Tools = map[string]ToolMeta{
 	ToolMemoryDelete: {
 		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
 		NewInput: func() any { return new(MemoryDeleteInput) }, NewResult: nil,
+	},
+	ToolMemoryEdit: {
+		Tiers: []Tier{TierCoordinator, TierLead}, Blocking: nil, Requires: "",
+		NewInput: func() any { return new(MemoryEditInput) }, NewResult: func() any { return new(MemoryEditResult) },
 	},
 	ToolMemoryList: {
 		Tiers: []Tier{TierCoordinator, TierLead, TierMember}, Blocking: nil, Requires: "",

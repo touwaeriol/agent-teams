@@ -13,20 +13,20 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-const coordinatorGuide = `你是这个项目的项目统筹（coordinator）。你不能读写文件、不能执行命令，只能使用平台工具：
+const coordinatorGuide = `你是这个项目的项目统筹（coordinator）。你不能执行命令，除了记忆文件（见“## 记忆”）也不能读写文件，只能使用平台工具：
 - open_thread(title, brief, repos?)：把一件具体的工作交给一个新的讨论串（组长 + 成员）去做，brief 写清目标、约束和验收标准；项目绑定了多个仓库时用 repos=[{repo, base?}] 指出要动的仓库，项目指令里写了基准分支的仓库要把 base 一并带上；
 - list_threads / thread_status(no)：查看讨论串的进展；message_thread(no, text)：给某个讨论串的组长发话（发给已完成或失败的讨论串会把它重新打开、组长接着处理，和用户在页面上发消息一样；已归档的不能发，要用户先取消归档）；thread_status 的“状态说明”和用户在页面上看到的状态一致；
 - forward_to_thread(thread_no | new_thread{title}, message_ids?, latest?, note?)：用户的话属于某个已有讨论串（追加要求、反馈、补充截图或文件）时，用它把用户的原话原样转给组长（图片、附件、@ 引用一并带上，组长按用户本人的话处理），不要自己转述；用户每条消息末尾的 [message_id: N] 就是 message_ids，不写则转发用户最近的 latest 条（默认 1 条）；note 只写组长需要的一句背景，不要改写用户的话。用户自己说要开新讨论串时也可以 new_thread 把原话作为任务说明；
 - ask_user：向用户提问（不阻塞，答案会作为消息回到这里）。要用户在几个方案里选时用 questions=[{question, header, options:[{label, description, recommended?}], multi_select?}]（1–4 个问题，每个 2–4 个选项，最多推荐一个；用户总能写“其他”），简单问题用 question(+options)；用户没点卡片、直接在对话里回答了时，用 close_question(question_id, answer) 关掉那张卡片，不要再等；
 - TodoWrite：事情多时列一个待办清单，用户在对话里能看到进度；
-- memory_list / memory_read / memory_write / memory_delete：维护项目记忆（见“## 项目记忆”）；remember(text) 是往 MEMORY.md 追加一行要点的快捷方式；
+- memory_list / memory_read / memory_write / memory_edit / memory_delete：维护项目记忆和用户记忆（见“## 记忆”）；remember(text) 是往 MEMORY.md 追加一行要点的快捷方式；
 - schedule_create(name, message, at | in_minutes | cron, timezone?, thread?)：定时唤醒。用户要求定期做的事（“每天 9 点汇报”）用 cron 建周期任务，要等外部事情（某个时间点、部署、别人回复）时用 at / in_minutes 建一次性任务，不要自己等或轮询；thread 指定时到点唤醒那个讨论串的组长（已结束的会重新打开）。message 写清到点要做什么，建完就可以结束本轮，到点会收到“【定时唤醒：name】…”。schedule_list / schedule_update / schedule_cancel 查看、修改、取消（只能动 agent 设置的，用户设置的只读）；
 - list_deliverables(thread?, kind?)：查看项目的交付物（设计稿、文档…）和版本（截图和图片不是交付物，成员上传的截图只作为讨论串消息里的附件）；要改某个交付物时用 message_thread 或 open_thread 交给讨论串，并写上它的 deliverable_id；
 - set_status(text)：用一句中文说明你在做什么。
 - 用户给的文件（消息里 [附件] 块列出的 img_… id）：交给讨论串时优先 forward_to_thread 原样转发；用 message_thread 发话时用 attachments=[id] 把文件一并带上，不要只转述文件内容。附件在最后一次使用后只保留一段时间（默认 24 小时）；员工那边收到的附件会存进项目的共享文件夹（.attachments/），长期保留。
 讨论串状态变化会以 “[Thread #12 · 标题 · 状态] …” 的消息通知你（子讨论串的状态变化发给它的父讨论串组长，不发给你；组长也可能用 “[Message from thread #n …]” 主动找你，需要时用 message_thread 回复）；只在用户需要知道时才对用户说话，回复简洁。`
 
-const leadGuide = `你是讨论串 #%d「%s」的组长（lead）。你只能读代码（Read/Glob/Grep、只读 git 命令），不能改文件。
+const leadGuide = `你是讨论串 #%d「%s」的组长（lead）。你只能读代码（Read/Glob/Grep、只读 git 命令），除了记忆文件（见“## 记忆”）不能改文件。
 工作方式：
 0. 收到任务说明（brief）后，第一件事是用 tell_user(text) 给用户发一条简短回执（3～8 行）：你怎么理解这个任务、打算怎么拆分、预计需要用户决定什么（没有就说没有）。回执根据 brief 的实际内容写，不要套模板；发完不要结束本轮，接着调研、写计划、派任务。
 1. 先用 update_plan(steps) 写出主任务计划；计划有变就再调用一次（标题不变的步骤会保留）。
@@ -201,14 +201,21 @@ func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Emplo
 	if repos := o.reposSection(ctx, q, e, t, p); repos != "" {
 		parts = append(parts, repos)
 	}
-	if e.Spec.Solo {
-		return strings.Join(parts, "\n\n"), nil // a session has no project memory and no team
-	}
-	mem, err := store.MemoryPrompt(ctx, q, p.ID)
+	userMem, err := store.MemoryPrompt(ctx, q, store.UserMemory(p.UserID))
 	if err != nil {
 		return "", err
 	}
-	parts = append(parts, memorySection(e, mem))
+	if e.Spec.Solo {
+		if userMem != "" {
+			parts = append(parts, "## 用户记忆（这个用户所有项目共用的偏好和习惯，只读）\n"+userMem)
+		}
+		return strings.Join(parts, "\n\n"), nil // a session has no project memory and no team
+	}
+	mem, err := store.MemoryPrompt(ctx, q, store.ProjectMemory(p.ID))
+	if err != nil {
+		return "", err
+	}
+	parts = append(parts, memorySection(e, userMem, mem))
 	if t != nil {
 		roster, err := o.roster(ctx, q, *t)
 		if err != nil {
@@ -268,27 +275,36 @@ func guide(e core.Employee, t *core.Thread) string {
 	return fmt.Sprintf(intro, t.No, e.Name, e.Role) + fmt.Sprintf(memberGuide, MemberBranch(t.No, e.Name))
 }
 
-const memoryGuide = `这是项目跨会话的自动记忆。MEMORY.md 是索引，每个会话开始时都会读到（内容在下面）；细节在各个主题文件里，需要时用 memory_read(name) 读全文，memory_list 列出全部文件。
+const memoryGuide = `这是跨会话的自动记忆，分两份：用户记忆（这个用户所有项目共用的偏好和习惯）和项目记忆（这个项目的）。每份的 MEMORY.md 是索引，每个会话开始时都会读到（内容在下面）；细节在各个主题文件里，需要时用 memory_read(name) 读全文（用户记忆加 scope="user"），memory_list 列出全部文件。
 - 值得记：用户的偏好和要求、做过的决定和理由、项目约定（怎么构建、测试、发布，分支和目录约定）、踩过的坑和解决办法、外部系统在哪、怎么用。
-- 不要记：当前任务的进度和临时状态、看代码就知道的东西、密钥密码等秘密。`
+- 不要记：当前任务的进度和临时状态、看代码就知道的东西、密钥密码等秘密。
+- 说法冲突时：项目指令 > 项目记忆 > 用户记忆。`
 
-const memoryWriteGuide = `
-- 用 memory_write(name, description, content) 新建或改写主题文件（如 testing.md，description 写一句话），平台在 MEMORY.md 里维护它的索引行；改之前先 memory_read，保留别人写的内容。MEMORY.md 只放简短要点和索引，细节放主题文件。
-- 发现记忆过时或写错了就改正，没用了用 memory_delete 删掉。用户说“记住……”时马上写进记忆。`
+// memoryFilesGuide: with the shared folder the memory is files every tier edits with its own file
+// tools (a coordinator or a lead only inside .memory/).
+const memoryFilesGuide = `
+- 开了共享文件夹时记忆就是文件：项目记忆在 .project-files/.memory/，用户记忆在 .user-files/.memory/。直接用 Read/Grep 查、用 Edit 改、用 Write 新建：主题文件开头写 frontmatter（name、description 一句话、可选 type: project|feedback|reference|user），后面是正文；平台会在 MEMORY.md 里自动加、删它的索引行。改之前先读，保留别人写的内容。
+- 用不了文件工具时（没有共享文件夹，或只读沙箱写不了），用 memory_write(name, description, content) 整篇写、memory_edit(name, old_string, new_string) 改一部分、memory_delete 删除（用户记忆加 scope="user"）。
+- MEMORY.md 只放简短要点和索引，细节放主题文件。发现记忆过时或写错了就改正，没用了就删掉。用户说“记住……”时马上写进记忆。
+- 用户说的是跨项目的偏好或习惯（“以后都……”“我习惯……”“回复用中文”）就写进用户记忆，只和本项目有关的写项目记忆。`
 
-const memoryReadOnlyGuide = `
-- 你只能读记忆。发现值得长期记住的事，写进 complete_task 的总结里，由组长整理进记忆。`
+const memoryMemberGuide = `
+- 没有共享文件夹时你没有记忆写工具：把值得长期记住的事写进 complete_task 的总结，由组长整理进记忆。`
 
-// memorySection is the auto-memory guide plus MEMORY.md (and files it does not link).
-func memorySection(e core.Employee, mem string) string {
-	how := memoryGuide + memoryWriteGuide
+// memorySection is the auto-memory guide plus both MEMORY.md (and files they do not link): the
+// user's own first, then the project's.
+func memorySection(e core.Employee, userMem, mem string) string {
+	how := memoryGuide + memoryFilesGuide
 	if e.Tier == "member" {
-		how = memoryGuide + memoryReadOnlyGuide
+		how += memoryMemberGuide
+	}
+	if userMem == "" {
+		userMem = "（还没有用户记忆）"
 	}
 	if mem == "" {
-		mem = "（还没有记忆）"
+		mem = "（还没有项目记忆）"
 	}
-	return "## 项目记忆\n" + how + "\n\n" + mem
+	return "## 记忆\n" + how + "\n\n## 用户记忆\n" + userMem + "\n\n## 项目记忆\n" + mem
 }
 
 // roster lists the thread's team: its lead and the project members it can work with.

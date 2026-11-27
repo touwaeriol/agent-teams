@@ -31,6 +31,7 @@ export const settingsRoutes: RouteRecordRaw[] = [
   { path: "/settings/git", component: () => import("@/pages/settings/GitRepos.vue") },
   { path: "/settings/servers", component: () => import("@/pages/settings/Servers.vue") },
   { path: "/settings/storage", component: () => import("@/pages/settings/SharedFolder.vue") },
+  { path: "/settings/memory", component: () => import("@/pages/settings/Memory.vue") },
   { path: "/settings/appearance", component: () => import("@/pages/settings/Appearance.vue") },
 ];
 

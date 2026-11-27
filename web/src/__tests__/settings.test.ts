@@ -350,7 +350,7 @@ describe("GitHub and admin", () => {
 
 describe("project settings", () => {
   it("memory files, lead timeouts, model choices", () => {
-    const f = (name: string) => ({ name, description: "", size: 0, updated_by: "user", updated_at: "" });
+    const f = (name: string) => ({ name, description: "", type: "", size: 0, updated_by: "user", updated_at: "" });
     expect(splitMemory([f("MEMORY.md"), f("a.md")])).toEqual({ index: f("MEMORY.md"), files: [f("a.md")] });
     expect(splitMemory(null)).toEqual({ index: undefined, files: [] });
     expect(memoryWriter("user")).toBe("你");

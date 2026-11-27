@@ -328,6 +328,9 @@ func (r *router) toolStarted(ctx context.Context, tx *core.Tx, sc core.SessionCo
 	if cat == "platform" || o.Summary == "" {
 		return []status.Observation{o}, nil
 	}
+	if err := r.e.touchMemory(ctx, tx, sc.Employee, o.Summary); err != nil {
+		return nil, err
+	}
 	text := fmt.Sprintf("%s %s", tool, o.Summary)
 	return []status.Observation{o}, tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.WorkThreadID(), sc.Employee.Name, text)
 }
