@@ -749,22 +749,26 @@ export interface FileDownload {
   data: string;
 }
 /**
- * Mount the owner's JuiceFS volume (the user's shared folder, juicefs-shared-storage design). Sent on the live link only to a daemon whose hello has fs_mount: after the welcome when the owner has a ready volume, and again when the volume or its credentials change (generation grows). Unreliable and never logged or stored: it carries the volume's credentials. The daemon mounts at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.
+ * Mount the shared JuiceFS volume at the owner's folder only (juicefs mount --subdir; juicefs-shared-storage design: one volume, a folder per user). Sent on the live link only to a daemon whose hello has fs_mount: after the welcome when the owner has a ready folder, and again when the folder or the credentials change (generation grows). Unreliable and never logged or stored: it carries the volume's credentials, which every node shares; the daemon must mount subdir and nothing else. The daemon mounts at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "FsMount".
  */
 export interface FsMount {
   /**
-   * Volume name (at-<id>), also the mount directory name.
+   * Volume name (the platform's one shared volume), also the mount directory name.
    */
   volume: string;
   /**
-   * Grows when the volume's credentials change; a remount is due when it differs from the mounted one.
+   * The owner's folder in the volume (users/<16 hex>): the only part of the volume the daemon mounts (juicefs mount --subdir).
+   */
+  subdir: string;
+  /**
+   * Grows when the owner's folder is provisioned again; a remount is due when it, the folder or the volume differs from the mounted one.
    */
   generation: number;
   /**
-   * Metadata engine URL without the password: postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x. The volume's object storage keys live in its metadata (juicefs format).
+   * Metadata engine URL without the password: postgres://juicefs@host:port/db?sslmode=...&search_path=juicefs. The volume's object storage keys live in its metadata (juicefs format).
    */
   meta_url: string;
   /**
@@ -807,6 +811,10 @@ export interface FsStatus {
   state: "mounting" | "mounted" | "unmounted" | "error";
   mode: "daemon" | "external";
   volume?: string;
+  /**
+   * The folder mounted (fs.mount subdir); absent for an external mount that does not know it.
+   */
+  subdir?: string;
   generation?: number;
   error?: string;
 }

@@ -4,182 +4,182 @@ package protocol
 
 // Node message types (envelope "type").
 const (
-	TypeAck                   = "ack"
-	TypeApprovalAck           = "approval.ack"
-	TypeApprovalCancel        = "approval.cancel"
-	TypeApprovalRequest       = "approval.request"
-	TypeApprovalResolve       = "approval.resolve"
-	TypeCredRequest           = "cred.request"
-	TypeCredResponse          = "cred.response"
-	TypeError                 = "error"
-	TypeFileChunk             = "file.chunk"
-	TypeFileDownload          = "file.download"
-	TypeFsMount               = "fs.mount"
-	TypeFsStatus              = "fs.status"
-	TypeFsUnmount             = "fs.unmount"
-	TypeGitCleanup            = "git.cleanup"
-	TypeGitPrepare            = "git.prepare"
-	TypeGitPurge              = "git.purge"
-	TypeGitPush               = "git.push"
-	TypeGitResult             = "git.result"
-	TypeGitStatus             = "git.status"
-	TypeHello                 = "hello"
-	TypeLog                   = "log"
-	TypeNodeConfig            = "node.config"
-	TypeNodeDrain             = "node.drain"
-	TypeNodeRuntimes          = "node.runtimes"
-	TypeNodeRuntimesRefresh   = "node.runtimes_refresh"
-	TypeNodeStats             = "node.stats"
-	TypeNodeUpgrade           = "node.upgrade"
-	TypeNodeUpgradeResult     = "node.upgrade_result"
-	TypeNodeUsage             = "node.usage"
-	TypeNodeUsageRefresh      = "node.usage_refresh"
-	TypeSessionClose          = "session.close"
-	TypeSessionClosed         = "session.closed"
-	TypeSessionCompact        = "session.compact"
-	TypeSessionCompacted      = "session.compacted"
-	TypeSessionContext        = "session.context"
+	TypeAck = "ack"
+	TypeApprovalAck = "approval.ack"
+	TypeApprovalCancel = "approval.cancel"
+	TypeApprovalRequest = "approval.request"
+	TypeApprovalResolve = "approval.resolve"
+	TypeCredRequest = "cred.request"
+	TypeCredResponse = "cred.response"
+	TypeError = "error"
+	TypeFileChunk = "file.chunk"
+	TypeFileDownload = "file.download"
+	TypeFsMount = "fs.mount"
+	TypeFsStatus = "fs.status"
+	TypeFsUnmount = "fs.unmount"
+	TypeGitCleanup = "git.cleanup"
+	TypeGitPrepare = "git.prepare"
+	TypeGitPurge = "git.purge"
+	TypeGitPush = "git.push"
+	TypeGitResult = "git.result"
+	TypeGitStatus = "git.status"
+	TypeHello = "hello"
+	TypeLog = "log"
+	TypeNodeConfig = "node.config"
+	TypeNodeDrain = "node.drain"
+	TypeNodeRuntimes = "node.runtimes"
+	TypeNodeRuntimesRefresh = "node.runtimes_refresh"
+	TypeNodeStats = "node.stats"
+	TypeNodeUpgrade = "node.upgrade"
+	TypeNodeUpgradeResult = "node.upgrade_result"
+	TypeNodeUsage = "node.usage"
+	TypeNodeUsageRefresh = "node.usage_refresh"
+	TypeSessionClose = "session.close"
+	TypeSessionClosed = "session.closed"
+	TypeSessionCompact = "session.compact"
+	TypeSessionCompacted = "session.compacted"
+	TypeSessionContext = "session.context"
 	TypeSessionContextRefresh = "session.context_refresh"
-	TypeSessionDelivered      = "session.delivered"
-	TypeSessionDigest         = "session.digest"
-	TypeSessionEvent          = "session.event"
-	TypeSessionExport         = "session.export"
-	TypeSessionExported       = "session.exported"
-	TypeSessionInterrupt      = "session.interrupt"
-	TypeSessionInterrupted    = "session.interrupted"
-	TypeSessionModeSet        = "session.mode_set"
-	TypeSessionOpen           = "session.open"
-	TypeSessionOpened         = "session.opened"
-	TypeSessionRelease        = "session.release"
-	TypeSessionSend           = "session.send"
-	TypeSessionSetMode        = "session.set_mode"
-	TypeSessionState          = "session.state"
-	TypeSessionWatch          = "session.watch"
-	TypeSessionsReport        = "sessions.report"
-	TypeSshCertRequest        = "ssh.cert_request"
-	TypeSshCertResponse       = "ssh.cert_response"
-	TypeSshServersUpdate      = "ssh.servers_update"
-	TypeStreamDelta           = "stream.delta"
-	TypeToolCall              = "tool.call"
-	TypeToolCancel            = "tool.cancel"
-	TypeToolResult            = "tool.result"
-	TypeWelcome               = "welcome"
+	TypeSessionDelivered = "session.delivered"
+	TypeSessionDigest = "session.digest"
+	TypeSessionEvent = "session.event"
+	TypeSessionExport = "session.export"
+	TypeSessionExported = "session.exported"
+	TypeSessionInterrupt = "session.interrupt"
+	TypeSessionInterrupted = "session.interrupted"
+	TypeSessionModeSet = "session.mode_set"
+	TypeSessionOpen = "session.open"
+	TypeSessionOpened = "session.opened"
+	TypeSessionRelease = "session.release"
+	TypeSessionSend = "session.send"
+	TypeSessionSetMode = "session.set_mode"
+	TypeSessionState = "session.state"
+	TypeSessionWatch = "session.watch"
+	TypeSessionsReport = "sessions.report"
+	TypeSshCertRequest = "ssh.cert_request"
+	TypeSshCertResponse = "ssh.cert_response"
+	TypeSshServersUpdate = "ssh.servers_update"
+	TypeStreamDelta = "stream.delta"
+	TypeToolCall = "tool.call"
+	TypeToolCancel = "tool.cancel"
+	TypeToolResult = "tool.result"
+	TypeWelcome = "welcome"
 )
 
 // Messages describes every node message type.
 var Messages = map[string]MessageMeta{
-	TypeAck:                   {Direction: Both, Reliable: false, Key: nil, New: func() any { return new(Ack) }},
-	TypeApprovalAck:           {Direction: NodeToConsole, Reliable: true, Key: []string{"approval_id"}, New: func() any { return new(ApprovalAck) }},
-	TypeApprovalCancel:        {Direction: NodeToConsole, Reliable: true, Key: []string{"approval_id"}, New: func() any { return new(ApprovalCancel) }},
-	TypeApprovalRequest:       {Direction: NodeToConsole, Reliable: true, Key: []string{"approval_id"}, New: func() any { return new(ApprovalRequest) }},
-	TypeApprovalResolve:       {Direction: ConsoleToNode, Reliable: true, Key: []string{"approval_id"}, New: func() any { return new(ApprovalResolve) }},
-	TypeCredRequest:           {Direction: NodeToConsole, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(CredRequest) }},
-	TypeCredResponse:          {Direction: ConsoleToNode, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(CredResponse) }},
-	TypeError:                 {Direction: Both, Reliable: false, Key: nil, New: func() any { return new(ProtocolError) }},
-	TypeFileChunk:             {Direction: NodeToConsole, Reliable: true, Key: []string{"upload_id", "index"}, New: func() any { return new(FileChunk) }},
-	TypeFileDownload:          {Direction: ConsoleToNode, Reliable: true, Key: []string{"download_id", "index"}, New: func() any { return new(FileDownload) }},
-	TypeFsMount:               {Direction: ConsoleToNode, Reliable: false, Key: []string{"volume", "generation"}, New: func() any { return new(FsMount) }},
-	TypeFsStatus:              {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(FsStatus) }},
-	TypeFsUnmount:             {Direction: ConsoleToNode, Reliable: false, Key: []string{"volume"}, New: func() any { return new(FsUnmount) }},
-	TypeGitCleanup:            {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitCleanup) }},
-	TypeGitPrepare:            {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPrepare) }},
-	TypeGitPurge:              {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPurge) }},
-	TypeGitPush:               {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPush) }},
-	TypeGitResult:             {Direction: NodeToConsole, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitResult) }},
-	TypeGitStatus:             {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitStatus) }},
-	TypeHello:                 {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(Hello) }},
-	TypeLog:                   {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(Log) }},
-	TypeNodeConfig:            {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(NodeConfig) }},
-	TypeNodeDrain:             {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(NodeDrain) }},
-	TypeNodeRuntimes:          {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(NodeRuntimes) }},
-	TypeNodeRuntimesRefresh:   {Direction: ConsoleToNode, Reliable: false, Key: nil, New: func() any { return new(NodeRuntimesRefresh) }},
-	TypeNodeStats:             {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(NodeStats) }},
-	TypeNodeUpgrade:           {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(NodeUpgrade) }},
-	TypeNodeUpgradeResult:     {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(NodeUpgradeResult) }},
-	TypeNodeUsage:             {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(NodeUsage) }},
-	TypeNodeUsageRefresh:      {Direction: ConsoleToNode, Reliable: false, Key: nil, New: func() any { return new(NodeUsageRefresh) }},
-	TypeSessionClose:          {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionClose) }},
-	TypeSessionClosed:         {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionClosed) }},
-	TypeSessionCompact:        {Direction: ConsoleToNode, Reliable: true, Key: []string{"compact_id"}, New: func() any { return new(SessionCompact) }},
-	TypeSessionCompacted:      {Direction: NodeToConsole, Reliable: true, Key: []string{"compact_id"}, New: func() any { return new(SessionCompacted) }},
-	TypeSessionContext:        {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(SessionContext) }},
+	TypeAck: {Direction: Both, Reliable: false, Key: nil, New: func() any { return new(Ack) }},
+	TypeApprovalAck: {Direction: NodeToConsole, Reliable: true, Key: []string{"approval_id"}, New: func() any { return new(ApprovalAck) }},
+	TypeApprovalCancel: {Direction: NodeToConsole, Reliable: true, Key: []string{"approval_id"}, New: func() any { return new(ApprovalCancel) }},
+	TypeApprovalRequest: {Direction: NodeToConsole, Reliable: true, Key: []string{"approval_id"}, New: func() any { return new(ApprovalRequest) }},
+	TypeApprovalResolve: {Direction: ConsoleToNode, Reliable: true, Key: []string{"approval_id"}, New: func() any { return new(ApprovalResolve) }},
+	TypeCredRequest: {Direction: NodeToConsole, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(CredRequest) }},
+	TypeCredResponse: {Direction: ConsoleToNode, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(CredResponse) }},
+	TypeError: {Direction: Both, Reliable: false, Key: nil, New: func() any { return new(ProtocolError) }},
+	TypeFileChunk: {Direction: NodeToConsole, Reliable: true, Key: []string{"upload_id", "index"}, New: func() any { return new(FileChunk) }},
+	TypeFileDownload: {Direction: ConsoleToNode, Reliable: true, Key: []string{"download_id", "index"}, New: func() any { return new(FileDownload) }},
+	TypeFsMount: {Direction: ConsoleToNode, Reliable: false, Key: []string{"volume", "generation"}, New: func() any { return new(FsMount) }},
+	TypeFsStatus: {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(FsStatus) }},
+	TypeFsUnmount: {Direction: ConsoleToNode, Reliable: false, Key: []string{"volume"}, New: func() any { return new(FsUnmount) }},
+	TypeGitCleanup: {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitCleanup) }},
+	TypeGitPrepare: {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPrepare) }},
+	TypeGitPurge: {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPurge) }},
+	TypeGitPush: {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitPush) }},
+	TypeGitResult: {Direction: NodeToConsole, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitResult) }},
+	TypeGitStatus: {Direction: ConsoleToNode, Reliable: true, Key: []string{"job_id"}, New: func() any { return new(GitStatus) }},
+	TypeHello: {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(Hello) }},
+	TypeLog: {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(Log) }},
+	TypeNodeConfig: {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(NodeConfig) }},
+	TypeNodeDrain: {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(NodeDrain) }},
+	TypeNodeRuntimes: {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(NodeRuntimes) }},
+	TypeNodeRuntimesRefresh: {Direction: ConsoleToNode, Reliable: false, Key: nil, New: func() any { return new(NodeRuntimesRefresh) }},
+	TypeNodeStats: {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(NodeStats) }},
+	TypeNodeUpgrade: {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(NodeUpgrade) }},
+	TypeNodeUpgradeResult: {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(NodeUpgradeResult) }},
+	TypeNodeUsage: {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(NodeUsage) }},
+	TypeNodeUsageRefresh: {Direction: ConsoleToNode, Reliable: false, Key: nil, New: func() any { return new(NodeUsageRefresh) }},
+	TypeSessionClose: {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionClose) }},
+	TypeSessionClosed: {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionClosed) }},
+	TypeSessionCompact: {Direction: ConsoleToNode, Reliable: true, Key: []string{"compact_id"}, New: func() any { return new(SessionCompact) }},
+	TypeSessionCompacted: {Direction: NodeToConsole, Reliable: true, Key: []string{"compact_id"}, New: func() any { return new(SessionCompacted) }},
+	TypeSessionContext: {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(SessionContext) }},
 	TypeSessionContextRefresh: {Direction: ConsoleToNode, Reliable: false, Key: nil, New: func() any { return new(SessionContextRefresh) }},
-	TypeSessionDelivered:      {Direction: NodeToConsole, Reliable: true, Key: []string{"msg_id"}, New: func() any { return new(SessionDelivered) }},
-	TypeSessionDigest:         {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(SessionDigest) }},
-	TypeSessionEvent:          {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "event_no"}, New: func() any { return new(SessionEvent) }},
-	TypeSessionExport:         {Direction: ConsoleToNode, Reliable: true, Key: []string{"export_id"}, New: func() any { return new(SessionExport) }},
-	TypeSessionExported:       {Direction: NodeToConsole, Reliable: true, Key: []string{"export_id"}, New: func() any { return new(SessionExported) }},
-	TypeSessionInterrupt:      {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(SessionInterrupt) }},
-	TypeSessionInterrupted:    {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(SessionInterrupted) }},
-	TypeSessionModeSet:        {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "request_id"}, New: func() any { return new(SessionModeSet) }},
-	TypeSessionOpen:           {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionOpen) }},
-	TypeSessionOpened:         {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionOpened) }},
-	TypeSessionRelease:        {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionRelease) }},
-	TypeSessionSend:           {Direction: ConsoleToNode, Reliable: true, Key: []string{"msg_id"}, New: func() any { return new(SessionSend) }},
-	TypeSessionSetMode:        {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(SessionSetMode) }},
-	TypeSessionState:          {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(SessionState) }},
-	TypeSessionWatch:          {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(SessionWatch) }},
-	TypeSessionsReport:        {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(SessionsReport) }},
-	TypeSshCertRequest:        {Direction: NodeToConsole, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(SshCertRequest) }},
-	TypeSshCertResponse:       {Direction: ConsoleToNode, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(SshCertResponse) }},
-	TypeSshServersUpdate:      {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen", "version"}, New: func() any { return new(SshServersUpdate) }},
-	TypeStreamDelta:           {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(StreamDelta) }},
-	TypeToolCall:              {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "call_id"}, New: func() any { return new(ToolCall) }},
-	TypeToolCancel:            {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "call_id"}, New: func() any { return new(ToolCancel) }},
-	TypeToolResult:            {Direction: ConsoleToNode, Reliable: true, Key: []string{"call_id"}, New: func() any { return new(ToolResult) }},
-	TypeWelcome:               {Direction: ConsoleToNode, Reliable: false, Key: nil, New: func() any { return new(Welcome) }},
+	TypeSessionDelivered: {Direction: NodeToConsole, Reliable: true, Key: []string{"msg_id"}, New: func() any { return new(SessionDelivered) }},
+	TypeSessionDigest: {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(SessionDigest) }},
+	TypeSessionEvent: {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "event_no"}, New: func() any { return new(SessionEvent) }},
+	TypeSessionExport: {Direction: ConsoleToNode, Reliable: true, Key: []string{"export_id"}, New: func() any { return new(SessionExport) }},
+	TypeSessionExported: {Direction: NodeToConsole, Reliable: true, Key: []string{"export_id"}, New: func() any { return new(SessionExported) }},
+	TypeSessionInterrupt: {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(SessionInterrupt) }},
+	TypeSessionInterrupted: {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(SessionInterrupted) }},
+	TypeSessionModeSet: {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "request_id"}, New: func() any { return new(SessionModeSet) }},
+	TypeSessionOpen: {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionOpen) }},
+	TypeSessionOpened: {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionOpened) }},
+	TypeSessionRelease: {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen"}, New: func() any { return new(SessionRelease) }},
+	TypeSessionSend: {Direction: ConsoleToNode, Reliable: true, Key: []string{"msg_id"}, New: func() any { return new(SessionSend) }},
+	TypeSessionSetMode: {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(SessionSetMode) }},
+	TypeSessionState: {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(SessionState) }},
+	TypeSessionWatch: {Direction: ConsoleToNode, Reliable: true, Key: []string{"id"}, New: func() any { return new(SessionWatch) }},
+	TypeSessionsReport: {Direction: NodeToConsole, Reliable: true, Key: nil, New: func() any { return new(SessionsReport) }},
+	TypeSshCertRequest: {Direction: NodeToConsole, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(SshCertRequest) }},
+	TypeSshCertResponse: {Direction: ConsoleToNode, Reliable: false, Key: []string{"req_id"}, New: func() any { return new(SshCertResponse) }},
+	TypeSshServersUpdate: {Direction: ConsoleToNode, Reliable: true, Key: []string{"session_id", "open_gen", "version"}, New: func() any { return new(SshServersUpdate) }},
+	TypeStreamDelta: {Direction: NodeToConsole, Reliable: false, Key: nil, New: func() any { return new(StreamDelta) }},
+	TypeToolCall: {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "call_id"}, New: func() any { return new(ToolCall) }},
+	TypeToolCancel: {Direction: NodeToConsole, Reliable: true, Key: []string{"session_id", "call_id"}, New: func() any { return new(ToolCancel) }},
+	TypeToolResult: {Direction: ConsoleToNode, Reliable: true, Key: []string{"call_id"}, New: func() any { return new(ToolResult) }},
+	TypeWelcome: {Direction: ConsoleToNode, Reliable: false, Key: nil, New: func() any { return new(Welcome) }},
 }
 
 // Platform tool names.
 const (
-	ToolAskLead            = "ask_lead"
-	ToolAskUser            = "ask_user"
-	ToolAssignSubtask      = "assign_subtask"
-	ToolAssignTask         = "assign_task"
-	ToolBroadcast          = "broadcast"
-	ToolCancelTask         = "cancel_task"
-	ToolCloseQuestion      = "close_question"
-	ToolCloseSubthread     = "close_subthread"
-	ToolCompleteTask       = "complete_task"
-	ToolEnqueueMerge       = "enqueue_merge"
-	ToolFinish             = "finish"
-	ToolForwardToThread    = "forward_to_thread"
-	ToolGetTask            = "get_task"
-	ToolListDeliverables   = "list_deliverables"
-	ToolListTasks          = "list_tasks"
-	ToolListTeam           = "list_team"
-	ToolListThreads        = "list_threads"
-	ToolMemoryDelete       = "memory_delete"
-	ToolMemoryEdit         = "memory_edit"
-	ToolMemoryList         = "memory_list"
-	ToolMemoryRead         = "memory_read"
-	ToolMemoryWrite        = "memory_write"
+	ToolAskLead = "ask_lead"
+	ToolAskUser = "ask_user"
+	ToolAssignSubtask = "assign_subtask"
+	ToolAssignTask = "assign_task"
+	ToolBroadcast = "broadcast"
+	ToolCancelTask = "cancel_task"
+	ToolCloseQuestion = "close_question"
+	ToolCloseSubthread = "close_subthread"
+	ToolCompleteTask = "complete_task"
+	ToolEnqueueMerge = "enqueue_merge"
+	ToolFinish = "finish"
+	ToolForwardToThread = "forward_to_thread"
+	ToolGetTask = "get_task"
+	ToolListDeliverables = "list_deliverables"
+	ToolListTasks = "list_tasks"
+	ToolListTeam = "list_team"
+	ToolListThreads = "list_threads"
+	ToolMemoryDelete = "memory_delete"
+	ToolMemoryEdit = "memory_edit"
+	ToolMemoryList = "memory_list"
+	ToolMemoryRead = "memory_read"
+	ToolMemoryWrite = "memory_write"
 	ToolMessageCoordinator = "message_coordinator"
-	ToolMessageThread      = "message_thread"
-	ToolOpenPr             = "open_pr"
-	ToolOpenSubthread      = "open_subthread"
-	ToolOpenThread         = "open_thread"
+	ToolMessageThread = "message_thread"
+	ToolOpenPr = "open_pr"
+	ToolOpenSubthread = "open_subthread"
+	ToolOpenThread = "open_thread"
 	ToolPublishDeliverable = "publish_deliverable"
-	ToolPublishFile        = "publish_file"
-	ToolPushBranch         = "push_branch"
-	ToolReadAttachment     = "read_attachment"
-	ToolReadDeliverable    = "read_deliverable"
-	ToolReadMessages       = "read_messages"
-	ToolRemember           = "remember"
-	ToolReplyTo            = "reply_to"
-	ToolReportProgress     = "report_progress"
-	ToolRequestReview      = "request_review"
-	ToolReviewPermission   = "review_permission"
-	ToolScheduleCancel     = "schedule_cancel"
-	ToolScheduleCreate     = "schedule_create"
-	ToolScheduleList       = "schedule_list"
-	ToolScheduleUpdate     = "schedule_update"
-	ToolSendMessage        = "send_message"
-	ToolSetStatus          = "set_status"
-	ToolTellUser           = "tell_user"
-	ToolThreadStatus       = "thread_status"
-	ToolUpdatePlan         = "update_plan"
-	ToolWaitTask           = "wait_task"
+	ToolPublishFile = "publish_file"
+	ToolPushBranch = "push_branch"
+	ToolReadAttachment = "read_attachment"
+	ToolReadDeliverable = "read_deliverable"
+	ToolReadMessages = "read_messages"
+	ToolRemember = "remember"
+	ToolReplyTo = "reply_to"
+	ToolReportProgress = "report_progress"
+	ToolRequestReview = "request_review"
+	ToolReviewPermission = "review_permission"
+	ToolScheduleCancel = "schedule_cancel"
+	ToolScheduleCreate = "schedule_create"
+	ToolScheduleList = "schedule_list"
+	ToolScheduleUpdate = "schedule_update"
+	ToolSendMessage = "send_message"
+	ToolSetStatus = "set_status"
+	ToolTellUser = "tell_user"
+	ToolThreadStatus = "thread_status"
+	ToolUpdatePlan = "update_plan"
+	ToolWaitTask = "wait_task"
 )
 
 // Tools describes every platform tool.

@@ -16,7 +16,6 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
-	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
 
 type formFile struct{ name, body string }
@@ -102,7 +101,7 @@ func TestProjectFiles(t *testing.T) {
 	if len(up.Files) != 2 || up.Files[0].Path != "docs/纪要.md" || up.Files[1].Path != "docs/web/page.html" || up.Files[0].Size != int64(len("# 纪要")) {
 		t.Fatalf("uploaded %+v", up)
 	}
-	onDisk, err := os.ReadFile(filepath.Join(fakes.root, userfs.NamesFor(tm.ownerID(t)).Volume, "projects", pid, "docs", "纪要.md"))
+	onDisk, err := os.ReadFile(filepath.Join(fakes.dir(tm.ownerID(t)), "projects", pid, "docs", "纪要.md"))
 	if err != nil || string(onDisk) != "# 纪要" {
 		t.Fatalf("volume copy %q %v", onDisk, err)
 	}
@@ -164,7 +163,7 @@ func TestProjectFiles(t *testing.T) {
 			t.Fatalf("mkdir %q = %d", root, code)
 		}
 	}
-	projectDir := filepath.Join(fakes.root, userfs.NamesFor(tm.ownerID(t)).Volume, "projects", pid)
+	projectDir := filepath.Join(fakes.dir(tm.ownerID(t)), "projects", pid)
 	if _, err := os.Stat(filepath.Join(projectDir, "docs", "纪要.md")); err != nil {
 		t.Fatalf("project folder touched: %v", err)
 	}

@@ -31,8 +31,8 @@ func setNodeFs(t *testing.T, st *store.Store, nodeID, status string) {
 	}
 }
 
-// TestGenerationGrowsAcrossReenable: a volume switched off and on again keeps its deterministic
-// name but never its generation, and its secrets open under the new one.
+// TestGenerationGrowsAcrossReenable: a folder switched off and on again keeps its deterministic
+// path but never its generation (nodes remount).
 func TestGenerationGrowsAcrossReenable(t *testing.T) {
 	s, _, _, _, _ := newTest(t)
 	ctx := context.Background()
@@ -48,7 +48,7 @@ func TestGenerationGrowsAcrossReenable(t *testing.T) {
 	if err != nil || second.State != StateReady {
 		t.Fatalf("re-enable: %+v %v", second, err)
 	}
-	if second.Volume != first.Volume || second.Generation <= first.Generation {
+	if second.Subdir != first.Subdir || second.Generation <= first.Generation {
 		t.Fatalf("generation %d after %d", second.Generation, first.Generation)
 	}
 	if spec, err := s.MountSpec(ctx, "u1"); err != nil || spec.Generation != second.Generation {
@@ -90,7 +90,7 @@ func TestEnableSurvivesClientCancel(t *testing.T) {
 func TestDisableWhileProvisioningIsBusy(t *testing.T) {
 	s, _, _, vols, st := newTest(t)
 	ctx := context.Background()
-	if _, _, err := insert(ctx, st.Pool, s.vault, "u1", 20); err != nil {
+	if _, _, err := insert(ctx, st.Pool, DefaultVolume, "u1", 20); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Disable(ctx, "u1"); !errors.Is(err, ErrBusy) {
@@ -109,14 +109,16 @@ func TestDisableWhileProvisioningIsBusy(t *testing.T) {
 	if err := setState(ctx, st.Pool, "u1", StateDeleting, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Disable(ctx, "u1"); err != nil || vols.destroys() != 0 {
-		t.Fatalf("disable while deleting: %v destroyed %d", err, vols.destroys())
+	if err := s.Disable(ctx, "u1"); err != nil || !exists(vols.userPath("u1")) {
+		t.Fatalf("disable while deleting: %v", err)
 	}
 }
 
-// TestDisableWaitsForUnmount: the volume is destroyed only once the daemon that mounted it
-// reports it unmounted; a Docker-mounted node cannot unmount, so the deletion goes on after the
-// bounded wait.
+func exists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// TestDisableWaitsForUnmount: the folder is removed only once the daemon that mounted it reports
+// it unmounted (another user's folder of the same volume does not count); a Docker-mounted node
+// cannot unmount, so the deletion goes on after the bounded wait.
 func TestDisableWaitsForUnmount(t *testing.T) {
 	s, _, _, vols, st := newTest(t)
 	ctx := context.Background()
@@ -124,8 +126,8 @@ func TestDisableWaitsForUnmount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	setNodeFs(t, st, "n1", `{"state":"mounted","mode":"daemon","volume":"`+vol.Volume+`","generation":1}`)
-	setNodeFs(t, st, "n2", `{"state":"mounted","mode":"daemon","volume":"at-other"}`)
+	setNodeFs(t, st, "n1", `{"state":"mounted","mode":"daemon","volume":"`+vol.Volume+`","subdir":"`+vol.Subdir+`","generation":1}`)
+	setNodeFs(t, st, "n2", `{"state":"mounted","mode":"daemon","volume":"`+vol.Volume+`","subdir":"users/other"}`)
 	if err := s.Disable(ctx, "u1"); err != nil {
 		t.Fatal(err)
 	}
@@ -133,13 +135,13 @@ func TestDisableWaitsForUnmount(t *testing.T) {
 		t.Fatalf("state %q", got.State)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if vols.destroys() != 0 {
-		t.Fatal("destroyed while a node still mounts it")
+	if !exists(vols.userPath("u1")) {
+		t.Fatal("removed while a node still mounts it")
 	}
 	setNodeFs(t, st, "n1", `{"state":"unmounted","mode":"daemon"}`)
 	s.Wait()
-	if _, err := s.Get(ctx, "u1"); !IsNotFound(err) || vols.destroys() != 1 {
-		t.Fatalf("after unmount: %v destroyed %d", err, vols.destroys())
+	if _, err := s.Get(ctx, "u1"); !IsNotFound(err) || exists(vols.userPath("u1")) {
+		t.Fatalf("after unmount: %v", err)
 	}
 
 	s.UnmountWait = 50 * time.Millisecond
@@ -151,26 +153,27 @@ func TestDisableWaitsForUnmount(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Wait()
-	if vols.destroys() != 2 {
-		t.Fatalf("external mount held the deletion: destroyed %d", vols.destroys())
+	if exists(vols.userPath("u1")) {
+		t.Fatal("external mount held the deletion")
 	}
 }
 
-// TestDisableWithoutMetadata: a volume whose provisioning never created its role (state error)
-// is deleted without juicefs destroy.
-func TestDisableWithoutMetadata(t *testing.T) {
-	s, m, _, vols, _ := newTest(t)
+// TestDisableWithoutVolume: a folder whose provisioning failed before the volume existed is
+// deleted all the same.
+func TestDisableWithoutVolume(t *testing.T) {
+	s, m, _, _, _ := newTest(t)
 	ctx := context.Background()
 	m.fail = errors.New("connection refused")
 	if vol, _ := s.Enable(ctx, "u1"); vol.State != StateError {
 		t.Fatalf("state %q", vol.State)
 	}
+	m.fail = nil
 	if err := s.Disable(ctx, "u1"); err != nil {
 		t.Fatal(err)
 	}
 	s.Wait()
-	if _, err := s.Get(ctx, "u1"); !IsNotFound(err) || vols.destroys() != 0 {
-		t.Fatalf("%v destroyed %d", err, vols.destroys())
+	if _, err := s.Get(ctx, "u1"); !IsNotFound(err) {
+		t.Fatal(err)
 	}
 }
 
@@ -225,13 +228,13 @@ func TestConsoleMetaTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Wait()
-	urls := append([]string{vols.formatted[NamesFor("u1").Volume].MetaURL}, append(vols.opened, vols.destroyAt...)...)
+	urls := append([]string{vols.formatted[DefaultVolume].MetaURL}, vols.opened...)
 	for _, u := range urls {
 		if !strings.Contains(u, "sslmode=verify-full") || !strings.Contains(u, "sslrootcert=%2Fetc%2Fca.pem") || strings.Contains(u, "pw") {
 			t.Fatalf("meta url %q", u)
 		}
 	}
-	if len(urls) != 3 {
+	if len(urls) < 3 {
 		t.Fatalf("urls %v", urls)
 	}
 }

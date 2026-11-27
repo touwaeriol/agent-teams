@@ -25,7 +25,7 @@ func TestRemoveRetried(t *testing.T) {
 	if _, err := s.Enable(ctx, "u1"); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(vols.root, NamesFor("u1").Volume, "projects", "p1")
+	dir := vols.userPath("u1", "projects", "p1")
 	if err := os.MkdirAll(filepath.Join(dir, ".memory"), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -3255,13 +3255,14 @@ func (j *ForwardToThreadResult) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Mount the owner's JuiceFS volume (the user's shared folder,
-// juicefs-shared-storage design). Sent on the live link only to a daemon whose
-// hello has fs_mount: after the welcome when the owner has a ready volume, and
-// again when the volume or its credentials change (generation grows). Unreliable
-// and never logged or stored: it carries the volume's credentials. The daemon
-// mounts at its own data directory and answers with fs.status; a generation older
-// than the one mounted is ignored.
+// Mount the shared JuiceFS volume at the owner's folder only (juicefs mount
+// --subdir; juicefs-shared-storage design: one volume, a folder per user). Sent on
+// the live link only to a daemon whose hello has fs_mount: after the welcome when
+// the owner has a ready folder, and again when the folder or the credentials
+// change (generation grows). Unreliable and never logged or stored: it carries the
+// volume's credentials, which every node shares; the daemon must mount subdir and
+// nothing else. The daemon mounts at its own data directory and answers with
+// fs.status; a generation older than the one mounted is ignored.
 type FsMount struct {
 	// Local cache size; default 10240.
 	CacheSizeMB *int `json:"cache_size_mb,omitempty,omitzero"`
@@ -3272,19 +3273,23 @@ type FsMount struct {
 	// binary.
 	Client FsMountClient `json:"client"`
 
-	// Grows when the volume's credentials change; a remount is due when it differs
-	// from the mounted one.
+	// Grows when the owner's folder is provisioned again; a remount is due when it,
+	// the folder or the volume differs from the mounted one.
 	Generation int `json:"generation"`
 
 	// Goes in META_PASSWORD.
 	MetaPassword string `json:"meta_password"`
 
 	// Metadata engine URL without the password:
-	// postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x. The volume's
+	// postgres://juicefs@host:port/db?sslmode=...&search_path=juicefs. The volume's
 	// object storage keys live in its metadata (juicefs format).
 	MetaURL string `json:"meta_url"`
 
-	// Volume name (at-<id>), also the mount directory name.
+	// The owner's folder in the volume (users/<16 hex>): the only part of the volume
+	// the daemon mounts (juicefs mount --subdir).
+	Subdir string `json:"subdir"`
+
+	// Volume name (the platform's one shared volume), also the mount directory name.
 	Volume string `json:"volume"`
 }
 
@@ -3389,6 +3394,9 @@ func (j *FsMount) UnmarshalJSON(value []byte) error {
 	if _, ok := raw["meta_url"]; raw != nil && !ok {
 		return fmt.Errorf("field meta_url in FsMount: required")
 	}
+	if _, ok := raw["subdir"]; raw != nil && !ok {
+		return fmt.Errorf("field subdir in FsMount: required")
+	}
 	if _, ok := raw["volume"]; raw != nil && !ok {
 		return fmt.Errorf("field volume in FsMount: required")
 	}
@@ -3408,6 +3416,12 @@ func (j *FsMount) UnmarshalJSON(value []byte) error {
 	}
 	if utf8.RuneCountInString(string(plain.MetaURL)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "meta_url", 1)
+	}
+	if matched, _ := regexp.MatchString(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`, string(plain.Subdir)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Subdir", `^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
+	}
+	if utf8.RuneCountInString(string(plain.Subdir)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "subdir", 200)
 	}
 	if matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9-]{2,62}$`, string(plain.Volume)); !matched {
 		return fmt.Errorf("field %s pattern match: must match %s", "Volume", `^[a-z0-9][a-z0-9-]{2,62}$`)
@@ -3433,6 +3447,10 @@ type FsStatus struct {
 
 	// State corresponds to the JSON schema field "state".
 	State FsStatusState `json:"state"`
+
+	// The folder mounted (fs.mount subdir); absent for an external mount that does
+	// not know it.
+	Subdir *string `json:"subdir,omitempty,omitzero"`
 
 	// Volume corresponds to the JSON schema field "volume".
 	Volume *string `json:"volume,omitempty,omitzero"`
@@ -3524,6 +3542,9 @@ func (j *FsStatus) UnmarshalJSON(value []byte) error {
 	}
 	if plain.Generation != nil && 1 > *plain.Generation {
 		return fmt.Errorf("field %s: must be >= %v", "generation", 1)
+	}
+	if plain.Subdir != nil && utf8.RuneCountInString(string(*plain.Subdir)) > 200 {
+		return fmt.Errorf("field %s length: must be <= %d", "subdir", 200)
 	}
 	*j = FsStatus(plain)
 	return nil

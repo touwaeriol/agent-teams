@@ -30,6 +30,11 @@
     "volume": {
       "type": "string"
     },
+    "subdir": {
+      "description": "The folder mounted (fs.mount subdir); absent for an external mount that does not know it.",
+      "type": "string",
+      "maxLength": 200
+    },
     "generation": {
       "type": "integer",
       "minimum": 1

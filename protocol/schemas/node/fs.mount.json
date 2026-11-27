@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/fs.mount.json",
   "title": "FsMount",
-  "description": "Mount the owner's JuiceFS volume (the user's shared folder, juicefs-shared-storage design). Sent on the live link only to a daemon whose hello has fs_mount: after the welcome when the owner has a ready volume, and again when the volume or its credentials change (generation grows). Unreliable and never logged or stored: it carries the volume's credentials. The daemon mounts at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.",
+  "description": "Mount the shared JuiceFS volume at the owner's folder only (juicefs mount --subdir; juicefs-shared-storage design: one volume, a folder per user). Sent on the live link only to a daemon whose hello has fs_mount: after the welcome when the owner has a ready folder, and again when the folder or the credentials change (generation grows). Unreliable and never logged or stored: it carries the volume's credentials, which every node shares; the daemon must mount subdir and nothing else. The daemon mounts at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.",
   "x-direction": "console_to_node",
   "x-key": [
     "volume",
@@ -12,6 +12,7 @@
   "type": "object",
   "required": [
     "volume",
+    "subdir",
     "generation",
     "meta_url",
     "meta_password",
@@ -19,17 +20,23 @@
   ],
   "properties": {
     "volume": {
-      "description": "Volume name (at-<id>), also the mount directory name.",
+      "description": "Volume name (the platform's one shared volume), also the mount directory name.",
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"
     },
+    "subdir": {
+      "description": "The owner's folder in the volume (users/<16 hex>): the only part of the volume the daemon mounts (juicefs mount --subdir).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
+      "maxLength": 200
+    },
     "generation": {
-      "description": "Grows when the volume's credentials change; a remount is due when it differs from the mounted one.",
+      "description": "Grows when the owner's folder is provisioned again; a remount is due when it, the folder or the volume differs from the mounted one.",
       "type": "integer",
       "minimum": 1
     },
     "meta_url": {
-      "description": "Metadata engine URL without the password: postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x. The volume's object storage keys live in its metadata (juicefs format).",
+      "description": "Metadata engine URL without the password: postgres://juicefs@host:port/db?sslmode=...&search_path=juicefs. The volume's object storage keys live in its metadata (juicefs format).",
       "type": "string",
       "minLength": 1
     },

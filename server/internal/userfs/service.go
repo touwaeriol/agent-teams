@@ -13,47 +13,36 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// Meta creates and drops a volume's PostgreSQL role and schema.
+// Meta creates the volume's PostgreSQL role and schema and reads usage from its metadata.
 type Meta interface {
 	// Ensure creates the role (login, password) and its schema, or resets the password of an
 	// existing one. Idempotent.
 	Ensure(ctx context.Context, role, password string) error
-	// Drop removes the schema (with every table) and the role. A missing one is not an error.
-	Drop(ctx context.Context, role string) error
-	// Exists tells whether the role and its schema are both there (a volume whose metadata was
-	// never created, or already dropped, has nothing for juicefs destroy to work on).
-	Exists(ctx context.Context, role string) (bool, error)
-	// Usage reads the volume's space and file counters from its metadata (zero before the volume
-	// was formatted).
-	Usage(ctx context.Context, role string) (Usage, error)
-	// Roles lists the volume roles that have a schema (jfs_<16 hex>).
-	Roles(ctx context.Context) ([]string, error)
+	// Usage reads what a folder of the volume holds from its directory quota (zero before the
+	// volume was formatted or the folder got its quota).
+	Usage(ctx context.Context, schema, dir string) (Usage, error)
 }
 
-// Usage is what a volume holds: bytes in use (JuiceFS counts in 4 KiB blocks) and files plus folders.
+// Usage is what a folder holds: bytes in use (JuiceFS counts in 4 KiB blocks) and files plus folders.
 type Usage struct {
 	UsedBytes int64 `json:"used_bytes"`
 	Inodes    int64 `json:"inodes"`
 }
 
-// IAM creates and removes a volume's object-store account.
+// IAM creates the volume's object-store account.
 type IAM interface {
 	// Ensure creates (or resets) the account and attaches a policy allowing only the volume's prefix.
 	Ensure(ctx context.Context, n Names, secretKey string, policy []byte) error
-	// Remove deletes the account and its policy. Missing ones are not errors.
-	Remove(ctx context.Context, n Names) error
 }
 
-// Volumes formats and destroys JuiceFS volumes (the juicefs CLI).
+// Volumes formats the JuiceFS volume, sets folder quotas and opens its tree (the juicefs CLI).
 type Volumes interface {
 	// Format creates the volume, or updates the settings of an existing one with that name.
 	Format(ctx context.Context, f FormatSpec) error
-	// Destroy deletes the volume's objects and metadata. A volume that was never formatted is not an error.
-	Destroy(ctx context.Context, metaURL, metaPassword string) error
+	// Quota sets the capacity of a folder of the volume (path from the root, "/users/<id>").
+	Quota(ctx context.Context, metaURL, metaPassword, path string, capacityGB int) error
 	// Files opens the volume's tree for the console (no mount).
 	Files(ctx context.Context, volume, metaURL, metaPassword string) (Files, error)
-	// Close releases what Files holds for the volume (before it is destroyed).
-	Close(volume string)
 }
 
 // FormatSpec is one juicefs format.
@@ -64,10 +53,10 @@ type FormatSpec struct {
 	Bucket       string
 	AccessKey    string
 	SecretKey    string
-	CapacityGB   int
 }
 
-// Service provisions volumes and hands nodes their mount settings.
+// Service provisions the shared volume and the users' folders in it, and hands nodes their mount
+// settings.
 type Service struct {
 	cfg     Config
 	db      store.DB
@@ -86,10 +75,13 @@ type Service struct {
 	bg sync.WaitGroup
 
 	orphanMu sync.Mutex
-	suspects map[string]bool // roles without a volume row at the last SweepOrphans
+	suspects map[string]bool // folders without a row at the last SweepOrphans
+
+	volMu  sync.Mutex
+	shared *shared // the volume, once provisioned by this process
 }
 
-// ErrBusy: the volume is being switched on; it can be deleted once that ends.
+// ErrBusy: the folder is being switched on; it can be deleted once that ends.
 var ErrBusy = errors.New("共享文件夹正在开启，请稍后再删除")
 
 // New builds the service; meta, iam and volumes nil = the real backends from cfg.
@@ -102,12 +94,12 @@ func (s *Service) Enabled() bool {
 	return s != nil && s.cfg.Enabled() && s.vault.Ready() && s.meta != nil && s.iam != nil && s.volumes != nil
 }
 
-// Get returns the user's volume.
+// Get returns the user's folder.
 func (s *Service) Get(ctx context.Context, userID string) (Volume, error) {
 	return Get(ctx, s.db, userID)
 }
 
-// Usage is what the user's ready volume holds (ErrNotReady-style errors from Files: not found, not ready).
+// Usage is what the user's ready folder holds (ErrNotFound when the user has none).
 func (s *Service) Usage(ctx context.Context, userID string) (Usage, error) {
 	vol, err := s.Get(ctx, userID)
 	if err != nil {
@@ -116,10 +108,10 @@ func (s *Service) Usage(ctx context.Context, userID string) (Usage, error) {
 	if vol.State != StateReady {
 		return Usage{}, nil
 	}
-	return s.meta.Usage(ctx, vol.MetaRole)
+	return s.meta.Usage(ctx, s.cfg.SharedNames().Role, vol.Subdir)
 }
 
-// Enable provisions the user's volume (or finishes a provisioning that failed). It returns the
+// Enable provisions the user's folder (or finishes a provisioning that failed). It returns the
 // volume as it stands after this attempt: ready, or error with the reason; provisioning or
 // deleting when another call is at it. Only the call that created the row or claimed the failed
 // one provisions, and it finishes even when its client goes away.
@@ -128,7 +120,7 @@ func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
 		return Volume{}, ErrDisabled
 	}
 	ctx = context.WithoutCancel(ctx)
-	vol, owned, err := insert(ctx, s.db, s.vault, userID, s.cfg.CapacityGB)
+	vol, owned, err := insert(ctx, s.db, s.cfg.SharedNames().Volume, userID, s.cfg.CapacityGB)
 	if err == nil && !owned {
 		var claimed Volume
 		if claimed, owned, err = claimProvisioning(ctx, s.db, userID); owned {
@@ -139,7 +131,7 @@ func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
 		return vol, err
 	}
 	if err := s.provision(ctx, vol); err != nil {
-		s.log.Warn("shared folder provisioning failed", "user_id", userID, "volume", vol.Volume, "err", err)
+		s.log.Warn("shared folder provisioning failed", "user_id", userID, "subdir", vol.Subdir, "err", err)
 		_ = setState(ctx, s.db, userID, StateError, err.Error())
 		return Get(ctx, s.db, userID)
 	}
@@ -174,44 +166,31 @@ func (s *Service) ProvisionAll(ctx context.Context) (int, error) {
 	return ready, nil
 }
 
+// provision makes the user's folder in the volume (provisioning the volume first when this
+// process has not yet), with its projects/ and shared/ folders and its quota.
 func (s *Service) provision(ctx context.Context, vol Volume) error {
-	metaURL, sec, err := s.consoleMeta(ctx, vol)
+	v, err := s.volume(ctx)
 	if err != nil {
 		return err
 	}
-	n := vol.Names()
-	if err := s.meta.Ensure(ctx, n.Role, sec.MetaPassword); err != nil {
-		return fmt.Errorf("元数据库：%w", err)
+	f, err := s.volumes.Files(ctx, v.names.Volume, v.metaURL, v.secrets.MetaPassword)
+	if err != nil {
+		return fmt.Errorf("打开共享卷：%w", err)
 	}
-	if err := s.iam.Ensure(ctx, n, sec.SecretKey, Policy(s.cfg.Bucket, n.Volume)); err != nil {
-		return fmt.Errorf("对象存储账号：%w", err)
+	for _, dir := range []string{vol.Subdir + "/projects", vol.Subdir + "/" + SharedDir} {
+		if err := f.Mkdir(ctx, dir); err != nil {
+			return fmt.Errorf("创建目录 %s：%w", dir, err)
+		}
 	}
-	f := FormatSpec{MetaURL: metaURL, MetaPassword: sec.MetaPassword, Volume: n.Volume, CapacityGB: vol.CapacityGB,
-		Bucket: s.cfg.BucketURL(), AccessKey: n.AccessKey, SecretKey: sec.SecretKey}
-	if err := s.volumes.Format(ctx, f); err != nil {
-		return fmt.Errorf("juicefs format：%w", err)
+	if err := s.volumes.Quota(ctx, v.metaURL, v.secrets.MetaPassword, "/"+vol.Subdir, vol.CapacityGB); err != nil {
+		return fmt.Errorf("目录配额：%w", err)
 	}
 	return nil
 }
 
-// consoleMeta is the volume's metadata URL as the console reaches it (AdminURL's host and TLS
-// settings) and its opened secrets.
-func (s *Service) consoleMeta(ctx context.Context, vol Volume) (string, Secrets, error) {
-	sec, err := secrets(ctx, s.db, s.vault, vol)
-	if err != nil {
-		return "", sec, fmt.Errorf("open secrets: %w", err)
-	}
-	db, err := s.cfg.database()
-	if err != nil {
-		return "", sec, err
-	}
-	return metaURL(vol.MetaRole, s.cfg.adminHost(), db, s.cfg.adminTLS()), sec, nil
-}
-
-// Disable deletes the user's volume (the account is being deleted): every file in it, its
-// metadata, role and account. It returns once the volume is marked deleting and the nodes were
-// told to unmount; the deletion itself runs in the background (Wait) from the secrets read now,
-// so it finishes even when the row goes with the user meanwhile.
+// Disable deletes the user's folder (the account is being deleted) with every file in it. It
+// returns once the folder is marked deleting and the nodes were told to unmount; the deletion
+// itself runs in the background (Wait), so it finishes even when the row goes with the user meanwhile.
 func (s *Service) Disable(ctx context.Context, userID string) error {
 	if !s.Enabled() {
 		return ErrDisabled
@@ -223,15 +202,10 @@ func (s *Service) Disable(ctx context.Context, userID string) error {
 	if !ok {
 		return s.notClaimed(ctx, userID)
 	}
-	metaURL, sec, err := s.consoleMeta(ctx, vol)
-	if err != nil {
-		_ = setState(ctx, s.db, userID, StateError, "删除失败："+err.Error())
-		return err
-	}
 	s.changed(ctx, userID) // nodes unmount before the data goes
 	ctx = context.WithoutCancel(ctx)
 	s.bg.Add(1)
-	go func() { defer s.bg.Done(); s.finishDisable(ctx, vol, metaURL, sec.MetaPassword) }()
+	go func() { defer s.bg.Done(); s.finishDisable(ctx, vol) }()
 	return nil
 }
 
@@ -262,9 +236,9 @@ func (s *Service) Close() {
 	}
 }
 
-func (s *Service) finishDisable(ctx context.Context, vol Volume, metaURL, password string) {
-	if err := s.teardown(ctx, vol, metaURL, password); err != nil {
-		s.log.Warn("shared folder deletion failed", "user_id", vol.UserID, "volume", vol.Volume, "err", err)
+func (s *Service) finishDisable(ctx context.Context, vol Volume) {
+	if err := s.teardown(ctx, vol); err != nil {
+		s.log.Warn("shared folder deletion failed", "user_id", vol.UserID, "subdir", vol.Subdir, "err", err)
 		_ = setState(ctx, s.db, vol.UserID, StateError, "删除失败："+err.Error())
 		return
 	}
@@ -273,44 +247,31 @@ func (s *Service) finishDisable(ctx context.Context, vol Volume, metaURL, passwo
 	}
 }
 
-// teardown deletes the volume once its nodes unmounted: its data and metadata, the account and
-// the role.
-func (s *Service) teardown(ctx context.Context, vol Volume, metaURL, password string) error {
+// teardown deletes the folder once its nodes unmounted.
+func (s *Service) teardown(ctx context.Context, vol Volume) error {
 	s.waitUnmounted(ctx, vol)
-	s.volumes.Close(vol.Volume)
-	if err := s.destroy(ctx, vol, metaURL, password); err != nil {
-		return err
-	}
-	n := vol.Names()
-	if err := s.iam.Remove(ctx, n); err != nil {
-		return fmt.Errorf("对象存储账号：%w", err)
-	}
-	return s.meta.Drop(ctx, n.Role)
+	return s.removeDir(ctx, vol.Subdir)
 }
 
-// destroy runs juicefs destroy unless the volume's metadata is not there (never created, or
-// already dropped by an earlier attempt).
-func (s *Service) destroy(ctx context.Context, vol Volume, metaURL, password string) error {
-	exists, err := s.meta.Exists(ctx, vol.MetaRole)
+// removeDir deletes a user's folder from the volume (nothing there is fine).
+func (s *Service) removeDir(ctx context.Context, dir string) error {
+	f, err := s.sharedFiles(ctx)
 	if err != nil {
-		return fmt.Errorf("元数据库：%w", err)
+		return err
 	}
-	if !exists {
-		return nil
-	}
-	if err := s.volumes.Destroy(ctx, metaURL, password); err != nil {
-		return fmt.Errorf("juicefs destroy：%w", err)
+	if err := f.Remove(ctx, dir); err != nil && !errors.Is(err, ErrNoFile) {
+		return fmt.Errorf("删除目录：%w", err)
 	}
 	return nil
 }
 
-// waitUnmounted waits (UnmountWait at most) until no node whose daemon mounts the volume still
+// waitUnmounted waits (UnmountWait at most) until no node whose daemon mounts the folder still
 // reports it mounted. Nodes mounting it outside the daemon (Docker volume plugin) cannot unmount
-// on request: the volume is destroyed under them, which is logged.
+// on request: the folder is removed under them, which is logged.
 func (s *Service) waitUnmounted(ctx context.Context, vol Volume) {
 	deadline := time.Now().Add(orDefault(s.UnmountWait, time.Minute))
 	for time.Now().Before(deadline) {
-		ids, err := mountedNodes(ctx, s.db, vol.UserID, vol.Volume, true)
+		ids, err := mountedNodes(ctx, s.db, vol.UserID, vol.Subdir, true)
 		if err != nil || len(ids) == 0 {
 			break
 		}
@@ -320,8 +281,8 @@ func (s *Service) waitUnmounted(ctx context.Context, vol Volume) {
 		case <-time.After(orDefault(s.UnmountPoll, time.Second)):
 		}
 	}
-	if ids, _ := mountedNodes(ctx, s.db, vol.UserID, vol.Volume, false); len(ids) > 0 {
-		s.log.Warn("shared folder destroyed while nodes still report it mounted", "user_id", vol.UserID, "volume", vol.Volume, "nodes", ids)
+	if ids, _ := mountedNodes(ctx, s.db, vol.UserID, vol.Subdir, false); len(ids) > 0 {
+		s.log.Warn("shared folder removed while nodes still report it mounted", "user_id", vol.UserID, "subdir", vol.Subdir, "nodes", ids)
 	}
 }
 
@@ -338,7 +299,8 @@ func (s *Service) changed(ctx context.Context, userID string) {
 	}
 }
 
-// MountSpec is the fs.mount for the user's nodes; ErrNotFound unless the volume is ready.
+// MountSpec is the fs.mount for the user's nodes: the shared volume, mounted at the user's folder
+// only; ErrNotFound unless the folder is ready.
 func (s *Service) MountSpec(ctx context.Context, userID string) (protocol.FsMount, error) {
 	if !s.Enabled() {
 		return protocol.FsMount{}, ErrDisabled
@@ -347,10 +309,10 @@ func (s *Service) MountSpec(ctx context.Context, userID string) (protocol.FsMoun
 	if err != nil {
 		return protocol.FsMount{}, err
 	}
-	if vol.State != StateReady {
+	if vol.State != StateReady || vol.Subdir == "" {
 		return protocol.FsMount{}, ErrNotFound
 	}
-	sec, err := secrets(ctx, s.db, s.vault, vol)
+	sec, err := s.sharedSecrets(ctx)
 	if err != nil {
 		return protocol.FsMount{}, err
 	}
@@ -362,12 +324,14 @@ func (s *Service) MountSpec(ctx context.Context, userID string) (protocol.FsMoun
 	for _, a := range s.cfg.ClientAssets() {
 		assets = append(assets, protocol.FsMountClientAssetsElem{Platform: a.Platform, URL: a.URL, SHA256: a.SHA256})
 	}
-	return protocol.FsMount{Volume: vol.Volume, Generation: vol.Generation, MetaURL: MetaURL(vol.MetaRole, s.cfg.MetaHost, db, s.cfg.MetaSSLMode),
+	n := s.cfg.SharedNames()
+	return protocol.FsMount{Volume: vol.Volume, Subdir: vol.Subdir, Generation: vol.Generation,
+		MetaURL:      MetaURL(s.cfg.metaUser(), n.Role, s.cfg.MetaHost, db, s.cfg.MetaSSLMode),
 		MetaPassword: sec.MetaPassword, Client: protocol.FsMountClient{Version: s.cfg.ClientVersion, Assets: assets}}, nil
 }
 
-// Files is the tree of the user's ready volume (ErrNotFound unless ready), for the console's
-// own reads and writes.
+// Files is the tree of the user's ready folder (ErrNotFound unless ready), for the console's own
+// reads and writes: paths are relative to the folder and cannot leave it.
 func (s *Service) Files(ctx context.Context, userID string) (Files, error) {
 	if !s.Enabled() {
 		return nil, ErrDisabled
@@ -376,17 +340,17 @@ func (s *Service) Files(ctx context.Context, userID string) (Files, error) {
 	if err != nil {
 		return nil, err
 	}
-	if vol.State != StateReady {
+	if vol.State != StateReady || vol.Subdir == "" {
 		return nil, ErrNotFound
 	}
-	metaURL, sec, err := s.consoleMeta(ctx, vol)
+	f, err := s.sharedFiles(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.volumes.Files(ctx, vol.Volume, metaURL, sec.MetaPassword)
+	return subFiles{f: f, dir: vol.Subdir}, nil
 }
 
-// Ready tells whether the user has a ready volume (session.open sends a shared folder only then).
+// Ready tells whether the user has a ready folder (session.open sends a shared folder only then).
 func (s *Service) Ready(ctx context.Context, userID string) bool {
 	if s == nil || !s.cfg.Enabled() {
 		return false

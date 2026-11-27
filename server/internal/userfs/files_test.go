@@ -123,7 +123,8 @@ func TestGatewayFiles(t *testing.T) {
 	}
 }
 
-// TestServiceFiles: only a ready volume opens, through the console's own database address; deleting closes it first.
+// TestServiceFiles: only a ready folder opens, through the console's own database address, as a
+// tree of its own: paths stay inside the user's folder and its root cannot be removed.
 func TestServiceFiles(t *testing.T) {
 	s, _, _, vols, _ := newTest(t)
 	ctx := context.Background()
@@ -138,12 +139,21 @@ func TestServiceFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	exerciseFiles(t, f)
-	if len(vols.opened) != 1 || !strings.Contains(vols.opened[0], "@db.internal:5432/agent_teams") || !strings.Contains(vols.opened[0], "sslmode=disable") {
-		t.Fatalf("meta url: %v", vols.opened)
+	for _, u := range vols.opened {
+		if !strings.Contains(u, "juicefs@db.internal:5432/agent_teams") || !strings.Contains(u, "sslmode=disable") {
+			t.Fatalf("meta url: %v", vols.opened)
+		}
 	}
-	err = s.Disable(ctx, "u1")
-	s.Wait()
-	if err != nil || len(vols.closed) != 1 || vols.closed[0] != NamesFor("u1").Volume {
-		t.Fatalf("disable: %v closed %v", err, vols.closed)
+	if err := f.Put(ctx, "projects/p1/a.txt", strings.NewReader("hi"), 2); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(vols.userPath("u1", "projects", "p1", "a.txt")); err != nil || string(b) != "hi" {
+		t.Fatalf("stored %q %v", b, err)
+	}
+	if _, _, err := f.Open(ctx, "../"+strings.TrimPrefix(UserDir("u2"), UsersDir+"/")+"/x"); err == nil {
+		t.Fatal("path left the folder")
+	}
+	if err := f.Remove(ctx, ""); !errors.Is(err, ErrBadPath) {
+		t.Fatalf("remove root: %v", err)
 	}
 }

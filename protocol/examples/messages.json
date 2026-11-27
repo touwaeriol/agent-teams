@@ -1749,9 +1749,10 @@
     "id": "c_01JD3V0000000000000000F01",
     "ts": "2026-11-26T12:00:00.000Z",
     "body": {
-      "volume": "at-01jd3v0000",
+      "volume": "agent-teams",
+      "subdir": "users/0123456789abcdef",
       "generation": 1,
-      "meta_url": "postgres://jfs_01jd3v0000@db.example.net:15432/agent_teams?sslmode=verify-full&search_path=jfs_01jd3v0000",
+      "meta_url": "postgres://juicefs@db.example.net:15432/agent_teams?sslmode=verify-full&search_path=juicefs",
       "meta_password": "secret",
       "client": {
         "version": "1.4.2",
@@ -1772,7 +1773,7 @@
     "id": "c_01JD3V0000000000000000F02",
     "ts": "2026-11-26T12:00:00.000Z",
     "body": {
-      "volume": "at-01jd3v0000"
+      "volume": "agent-teams"
     }
   },
   {
@@ -1783,7 +1784,8 @@
     "body": {
       "state": "mounted",
       "mode": "daemon",
-      "volume": "at-01jd3v0000",
+      "volume": "agent-teams",
+      "subdir": "users/0123456789abcdef",
       "generation": 1
     }
   }

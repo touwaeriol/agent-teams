@@ -64,7 +64,11 @@ type FS struct {
 	Bucket         string // AGENT_TEAMS_FS_BUCKET: bucket all volumes share (one prefix each)
 	AdminAccessKey string // AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY: object store admin (users and policies)
 	AdminSecretKey string // AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY
-	CapacityGB     int    // AGENT_TEAMS_FS_CAPACITY_GB, default 20; 0 = no limit
+	CapacityGB     int    // AGENT_TEAMS_FS_CAPACITY_GB: each user's folder quota, default 20; 0 = no limit
+	Volume         string // AGENT_TEAMS_FS_VOLUME: the one shared volume, default agent-teams
+	MetaRole       string // AGENT_TEAMS_FS_META_ROLE: its metadata role and schema, default juicefs
+	MetaUser       string // AGENT_TEAMS_FS_META_USER: user name that role connects as (Supabase pooler: juicefs.<ref>)
+	MetaConnLimit  int    // AGENT_TEAMS_FS_META_CONN_LIMIT: that role's connection limit, default 30
 	JuiceFS        string // AGENT_TEAMS_FS_JUICEFS: the juicefs binary, default juicefs
 	ClientVersion  string // AGENT_TEAMS_FS_CLIENT_VERSION: client nodes run, default the built-in one
 	ClientBase     string // AGENT_TEAMS_FS_CLIENT_BASE: download base, default the GitHub releases
@@ -102,6 +106,9 @@ func fsConfig(getenv Getenv, databaseURL, s3Endpoint string) (FS, error) {
 		AdminAccessKey: getenv("AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY"),
 		AdminSecretKey: getenv("AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY"),
 		CapacityGB:     20,
+		Volume:         strings.TrimSpace(getenv("AGENT_TEAMS_FS_VOLUME")),
+		MetaRole:       strings.TrimSpace(getenv("AGENT_TEAMS_FS_META_ROLE")),
+		MetaUser:       strings.TrimSpace(getenv("AGENT_TEAMS_FS_META_USER")),
 		JuiceFS:        first(getenv("AGENT_TEAMS_FS_JUICEFS"), "juicefs"),
 		ClientVersion:  getenv("AGENT_TEAMS_FS_CLIENT_VERSION"),
 		ClientBase:     strings.TrimRight(getenv("AGENT_TEAMS_FS_CLIENT_BASE"), "/"),
@@ -112,6 +119,13 @@ func fsConfig(getenv Getenv, databaseURL, s3Endpoint string) (FS, error) {
 			return f, errors.New("AGENT_TEAMS_FS_CAPACITY_GB must be a number of GiB (0 = no limit)")
 		}
 		f.CapacityGB = n
+	}
+	if v := strings.TrimSpace(getenv("AGENT_TEAMS_FS_META_CONN_LIMIT")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return f, errors.New("AGENT_TEAMS_FS_META_CONN_LIMIT must be a positive number")
+		}
+		f.MetaConnLimit = n
 	}
 	for _, kv := range strings.Split(getenv("AGENT_TEAMS_FS_CLIENT_SHA256"), ",") {
 		k, v, ok := strings.Cut(strings.TrimSpace(kv), "=")

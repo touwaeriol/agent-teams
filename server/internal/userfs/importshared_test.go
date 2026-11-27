@@ -46,7 +46,7 @@ VALUES ('p1', 'data/a.csv', 'text/csv', 3, '', NULL, 'user', 'projects/p1/shared
 	if err != nil || rep.Copied != 2 || rep.Failed != 0 {
 		t.Fatalf("import: %+v %v", rep, err)
 	}
-	f, _ := vols.Files(ctx, NamesFor("u1").Volume, "", "")
+	f := DirFiles{Root: vols.userPath("u1")}
 	r, _, err := f.Open(ctx, "projects/p1/data/a.csv")
 	if err != nil {
 		t.Fatal(err)

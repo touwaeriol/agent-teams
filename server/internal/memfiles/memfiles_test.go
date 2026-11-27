@@ -60,8 +60,8 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Exec(ctx, s.Pool, `INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb, state)
-		VALUES ($1, 'at-x', 'jfs_x', 'jfs-x', '{}', 20, 'ready')`, u.ID); err != nil {
+	if _, err := store.Exec(ctx, s.Pool, `INSERT INTO at_user_fs (user_id, volume, subdir, capacity_gb, state)
+		VALUES ($1, 'agent-teams', 'users/x', 20, 'ready')`, u.ID); err != nil {
 		t.Fatal(err)
 	}
 	fx := &fixture{ctx: ctx, s: s, f: &folders{root: t.TempDir()}, user: u.ID, scope: store.ProjectMemory(p.ID)}

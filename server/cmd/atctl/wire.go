@@ -83,11 +83,11 @@ func sharedFolders(c config.FS, st *store.Store, vault *credvault.Vault, log *sl
 	}
 	cfg := userfs.Config{AdminURL: c.AdminURL, MetaHost: c.MetaHost, MetaSSLMode: c.MetaSSLMode, S3Endpoint: c.S3Endpoint, Bucket: c.Bucket,
 		AdminAccessKey: c.AdminAccessKey, AdminSecretKey: c.AdminSecretKey, CapacityGB: c.CapacityGB, JuiceFS: c.JuiceFS,
-		ClientVersion: version, ClientBase: base, Assets: assets}
+		Volume: c.Volume, MetaRole: c.MetaRole, MetaUser: c.MetaUser, ClientVersion: version, ClientBase: base, Assets: assets}
 	if !vault.Ready() {
 		log.Warn("shared folder needs AGENT_TEAMS_SECRET_KEYS to seal its credentials: switched off")
 	}
-	return userfs.New(cfg, st.Pool, vault, &userfs.PGMeta{URL: c.AdminURL},
+	return userfs.New(cfg, st.Pool, vault, &userfs.PGMeta{URL: c.AdminURL, ConnLimit: c.MetaConnLimit},
 		userfs.MinioIAM{Endpoint: c.S3Endpoint, AccessKey: c.AdminAccessKey, SecretKey: c.AdminSecretKey},
 		userfs.CLI{Bin: c.JuiceFS, Gateways: &userfs.Gateways{Bin: c.JuiceFS, Log: log}}, log)
 }

@@ -27,6 +27,7 @@ type nodeFsStatus struct {
 	State      string `json:"state"`
 	Mode       string `json:"mode"`
 	Volume     string `json:"volume,omitempty"`
+	Subdir     string `json:"subdir,omitempty"`
 	Generation int    `json:"generation,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
@@ -87,9 +88,9 @@ func (e *Engine) sweepOrphanFolders(ctx context.Context) (string, error) {
 }
 
 // sharedFolder is session.open fs: the project's folder and the user's shared folder, when the
-// user has a ready volume and the node reports that very volume and generation mounted (a status
-// left from another volume, or from before a re-enable, does not count; at_nodes.fs_status is
-// reset whenever the node connects or drops).
+// user has a ready folder and the node reports that very folder of the volume mounted, at its
+// generation (a status left from another user's folder, another volume, or from before a re-enable,
+// does not count; at_nodes.fs_status is reset whenever the node connects or drops).
 func (e *Engine) sharedFolder(ctx context.Context, q core.DB, userID, nodeID, projectID string) (*protocol.SessionOpenFs, error) {
 	vol, err := e.FS.Get(ctx, userID)
 	if err != nil || vol.State != userfs.StateReady {
@@ -102,17 +103,17 @@ func (e *Engine) sharedFolder(ctx context.Context, q core.DB, userID, nodeID, pr
 	return &protocol.SessionOpenFs{Project: protocol.RelPath(userfs.ProjectDir(projectID)), Shared: protocol.RelPath(userfs.SharedDir)}, nil
 }
 
-// mounts tells whether the status is vol mounted at its current generation. A volume mounted
-// outside the daemon (Docker volume plugin) is reported without them; it counts unless it names
-// another volume.
+// mounts tells whether the status is the user's folder of the volume mounted, at its current
+// generation. A folder mounted outside the daemon (Docker volume plugin) may be reported without
+// them; it counts unless it names another volume or folder.
 func (st nodeFsStatus) mounts(vol userfs.Volume) bool {
 	switch {
 	case st.State != string(protocol.FsStatusStateMounted):
 		return false
 	case st.Mode == string(protocol.FsStatusModeExternal):
-		return st.Volume == "" || st.Volume == vol.Volume
+		return (st.Volume == "" || st.Volume == vol.Volume) && (st.Subdir == "" || st.Subdir == vol.Subdir)
 	default:
-		return st.Volume == vol.Volume && st.Generation == vol.Generation
+		return st.Volume == vol.Volume && st.Subdir == vol.Subdir && st.Generation == vol.Generation
 	}
 }
 
@@ -121,6 +122,9 @@ func (e *Engine) fsStatus(ctx context.Context, node store.Node, m *protocol.FsSt
 	st := nodeFsStatus{State: string(m.State), Mode: string(m.Mode)}
 	if m.Volume != nil {
 		st.Volume = *m.Volume
+	}
+	if m.Subdir != nil {
+		st.Subdir = *m.Subdir
 	}
 	if m.Generation != nil {
 		st.Generation = *m.Generation

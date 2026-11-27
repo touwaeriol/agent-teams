@@ -8,7 +8,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -20,18 +19,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/madmin-go/v3"
 )
 
-var roleRE = regexp.MustCompile(`^jfs_[0-9a-f]{16}$`)
+// roleRE is a role and schema name the console creates (an unquoted SQL identifier).
+var roleRE = regexp.MustCompile(`^[a-z_][a-z0-9_]{0,62}$`)
 
 // PGMeta is Meta on the PostgreSQL of Config.AdminURL (a role allowed to create roles).
 type PGMeta struct {
-	URL  string
-	once sync.Once
-	pool *pgxpool.Pool
-	err  error
+	URL string
+	// ConnLimit caps the volume role's connections (0 = 30): every node's mount holds some.
+	ConnLimit int
+	once      sync.Once
+	pool      *pgxpool.Pool
+	err       error
 }
 
 func (m *PGMeta) open(ctx context.Context) (*pgxpool.Pool, error) {
@@ -48,9 +51,13 @@ func (m *PGMeta) open(ctx context.Context) (*pgxpool.Pool, error) {
 }
 
 // Ensure implements Meta. The role can log in and owns its schema only: it gets no privilege on
-// the console's tables (they are not granted to PUBLIC) nor on the other volumes' schemas. The
-// password goes as a SCRAM-SHA-256 verifier, so the plain password never reaches the server (nor
-// its statement log).
+// the console's tables (they are not granted to PUBLIC). The password goes as a SCRAM-SHA-256
+// verifier, so the plain password never reaches the server (nor its statement log). It needs only
+// CREATEROLE, not superuser (managed PostgreSQL such as Supabase), so it leaves the superuser and
+// replication attributes alone (and CREATEDB, CREATEROLE, which only a role holding them may
+// change): a role created without them has none. Such an admin is made a
+// member of the role first: PostgreSQL 16+ gives the creator only ADMIN on it, and CREATE SCHEMA
+// ... AUTHORIZATION needs to be able to SET ROLE to it.
 func (m *PGMeta) Ensure(ctx context.Context, role, password string) error {
 	if !roleRE.MatchString(role) {
 		return fmt.Errorf("bad role %q", role)
@@ -65,13 +72,23 @@ func (m *PGMeta) Ensure(ctx context.Context, role, password string) error {
 	}
 	_, err = pool.Exec(ctx, fmt.Sprintf(`
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '%[1]s') THEN CREATE ROLE %[1]s LOGIN; END IF; END $$;
-ALTER ROLE %[1]s LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION CONNECTION LIMIT 30 PASSWORD '%[2]s';
+ALTER ROLE %[1]s LOGIN CONNECTION LIMIT %[3]d PASSWORD '%[2]s';
 ALTER ROLE %[1]s SET search_path = %[1]s;
 ALTER ROLE %[1]s SET statement_timeout = '60s';
 ALTER ROLE %[1]s SET idle_in_transaction_session_timeout = '60s';
+DO $$ BEGIN IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+  EXECUTE format('GRANT %[1]s TO %%I', current_user);
+END IF; END $$;
 CREATE SCHEMA IF NOT EXISTS %[1]s AUTHORIZATION %[1]s;
-REVOKE ALL ON SCHEMA %[1]s FROM PUBLIC;`, role, verifier))
+REVOKE ALL ON SCHEMA %[1]s FROM PUBLIC;`, role, verifier, m.connLimit()))
 	return err
+}
+
+func (m *PGMeta) connLimit() int {
+	if m.ConnLimit > 0 {
+		return m.ConnLimit
+	}
+	return 30
 }
 
 // scramIterations is PostgreSQL's default scram_iterations.
@@ -101,75 +118,36 @@ func hmacSHA256(key []byte, msg string) []byte {
 	return h.Sum(nil)
 }
 
-// Exists implements Meta.
-func (m *PGMeta) Exists(ctx context.Context, role string) (bool, error) {
-	pool, err := m.open(ctx)
-	if err != nil {
-		return false, err
-	}
-	var ok bool
-	err = pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AND EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)`, role).Scan(&ok)
-	return ok, err
-}
-
-// Usage implements Meta: JuiceFS keeps the totals in <schema>.jfs_counter.
-func (m *PGMeta) Usage(ctx context.Context, role string) (Usage, error) {
+// Usage implements Meta: JuiceFS keeps a quota folder's totals in <schema>.jfs_dir_quota, keyed
+// by its inode; the path is walked from the root (inode 1) through <schema>.jfs_edge.
+func (m *PGMeta) Usage(ctx context.Context, schema, dir string) (Usage, error) {
 	var u Usage
-	if !roleRE.MatchString(role) {
-		return u, fmt.Errorf("bad role %q", role)
+	if !roleRE.MatchString(schema) {
+		return u, fmt.Errorf("bad schema %q", schema)
 	}
 	pool, err := m.open(ctx)
 	if err != nil {
 		return u, err
 	}
 	var formatted bool
-	if err := pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, role+".jfs_counter").Scan(&formatted); err != nil || !formatted {
+	if err := pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+".jfs_dir_quota").Scan(&formatted); err != nil || !formatted {
 		return u, err
 	}
-	err = pool.QueryRow(ctx, fmt.Sprintf(`SELECT
-	COALESCE(MAX(value) FILTER (WHERE name = 'usedSpace'), 0),
-	COALESCE(MAX(value) FILTER (WHERE name = 'totalInodes'), 0)
-FROM %s.jfs_counter`, role)).Scan(&u.UsedBytes, &u.Inodes)
-	return u, err
-}
-
-// Roles implements Meta.
-func (m *PGMeta) Roles(ctx context.Context) ([]string, error) {
-	pool, err := m.open(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := pool.Query(ctx, `SELECT r.rolname FROM pg_roles r JOIN pg_namespace n ON n.nspname = r.rolname
-		WHERE r.rolname ~ '^jfs_[0-9a-f]{16}$' ORDER BY 1`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var r string
-		if err := rows.Scan(&r); err != nil {
-			return nil, err
+	inode := int64(1)
+	for _, seg := range strings.Split(strings.Trim(dir, "/"), "/") {
+		err := pool.QueryRow(ctx, fmt.Sprintf(`SELECT inode FROM %s.jfs_edge WHERE parent = $1 AND name = $2`, schema), inode, []byte(seg)).Scan(&inode)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return u, nil
 		}
-		out = append(out, r)
+		if err != nil {
+			return u, err
+		}
 	}
-	return out, rows.Err()
-}
-
-// Drop implements Meta.
-func (m *PGMeta) Drop(ctx context.Context, role string) error {
-	if !roleRE.MatchString(role) {
-		return fmt.Errorf("bad role %q", role)
+	err = pool.QueryRow(ctx, fmt.Sprintf(`SELECT used_space, used_inodes FROM %s.jfs_dir_quota WHERE inode = $1`, schema), inode).Scan(&u.UsedBytes, &u.Inodes)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return u, nil
 	}
-	pool, err := m.open(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = pool.Exec(ctx, fmt.Sprintf(`
-SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = '%[1]s';
-DROP SCHEMA IF EXISTS %[1]s CASCADE;
-DROP ROLE IF EXISTS %[1]s;`, role))
-	return err
+	return u, err
 }
 
 // MinioIAM is IAM on a RustFS / MinIO admin API.
@@ -212,30 +190,6 @@ func alreadyAttached(err error) bool {
 	return strings.Contains(s, "already") && strings.Contains(s, "attach")
 }
 
-// Remove implements IAM.
-func (m MinioIAM) Remove(ctx context.Context, n Names) error {
-	c, err := m.client()
-	if err != nil {
-		return err
-	}
-	if err := c.RemoveUser(ctx, n.AccessKey); err != nil && !notFound(err) {
-		return fmt.Errorf("remove user: %w", err)
-	}
-	if err := c.RemoveCannedPolicy(ctx, n.Policy); err != nil && !notFound(err) {
-		return fmt.Errorf("remove policy: %w", err)
-	}
-	return nil
-}
-
-func notFound(err error) bool {
-	var e madmin.ErrorResponse
-	if errors.As(err, &e) && strings.Contains(e.Code, "NoSuch") {
-		return true
-	}
-	s := strings.ToLower(err.Error())
-	return strings.Contains(s, "not found") || strings.Contains(s, "does not exist") || strings.Contains(s, "nosuch")
-}
-
 // CLI is Volumes with the juicefs binary. Secrets go in the environment (META_PASSWORD, SECRET_KEY),
 // never in the arguments.
 type CLI struct {
@@ -249,9 +203,6 @@ type CLI struct {
 func (c CLI) Files(ctx context.Context, volume, metaURL, metaPassword string) (Files, error) {
 	return c.Gateways.Files(ctx, volume, metaURL, metaPassword)
 }
-
-// Close implements Volumes.
-func (c CLI) Close(volume string) { c.Gateways.Stop(volume) }
 
 // Shutdown stops every gateway (Service.Close).
 func (c CLI) Shutdown() { c.Gateways.Close() }
@@ -281,40 +232,19 @@ func lastLines(s string, n int) string {
 	return strings.Join(lines, " | ")
 }
 
-// Format implements Volumes.
+// Format implements Volumes. The volume has no capacity of its own: each user's folder has a quota.
 func (c CLI) Format(ctx context.Context, f FormatSpec) error {
 	_, err := c.run(ctx, []string{"META_PASSWORD=" + f.MetaPassword, "SECRET_KEY=" + f.SecretKey},
 		"format", "--storage", "s3", "--bucket", f.Bucket, "--access-key", f.AccessKey,
-		"--capacity", strconv.Itoa(f.CapacityGB), "--trash-days", "1", "--no-update=false", f.MetaURL, f.Volume)
+		"--trash-days", "1", "--no-update=false", f.MetaURL, f.Volume)
 	return err
 }
 
-// Destroy implements Volumes. A volume that was never formatted, or whose role is gone or no
-// longer logs in, has nothing left to destroy.
-func (c CLI) Destroy(ctx context.Context, metaURL, metaPassword string) error {
-	env := []string{"META_PASSWORD=" + metaPassword}
-	out, err := c.run(ctx, env, "status", metaURL)
-	if err != nil {
-		if nothingToDestroy(err) {
-			return nil
-		}
-		return err
+// Quota implements Volumes (capacityGB <= 0: no quota is set).
+func (c CLI) Quota(ctx context.Context, metaURL, metaPassword, path string, capacityGB int) error {
+	if capacityGB <= 0 {
+		return nil
 	}
-	var st struct {
-		Setting struct {
-			UUID string
-		}
-	}
-	if err := json.Unmarshal(out, &st); err != nil || st.Setting.UUID == "" {
-		return fmt.Errorf("juicefs status: no volume uuid (%v)", err)
-	}
-	_, err = c.run(ctx, env, "destroy", "--yes", "--force", metaURL, st.Setting.UUID)
+	_, err := c.run(ctx, []string{"META_PASSWORD=" + metaPassword}, "quota", "set", metaURL, "--path", path, "--capacity", strconv.Itoa(capacityGB))
 	return err
-}
-
-// nothingToDestroy tells the juicefs status errors of a volume without metadata.
-func nothingToDestroy(err error) bool {
-	s := err.Error()
-	roleGone := strings.Contains(s, `role "`) && strings.Contains(s, "does not exist")
-	return roleGone || strings.Contains(s, "not formatted") || strings.Contains(s, "password authentication failed")
 }

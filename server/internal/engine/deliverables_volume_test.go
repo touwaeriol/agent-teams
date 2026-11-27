@@ -45,7 +45,7 @@ func TestDeliverablesInSharedFolder(t *testing.T) {
 		t.Fatalf("publish before the folder is ready %+v", res.Content)
 	}
 	tm.w.e.SweepSharedFolders(tm.w.ctx) // switches the folder on and moves version 1 in
-	volume := filepath.Join(fakes.root, userfs.NamesFor(tm.ownerID(t)).Volume)
+	volume := fakes.dir(tm.ownerID(t))
 	dir := filepath.Join(volume, "projects", tm.projectID, ".deliverables", id)
 
 	res = tm.dev.publish(map[string]any{"path": "site", "kind": "design", "title": "登录页", "deliverable_id": id}, 1<<20, v2, upFile{"css/a.css", "b{}"})
