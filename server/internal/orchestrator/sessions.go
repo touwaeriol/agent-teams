@@ -646,14 +646,8 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 			return err
 		}
 	}
-	if open.Fs != nil {
-		ok, err := core.NodeHasFeature(ctx, tx, node.ID, FeatureMemoryFiles)
-		if err != nil {
-			return err
-		}
-		if ok {
-			allowMemoryFiles(env.emp, open.Claude)
-		}
+	if err := grantMemoryFiles(ctx, tx, node.ID, env.emp, &open); err != nil {
+		return err
 	}
 	if err := o.addSkills(ctx, tx, env.project.UserID, env.emp, &open); err != nil {
 		return err
@@ -1092,5 +1086,18 @@ func (o *Orchestrator) SetMode(ctx context.Context, tx *core.Tx, s core.AgentSes
 	}
 	_, err := o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionSetMode,
 		Body: protocol.SessionSetMode{SessionID: protocol.SessionID(s.ID), PermissionMode: &m}, SessionID: s.ID, OpenGen: s.OpenGen})
+	return err
+}
+
+// grantMemoryFiles lets the coordinator and read-only sessions edit the memory files themselves
+// when they get the shared folder and their node keeps the file tools inside it.
+func grantMemoryFiles(ctx context.Context, tx *core.Tx, nodeID string, e core.Employee, open *protocol.SessionOpen) error {
+	if open.Fs == nil {
+		return nil
+	}
+	ok, err := core.NodeHasFeature(ctx, tx, nodeID, FeatureMemoryFiles)
+	if ok {
+		allowMemoryFiles(e, open.Claude)
+	}
 	return err
 }

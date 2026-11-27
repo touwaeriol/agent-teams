@@ -307,7 +307,11 @@ func (r *router) checkTools(ctx context.Context, tx *core.Tx, sc core.SessionCon
 	if len(tools) == 0 {
 		return nil
 	}
-	if ok, bad := orchestrator.ToolsAllowed(sc.Employee, tools); !ok {
+	memoryFiles, err := orchestrator.MemoryFilesOn(ctx, tx, sc.Session)
+	if err != nil {
+		return err
+	}
+	if ok, bad := orchestrator.ToolsAllowed(sc.Employee, tools, memoryFiles); !ok {
 		r.e.log.Warn("turn tools violate the role policy", "session_id", sc.Session.ID, "tool", bad)
 		if err := r.e.Orch.CloseSession(ctx, tx, sc.Session, "policy_violation"); err != nil {
 			return err
@@ -328,7 +332,7 @@ func (r *router) toolStarted(ctx context.Context, tx *core.Tx, sc core.SessionCo
 	if cat == "platform" || o.Summary == "" {
 		return []status.Observation{o}, nil
 	}
-	if err := r.e.touchMemory(ctx, tx, sc.Employee, o.Summary); err != nil {
+	if err := r.e.touchMemory(ctx, tx, sc, o.Summary); err != nil {
 		return nil, err
 	}
 	text := fmt.Sprintf("%s %s", tool, o.Summary)

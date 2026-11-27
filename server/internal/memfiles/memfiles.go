@@ -8,6 +8,7 @@
 package memfiles
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
@@ -27,6 +29,9 @@ const ByNode = "节点上直接修改"
 
 // maxFile is the most read of one file (the rows keep store.MemoryContentMax characters).
 const maxFile = 1 << 20
+
+// changedKick is how soon rows written through the platform are written into the folder.
+const changedKick = time.Second
 
 // Dir is a scope's memory folder in the owner's volume.
 func Dir(s store.MemoryScope) string {
@@ -41,7 +46,7 @@ type Folders interface {
 	Files(ctx context.Context, userID string) (userfs.Files, error)
 }
 
-// Syncer keeps the memory rows and the folders in step (store.MemoryFiles).
+// Syncer keeps the memory rows and the folders in step (core.MemoryFiles).
 type Syncer struct {
 	DB      store.DB
 	Folders Folders
@@ -54,7 +59,7 @@ type Syncer struct {
 	kicked   map[store.MemoryScope]bool
 }
 
-var _ store.MemoryFiles = (*Syncer)(nil)
+var _ core.MemoryFiles = (*Syncer)(nil)
 
 func (m *Syncer) lock(s store.MemoryScope) func() {
 	m.mu.Lock()
@@ -84,7 +89,8 @@ func (m *Syncer) open(ctx context.Context, s store.MemoryScope) (userfs.Files, e
 	return files, err
 }
 
-// Start sets the context of the syncs Kick starts (the engine's lifetime).
+// Start sets the context of the syncs Kick starts (the engine's lifetime); until then Kick does
+// nothing and the sweep catches up.
 func (m *Syncer) Start(ctx context.Context) {
 	m.mu.Lock()
 	m.base = ctx
@@ -109,10 +115,7 @@ func (m *Syncer) Kick(s store.MemoryScope, after time.Duration) {
 		delete(m.kicked, s)
 		ctx := m.base
 		m.mu.Unlock()
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		if ctx.Err() != nil {
+		if ctx == nil || ctx.Err() != nil {
 			return
 		}
 		if err := m.Sync(ctx, s); err != nil {
@@ -120,6 +123,9 @@ func (m *Syncer) Kick(s store.MemoryScope, after time.Duration) {
 		}
 	})
 }
+
+// Changed implements core.MemoryFiles.
+func (m *Syncer) Changed(s store.MemoryScope) { m.Kick(s, changedKick) }
 
 // Sweep syncs the scopes with something to do (all: every scope of a ready folder).
 func (m *Syncer) Sweep(ctx context.Context, all bool) {
@@ -141,35 +147,45 @@ func (m *Syncer) Sweep(ctx context.Context, all bool) {
 	}
 }
 
-// Removing deletes a file from the folder before its row goes. With the folder out of reach a
-// file already written there is refused (it would come back); one never written out is fine.
-func (m *Syncer) Removing(ctx context.Context, s store.MemoryScope, name string) error {
+// Delete removes a topic file from the folder, then its row and index line through q, under the
+// scope's lock so a sync cannot take the missing file for one deleted on a node. With the folder
+// out of reach a file already written there is refused (it would come back).
+func (m *Syncer) Delete(ctx context.Context, q store.DB, s store.MemoryScope, name, by string) error {
 	name, err := store.MemoryName(name)
 	if err != nil {
 		return err
 	}
+	if name == store.MemoryIndex {
+		return store.DeleteMemoryFile(ctx, q, s, name, by) // refused, nothing to remove
+	}
+	defer m.lock(s)()
+	if err := m.remove(ctx, s, name); err != nil {
+		return err
+	}
+	return store.DeleteMemoryFile(ctx, q, s, name, by)
+}
+
+func (m *Syncer) remove(ctx context.Context, s store.MemoryScope, name string) error {
 	files, err := m.open(ctx, s)
 	if err != nil {
 		return err
 	}
-	if files == nil {
-		rows, err := store.MemoryStates(ctx, m.DB, s)
-		if err != nil {
+	if files != nil {
+		if err := files.Remove(ctx, Dir(s)+"/"+name); err != nil && !errors.Is(err, userfs.ErrNoFile) {
 			return err
-		}
-		if rows[name].FileMtime != nil {
-			return store.NewMemoryError("共享文件夹暂时不可用，稍后再删这个记忆文件")
 		}
 		return nil
 	}
-	if err := files.Remove(ctx, Dir(s)+"/"+name); err != nil && !errors.Is(err, userfs.ErrNoFile) {
-		return err
+	rows, err := store.MemoryStates(ctx, m.DB, s)
+	if err == nil && rows[name].FileMtime != nil {
+		err = store.NewMemoryError("共享文件夹暂时不可用，稍后再删这个记忆文件")
 	}
-	return nil
+	return err
 }
 
 // Sync reads the scope's folder into the rows (changed and deleted files), then writes the
-// pending rows out. Nothing when the owner has no ready shared folder.
+// pending rows out. Nothing when the owner has no ready shared folder. A file that cannot be
+// read back is logged and skipped, so it does not hold up the others or the writes.
 func (m *Syncer) Sync(ctx context.Context, s store.MemoryScope) error {
 	defer m.lock(s)()
 	files, err := m.open(ctx, s)
@@ -189,18 +205,20 @@ func (m *Syncer) Sync(ctx context.Context, s store.MemoryScope) error {
 		return err
 	}
 	for name, e := range disk {
-		if err := m.pull(ctx, s, files, name, e, rows, touches); err != nil {
-			return err
-		}
+		m.skip(s, name, m.pull(ctx, s, files, name, e, rows, touches))
 	}
 	for name, r := range rows {
 		if _, on := disk[name]; !on {
-			if err := m.gone(ctx, s, name, r, touches); err != nil {
-				return err
-			}
+			m.skip(s, name, m.gone(ctx, s, name, r, touches))
 		}
 	}
 	return m.push(ctx, s, files)
+}
+
+func (m *Syncer) skip(s store.MemoryScope, name string, err error) {
+	if err != nil {
+		m.Log.Warn("memory file not read back", "scope", s.Kind, "id", s.ID, "name", name, "err", err)
+	}
 }
 
 // list is the memory files of a folder by name (none when it does not exist yet).
@@ -256,7 +274,7 @@ func (m *Syncer) pull(ctx context.Context, s store.MemoryScope, files userfs.Fil
 		return err
 	}
 	if !ok && !known {
-		m.Log.Warn("memory file in the folder not taken (too many files)", "scope", s.Kind, "id", s.ID, "name", name)
+		m.Log.Warn("memory file in the folder not taken (too many files, or MEMORY.md is full)", "scope", s.Kind, "id", s.ID, "name", name)
 	}
 	if ok {
 		m.changed(ctx, s, name, "write", by)
@@ -298,7 +316,7 @@ func (m *Syncer) push(ctx context.Context, s store.MemoryScope, files userfs.Fil
 	dir := Dir(s)
 	for _, f := range pending {
 		data := Render(f)
-		if err := files.Put(ctx, dir+"/"+f.Name, bytesReader(data), int64(len(data))); err != nil {
+		if err := files.Put(ctx, dir+"/"+f.Name, bytes.NewReader(data), int64(len(data))); err != nil {
 			return err
 		}
 	}

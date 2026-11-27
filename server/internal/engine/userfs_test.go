@@ -118,7 +118,9 @@ func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
 	sharedFolderMemory(t, w, lead, fakes.root+"/"+vol, project.ID)
 
 	tm.projectID = project.ID
-	w.e.Hooks().UserDeleting(w.ctx, tm.ownerID(t))
+	if err := w.e.Hooks().UserDeleting(w.ctx, tm.ownerID(t)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tm.n.Wait(ctx, protocol.TypeFsUnmount, nil); err != nil {
 		t.Fatal(err)
 	}

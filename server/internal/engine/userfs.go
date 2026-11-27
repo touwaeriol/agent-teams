@@ -49,6 +49,7 @@ func (e *Engine) UseSharedFolder(s *userfs.Service) {
 		return
 	}
 	s.OnChange = e.pushFS
+	e.Core.Volume = nil
 	if s.Enabled() {
 		e.Core.Volume = s // deliverables then live only in the owners' folders
 	}
@@ -67,8 +68,13 @@ func (e *Engine) runSharedFolders(ctx context.Context) {
 		return
 	}
 	scheduler.RunAsLeader(ctx, e.Core.Pool, "agent-teams:shared-folders", 30*time.Second, func(ctx context.Context) {
+		var fullAt time.Time // when the memory sweep last read every folder
 		for {
-			e.sweepSharedFolders(ctx)
+			full := time.Since(fullAt) >= memoryFullEvery
+			if full {
+				fullAt = time.Now()
+			}
+			e.sweepSharedFolders(ctx, full)
 			select {
 			case <-ctx.Done():
 				return
@@ -78,7 +84,7 @@ func (e *Engine) runSharedFolders(ctx context.Context) {
 	})
 }
 
-func (e *Engine) sweepSharedFolders(ctx context.Context) {
+func (e *Engine) sweepSharedFolders(ctx context.Context, fullMemory bool) {
 	if _, err := e.FS.ProvisionAll(ctx); err != nil {
 		e.log.Warn("shared folders: provisioning sweep", "err", err)
 	}
@@ -88,7 +94,7 @@ func (e *Engine) sweepSharedFolders(ctx context.Context) {
 	} else if rep.Moved > 0 || rep.Failed > 0 {
 		e.log.Info("shared folders: deliverables moved into the folders", "moved", rep.Moved, "failed", rep.Failed)
 	}
-	e.sweepMemory(ctx)
+	e.sweepMemory(ctx, fullMemory)
 }
 
 // sharedFolder is session.open fs: the project's folder and the user's shared folder, when the

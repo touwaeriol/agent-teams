@@ -7,7 +7,8 @@ import (
 	"unicode/utf8"
 )
 
-// What memfiles needs to keep the memory rows in step with the files in the owner's shared folder.
+// What memfiles needs to keep the memory rows in step with files stored elsewhere (the owner's
+// shared folder): pending rows to write out, and files read back.
 
 // MemoryTouchFresh is how long a touch credits changes and keeps its scope read every sweep.
 const MemoryTouchFresh = 10 * time.Minute
@@ -58,16 +59,14 @@ type MemoryImport struct {
 	Size                                 int64
 }
 
-// ImportMemoryFile stores a file changed in the folder (a topic file also gets its index line).
-// It leaves a row alone that was written here meanwhile (pending: that write is newer) and skips a
-// new file past the limit; ok reports whether the row now holds the file.
+// ImportMemoryFile stores a file read back (a topic file also gets its index line). It leaves a
+// row alone that was written here meanwhile (pending: that write is newer); ok is false when the
+// row does not hold the file: written here meanwhile, a new file past the limit, or no room for
+// its line in MEMORY.md.
 func ImportMemoryFile(ctx context.Context, q DB, s MemoryScope, in MemoryImport) (ok bool, err error) {
-	in.Description = clipRunes(oneLine(in.Description), MemoryDescMax)
+	in.Description, in.Type = normalizeMemory(in.Name, in.Description, in.Type)
+	in.Description = clipRunes(in.Description, MemoryDescMax)
 	in.Content = clipRunes(in.Content, MemoryContentMax)
-	in.Type = MemoryType(in.Type)
-	if in.Name == MemoryIndex {
-		in.Description, in.Type = "", ""
-	}
 	err = InTx(ctx, q, func(tx DB) error {
 		var e error
 		if ok, e = importRow(ctx, tx, s, in); e != nil || !ok || in.Name == MemoryIndex {
@@ -75,16 +74,15 @@ func ImportMemoryFile(ctx context.Context, q DB, s MemoryScope, in MemoryImport)
 		}
 		return editIndex(ctx, tx, s, "platform", func(lines []string) []string { return setIndexLine(lines, in.Name, in.Description) })
 	})
+	if IsMemoryError(err) {
+		return false, nil
+	}
 	return ok, err
 }
 
 func importRow(ctx context.Context, tx DB, s MemoryScope, in MemoryImport) (bool, error) {
-	var n int64
-	if err := memoryRows(ctx, tx, s).Where("name = ?", in.Name).Count(&n).Error; err != nil {
+	if _, err := newMemoryFile(ctx, tx, s, in.Name); err != nil {
 		return false, err
-	}
-	if n == 0 && checkMemoryCount(ctx, tx, s) != nil {
-		return false, nil
 	}
 	t := s.table()
 	res := tx.Gorm(ctx).Exec(`INSERT INTO `+t+` (`+s.key()+`, name, description, type, content, updated_by, pending, file_mtime, file_size, updated_at)
@@ -170,26 +168,3 @@ func clipRunes(s string, n int) string {
 	}
 	return string([]rune(s)[:n])
 }
-
-// MemoryFiles keeps memory in the owners' shared folders (memfiles.Syncer); NoMemoryFiles when
-// the console has none (the rows are then all there is).
-type MemoryFiles interface {
-	// Removing deletes a file from the folder before its row goes (a MemoryError when it cannot).
-	Removing(ctx context.Context, s MemoryScope, name string) error
-	// Kick syncs the scope after a while: rows were written, or an employee is editing a file.
-	Kick(s MemoryScope, after time.Duration)
-	// Sync reads the folder into the rows and writes pending rows out, now.
-	Sync(ctx context.Context, s MemoryScope) error
-}
-
-// NoMemoryFiles is MemoryFiles without shared folders.
-type NoMemoryFiles struct{}
-
-// Removing implements MemoryFiles.
-func (NoMemoryFiles) Removing(context.Context, MemoryScope, string) error { return nil }
-
-// Kick implements MemoryFiles.
-func (NoMemoryFiles) Kick(MemoryScope, time.Duration) {}
-
-// Sync implements MemoryFiles.
-func (NoMemoryFiles) Sync(context.Context, MemoryScope) error { return nil }

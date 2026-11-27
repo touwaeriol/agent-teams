@@ -20,4 +20,4 @@ func (e *Engine) SharedFolderFor(ctx context.Context, userID, nodeID, projectID 
 }
 
 // SweepSharedFolders runs one pass of the automatic switch-on (provision, then move deliverables).
-func (e *Engine) SweepSharedFolders(ctx context.Context) { e.sweepSharedFolders(ctx) }
+func (e *Engine) SweepSharedFolders(ctx context.Context) { e.sweepSharedFolders(ctx, true) }

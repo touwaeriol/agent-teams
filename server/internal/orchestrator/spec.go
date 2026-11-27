@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path"
@@ -451,16 +452,29 @@ func mergeLists(lists ...[]string) []string {
 	return out
 }
 
-// ToolsAllowed checks the init tool list of a session against its role (§10.2 third line of defence).
-func ToolsAllowed(e core.Employee, tools []string) (bool, string) {
+// ToolsAllowed checks the init tool list of a session against its role (§10.2 third line of
+// defence). memoryFiles: the session may have the memory file tools (claude.memory_files; the
+// daemon keeps them inside .memory/).
+func ToolsAllowed(e core.Employee, tools []string, memoryFiles bool) (bool, string) {
 	for _, t := range tools {
-		// The memory file tools may be on (claude.memory_files); the daemon keeps them in .memory/.
-		if e.Tier == "coordinator" && !strings.HasPrefix(t, "mcp__platform__") && !slices.Contains(chatTools, t) && !slices.Contains(memoryFileTools, t) {
+		if memoryFiles && slices.Contains(memoryFileTools, t) {
+			continue
+		}
+		if e.Tier == "coordinator" && !strings.HasPrefix(t, "mcp__platform__") && !slices.Contains(chatTools, t) {
 			return false, t
 		}
-		if readOnly(e) && slices.Contains(writeTools, t) && !slices.Contains(memoryFileTools, t) {
+		if readOnly(e) && slices.Contains(writeTools, t) {
 			return false, t
 		}
 	}
 	return true, ""
+}
+
+// MemoryFilesOn reports whether a session may have the memory file tools: its node runs a daemon
+// that keeps them inside the memory directories.
+func MemoryFilesOn(ctx context.Context, q core.DB, s core.AgentSession) (bool, error) {
+	if s.NodeID == nil {
+		return false, nil
+	}
+	return core.NodeHasFeature(ctx, q, *s.NodeID, FeatureMemoryFiles)
 }

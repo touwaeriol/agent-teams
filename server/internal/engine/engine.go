@@ -82,10 +82,8 @@ type Engine struct {
 	SSH       *sshgw.Gateway
 	FS        *userfs.Service
 	log       *slog.Logger
-	// memory keeps auto memory in the shared folders (nil: rows only); memoryFullAt is when the
-	// sweep last read every folder (the leader's loop only).
-	memory       *memfiles.Syncer
-	memoryFullAt time.Time
+	// memory keeps auto memory in the shared folders (nil: rows only).
+	memory *memfiles.Syncer
 }
 
 // New wires the engines together.

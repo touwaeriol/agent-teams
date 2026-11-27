@@ -21,7 +21,7 @@ func TestApplySkillsClaude(t *testing.T) {
 	if len(o.Skills) != 1 || !contains(o.Claude.Tools, "Skill") || !contains(o.Claude.AllowedTools, "Skill") {
 		t.Fatalf("claude skills %+v tools %v allowed %v", o.Skills, o.Claude.Tools, o.Claude.AllowedTools)
 	}
-	if ok, bad := ToolsAllowed(emp("lead", "lead", store.Role{}), o.Claude.Tools); !ok {
+	if ok, bad := ToolsAllowed(emp("lead", "lead", store.Role{}), o.Claude.Tools, false); !ok {
 		t.Fatalf("Skill must pass the read-only init check, refused %s", bad)
 	}
 }

@@ -26,36 +26,23 @@ const touchKick = 5 * time.Second
 // useMemoryFiles wires memory to the shared folders (s enabled) or to the rows alone.
 func (e *Engine) useMemoryFiles(s *userfs.Service) {
 	if s == nil || !s.Enabled() {
-		e.memory, e.Core.Memory = nil, store.NoMemoryFiles{}
+		e.memory, e.Core.Memory = nil, core.NoMemoryFiles{}
 		return
 	}
 	e.memory = &memfiles.Syncer{DB: e.Core.Pool, Folders: s, Log: e.log, OnChange: e.memoryChanged}
 	e.Core.Memory = e.memory
 }
 
-// sweepMemory syncs the scopes with something to do, and every ready folder once an hour.
-func (e *Engine) sweepMemory(ctx context.Context) {
-	if e.memory == nil {
-		return
+// sweepMemory syncs the scopes with something to do (all: every ready folder).
+func (e *Engine) sweepMemory(ctx context.Context, all bool) {
+	if e.memory != nil {
+		e.memory.Sweep(ctx, all)
 	}
-	full := time.Since(e.memoryFullAt) >= memoryFullEvery
-	if full {
-		e.memoryFullAt = time.Now()
-	}
-	e.memory.Sweep(ctx, full)
 }
 
 // memoryChanged refreshes the pages showing a memory file changed in the folder.
 func (e *Engine) memoryChanged(ctx context.Context, s store.MemoryScope, name, op, by string) {
-	payload := map[string]any{"op": op, "name": name}
-	err := e.Core.InTx(ctx, func(tx *core.Tx) error {
-		if s.Kind == store.MemoryUser {
-			_, err := tx.EmitUser(ctx, s.ID, core.EvMemory, payload)
-			return err
-		}
-		_, err := tx.Emit(ctx, s.ID, nil, core.EvMemory, by, payload)
-		return err
-	})
+	err := e.Core.InTx(ctx, func(tx *core.Tx) error { return tx.EmitMemory(ctx, s, by, op, name) })
 	if err != nil {
 		e.log.Warn("memory change not announced", "scope", s.Kind, "id", s.ID, "err", err)
 	}
@@ -66,21 +53,18 @@ func (e *Engine) memoryChanged(ctx context.Context, s store.MemoryScope, name, o
 var memoryPath = regexp.MustCompile(`(\.project-files|\.user-files|projects/[A-Za-z0-9_-]+|shared)/\.memory/([^/\s,'"` + "`" + `]+\.md)`)
 
 // touchMemory records who is about to change memory files named in a tool call and has their
-// folder read soon after.
-func (e *Engine) touchMemory(ctx context.Context, tx *core.Tx, emp core.Employee, summary string) error {
+// folder read soon after; paths into another project's folder are skipped.
+func (e *Engine) touchMemory(ctx context.Context, tx *core.Tx, sc core.SessionContext, summary string) error {
 	if e.memory == nil {
 		return nil
 	}
 	for _, m := range memoryPath.FindAllStringSubmatch(summary, -1) {
-		s, err := e.memoryScopeOf(ctx, tx, emp, m[1])
-		if err != nil || s.ID == "" {
-			return err
-		}
+		s, ok := memoryScopeOf(sc, m[1])
 		name, err := store.MemoryName(m[2])
-		if err != nil {
+		if !ok || err != nil {
 			continue
 		}
-		if err := store.TouchMemory(ctx, tx, s, name, emp.Name); err != nil {
+		if err := store.TouchMemory(ctx, tx, s, name, sc.Employee.Name); err != nil {
 			return err
 		}
 		tx.AfterCommit(func(context.Context) { e.memory.Kick(s, touchKick) })
@@ -88,15 +72,14 @@ func (e *Engine) touchMemory(ctx context.Context, tx *core.Tx, emp core.Employee
 	return nil
 }
 
-// memoryScopeOf is the scope a path's folder names: the employee's project, the user's own
-// memory, or none (another project's folder).
-func (e *Engine) memoryScopeOf(ctx context.Context, tx *core.Tx, emp core.Employee, dir string) (store.MemoryScope, error) {
+// memoryScopeOf is the scope a path's folder names: the employee's project or the owner's own
+// memory; not ok for another project's folder.
+func memoryScopeOf(sc core.SessionContext, dir string) (store.MemoryScope, bool) {
 	switch dir {
-	case ".project-files", userfs.ProjectDir(emp.ProjectID):
-		return store.ProjectMemory(emp.ProjectID), nil
+	case ".project-files", userfs.ProjectDir(sc.Employee.ProjectID):
+		return store.ProjectMemory(sc.Employee.ProjectID), true
 	case ".user-files", userfs.SharedDir:
-		userID, err := store.MemoryOwner(ctx, tx, store.ProjectMemory(emp.ProjectID))
-		return store.UserMemory(userID), err
+		return store.UserMemory(sc.OwnerID), true
 	}
-	return store.MemoryScope{}, nil
+	return store.MemoryScope{}, false
 }

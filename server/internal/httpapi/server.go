@@ -14,6 +14,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/config"
+	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
 	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
@@ -39,6 +40,8 @@ type Deps struct {
 	Events platform.Events
 	Hooks  platform.Hooks
 	SSH    platform.SSHHooks // remote servers → SSH gateway / node gateway; nil = platform.NoSSHHooks
+	// Memory keeps auto memory in the owners' shared folders (nil: core.NoMemoryFiles).
+	Memory core.MemoryFiles
 	// Relay serves standalone Git repositories to nodes at /git/ (nil: answers 503).
 	Relay   *gitrelay.Relay
 	Log     *slog.Logger
@@ -64,6 +67,7 @@ type Server struct {
 	nodes   platform.NodeRegistry
 	events  platform.Events
 	hooks   platform.Hooks
+	memory  core.MemoryFiles
 	ssh     platform.SSHHooks
 	vault   *credvault.Vault
 	git     gitremote.Git
@@ -83,7 +87,7 @@ func New(d Deps) *Server {
 	box := auth.NewSecretBox(d.Config.SecretKeys...)
 	s := &Server{cfg: d.Config, store: d.Store, kv: d.KV, limiter: kv.NewLimiter(d.KV), box: box,
 		states: auth.NewStateSigner(box), gh: d.GitHub, office: d.Office, nodes: d.Nodes, events: d.Events,
-		hooks: d.Hooks, ssh: d.SSH, vault: mustVault(d.Config.SecretKeys), log: d.Log, expect: d.Version, repos: newRepoCache(), authz: mustAuthorizer(d.Store), relay: d.Relay}
+		hooks: d.Hooks, memory: d.Memory, ssh: d.SSH, vault: mustVault(d.Config.SecretKeys), log: d.Log, expect: d.Version, repos: newRepoCache(), authz: mustAuthorizer(d.Store), relay: d.Relay}
 	if s.relay == nil {
 		s.relay = &gitrelay.Relay{}
 	}
@@ -137,6 +141,9 @@ func withDefaults(d Deps) Deps {
 	}
 	if d.Events == nil {
 		d.Events = platform.LogEvents{Log: d.Log}
+	}
+	if d.Memory == nil {
+		d.Memory = core.NoMemoryFiles{}
 	}
 	if d.Hooks == nil {
 		d.Hooks = platform.NoHooks{}

@@ -70,10 +70,10 @@ func TestBuildOpenPerTier(t *testing.T) {
 		strings.Join(l.Tools, ",") != "Read,Glob,Grep,Bash,TodoWrite,AskUserQuestion" || !contains(l.AllowedTools, "AskUserQuestion") {
 		t.Fatalf("chat tools: member %v, lead %v / %v", d.Tools, l.Tools, l.AllowedTools)
 	}
-	if ok, bad := ToolsAllowed(emp("coordinator", "coordinator", store.Role{}), []string{"mcp__platform__ask_user", "TodoWrite", "AskUserQuestion"}); !ok {
+	if ok, bad := ToolsAllowed(emp("coordinator", "coordinator", store.Role{}), []string{"mcp__platform__ask_user", "TodoWrite", "AskUserQuestion"}, false); !ok {
 		t.Fatalf("coordinator chat tools refused: %s", bad)
 	}
-	if ok, _ := ToolsAllowed(emp("coordinator", "coordinator", store.Role{}), []string{"Bash"}); ok {
+	if ok, _ := ToolsAllowed(emp("coordinator", "coordinator", store.Role{}), []string{"Bash"}, false); ok {
 		t.Fatal("coordinator Bash must be refused")
 	}
 }
@@ -129,16 +129,23 @@ func TestCodexOptions(t *testing.T) {
 }
 
 func TestToolsAllowed(t *testing.T) {
-	if ok, bad := ToolsAllowed(emp("coordinator", "coordinator", store.Role{}), []string{"mcp__platform__open_thread", "Read", "Edit", "Bash"}); ok || bad != "Bash" {
+	coordinator, lead := emp("coordinator", "coordinator", store.Role{}), emp("lead", "lead", store.Role{})
+	if ok, bad := ToolsAllowed(coordinator, []string{"mcp__platform__open_thread", "Read", "Edit", "Bash"}, true); ok || bad != "Bash" {
 		t.Fatal("coordinator may only have platform tools and the memory file tools")
 	}
-	if ok, _ := ToolsAllowed(emp("lead", "lead", store.Role{}), []string{"Read", "Bash", "mcp__platform__assign_task"}); !ok {
+	if ok, bad := ToolsAllowed(coordinator, []string{"mcp__platform__open_thread", "Read"}, false); ok || bad != "Read" {
+		t.Fatal("without memory_files the coordinator has no file tools")
+	}
+	if ok, _ := ToolsAllowed(lead, []string{"Read", "Bash", "mcp__platform__assign_task"}, false); !ok {
 		t.Fatal("lead read tools are fine")
 	}
-	if ok, bad := ToolsAllowed(emp("lead", "lead", store.Role{}), []string{"Edit", "Write", "NotebookEdit"}); ok || bad != "NotebookEdit" {
+	if ok, bad := ToolsAllowed(lead, []string{"Edit", "Write", "NotebookEdit"}, true); ok || bad != "NotebookEdit" {
 		t.Fatal("lead may only have the memory file tools among the write tools")
 	}
-	if ok, _ := ToolsAllowed(emp("member", "dev", store.Role{}), []string{"Edit", "Write"}); !ok {
+	if ok, bad := ToolsAllowed(lead, []string{"Edit"}, false); ok || bad != "Edit" {
+		t.Fatal("without memory_files the lead writes nothing")
+	}
+	if ok, _ := ToolsAllowed(emp("member", "dev", store.Role{}), []string{"Edit", "Write"}, false); !ok {
 		t.Fatal("members edit")
 	}
 }
