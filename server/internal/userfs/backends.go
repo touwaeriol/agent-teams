@@ -133,6 +133,29 @@ FROM %s.jfs_counter`, role)).Scan(&u.UsedBytes, &u.Inodes)
 	return u, err
 }
 
+// Roles implements Meta.
+func (m *PGMeta) Roles(ctx context.Context) ([]string, error) {
+	pool, err := m.open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := pool.Query(ctx, `SELECT r.rolname FROM pg_roles r JOIN pg_namespace n ON n.nspname = r.rolname
+		WHERE r.rolname ~ '^jfs_[0-9a-f]{16}$' ORDER BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var r string
+		if err := rows.Scan(&r); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // Drop implements Meta.
 func (m *PGMeta) Drop(ctx context.Context, role string) error {
 	if !roleRE.MatchString(role) {

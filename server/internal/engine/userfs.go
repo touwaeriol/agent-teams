@@ -56,19 +56,25 @@ func (e *Engine) UseSharedFolder(s *userfs.Service) {
 	e.Orch.SharedFolder = e.sharedFolder
 }
 
+// orphanSweepEvery is how often volumes left without an owner are looked for (one is destroyed
+// at the second sweep that finds it).
+const orphanSweepEvery = time.Hour
+
 // fsSweepEvery is how often the automatic switch-on looks for users without a ready folder.
 const fsSweepEvery = time.Minute
 
 // runSharedFolders keeps every user's shared folder on (it is on by default): at start and every
 // fsSweepEvery it provisions the missing ones, retries failed removals and moves deliverable versions still kept in the
 // database into their owners' folders; beside it, on its own pace, memory and its folders are kept
-// in step. One replica runs both (leader lock).
+// in step, and every hour volumes left without an owner (a deleted user whose teardown failed) are
+// destroyed. One replica runs them (leader lock).
 func (e *Engine) runSharedFolders(ctx context.Context) {
 	if !e.FS.Enabled() {
 		return
 	}
 	scheduler.RunAsLeader(ctx, e.Core.Pool, "agent-teams:shared-folders", 30*time.Second, func(ctx context.Context) {
 		go e.runMemorySweep(ctx)
+		go every(ctx, orphanSweepEvery, func() { e.sweepOrphanFolders(ctx) })
 		every(ctx, fsSweepEvery, func() { e.sweepSharedFolders(ctx) })
 	})
 }
@@ -82,6 +88,12 @@ func every(ctx context.Context, d time.Duration, f func()) {
 			return
 		case <-time.After(d):
 		}
+	}
+}
+
+func (e *Engine) sweepOrphanFolders(ctx context.Context) {
+	if _, err := e.FS.SweepOrphans(ctx); err != nil {
+		e.log.Warn("shared folders: looking for ownerless volumes", "err", err)
 	}
 }
 

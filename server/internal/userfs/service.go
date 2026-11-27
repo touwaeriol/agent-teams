@@ -26,6 +26,8 @@ type Meta interface {
 	// Usage reads the volume's space and file counters from its metadata (zero before the volume
 	// was formatted).
 	Usage(ctx context.Context, role string) (Usage, error)
+	// Roles lists the volume roles that have a schema (jfs_<16 hex>).
+	Roles(ctx context.Context) ([]string, error)
 }
 
 // Usage is what a volume holds: bytes in use (JuiceFS counts in 4 KiB blocks) and files plus folders.
@@ -82,6 +84,9 @@ type Service struct {
 	UnmountWait, UnmountPoll time.Duration
 
 	bg sync.WaitGroup
+
+	orphanMu sync.Mutex
+	suspects map[string]bool // roles without a volume row at the last SweepOrphans
 }
 
 // ErrBusy: the volume is being switched on; it can be deleted once that ends.
