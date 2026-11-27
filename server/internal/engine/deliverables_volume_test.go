@@ -87,15 +87,15 @@ func TestDeliverablesInSharedFolder(t *testing.T) {
 	tm.b.must(403, "DELETE", "/api/projects/"+tm.projectID+"/files?path=.deliverables/"+id, nil, nil)
 	tm.b.must(403, "POST", "/api/projects/"+tm.projectID+"/files/folders", map[string]string{"path": ".deliverables/x"}, nil)
 
-	// A file changed behind the platform's back is not served as the published one.
+	// A file edited in the folder is served as it is now.
 	_ = os.WriteFile(filepath.Join(dir, "v2", "css", "a.css"), []byte("changed!"), 0o644)
 	tm.b.must(200, "GET", "/api/deliverables/"+id+"/files", nil, &files)
-	if resp, _ := fetch(t, tm.w, files.BaseURL+"css/a.css"); resp.StatusCode != 404 {
-		t.Fatalf("changed file = %d", resp.StatusCode)
+	if resp, body := fetch(t, tm.w, files.BaseURL+"css/a.css"); resp.StatusCode != 200 || body != "changed!" {
+		t.Fatalf("edited file = %d %q", resp.StatusCode, body)
 	}
 
-	// An @ reference to a deliverable whose entry file changed in the folder still goes out, with a note.
-	_ = os.WriteFile(filepath.Join(dir, "v2", "index.html"), []byte("changed!"), 0o644)
+	// An @ reference to a deliverable whose entry file is gone from the folder still goes out, with a note.
+	_ = os.Remove(filepath.Join(dir, "v2", "index.html"))
 	refs := []map[string]any{{"kind": "deliverable", "id": id}}
 	tm.b.must(202, "POST", "/api/conversations/"+tm.thread.ID+"/messages", map[string]any{"content": "看看这个", "refs": refs}, nil)
 	if send := tm.lead.expectSend("看看这个"); !strings.Contains(send.Text, "index.html 的内容现在取不到") {
