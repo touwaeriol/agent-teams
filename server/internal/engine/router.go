@@ -307,7 +307,7 @@ func (r *router) checkTools(ctx context.Context, tx *core.Tx, sc core.SessionCon
 	if len(tools) == 0 {
 		return nil
 	}
-	memoryFiles, err := orchestrator.MemoryFilesOn(ctx, tx, sc.Session)
+	memoryFiles, err := orchestrator.MemoryFilesOn(ctx, tx, sc.Employee, sc.Session, tools)
 	if err != nil {
 		return err
 	}

@@ -167,6 +167,12 @@ func TestAllowMemoryFiles(t *testing.T) {
 	if o.Claude.MemoryFiles == nil || slices.Contains(o.Claude.DisallowedTools, "Edit") || !slices.Contains(o.Claude.DisallowedTools, "NotebookEdit") {
 		t.Fatalf("lead %+v", o.Claude)
 	}
+	strict := emp("lead", "lead", store.Role{DisallowedTools: []string{"Write"}})
+	o, _ = buildOpen(open(t, strict, store.Node{}))
+	allowMemoryFiles(strict, o.Claude)
+	if !slices.Contains(o.Claude.DisallowedTools, "Write") || slices.Contains(o.Claude.DisallowedTools, "Edit") {
+		t.Fatalf("a tool the role disallows was lifted: %v", o.Claude.DisallowedTools)
+	}
 	member := emp("member", "dev", store.Role{})
 	o, _ = buildOpen(open(t, member, store.Node{}))
 	allowMemoryFiles(member, o.Claude)

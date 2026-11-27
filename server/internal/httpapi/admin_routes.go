@@ -245,10 +245,12 @@ func (s *Server) adminDeleteUser(ctx context.Context, in *userIDInput) (*struct{
 	if _, err := s.store.UserByID(ctx, in.ID); err != nil {
 		return nil, storeErr(err, "没有这个用户")
 	}
-	s.cutOff(ctx, in.ID)
+	// The folder first: when it is being switched on the deletion is refused before anything else
+	// happened to the account.
 	if err := s.hooks.UserDeleting(ctx, in.ID); err != nil {
 		return nil, fail(http.StatusConflict, "folder_busy", err.Error())
 	}
+	s.cutOff(ctx, in.ID)
 	// Grouping rules first: if deleting the row then fails, a retry finishes the job and no
 	// rule outlives its user.
 	if err := s.authz.forget(in.ID); err != nil {

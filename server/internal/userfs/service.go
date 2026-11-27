@@ -124,8 +124,9 @@ func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
 	return Get(ctx, s.db, userID)
 }
 
-// ProvisionAll switches the shared folder on for every user who lacks a ready one (the folder is
-// on by default): new accounts, failed attempts after retryAfter, provisionings left standing.
+// ProvisionAll switches the shared folder on for every active user who lacks a ready one (the
+// folder is on by default): new accounts, failed attempts after retryAfter, provisionings left
+// standing. It stops between users when ctx ends.
 // It returns how many volumes became ready.
 func (s *Service) ProvisionAll(ctx context.Context) (int, error) {
 	if !s.Enabled() {
@@ -137,6 +138,9 @@ func (s *Service) ProvisionAll(ctx context.Context) (int, error) {
 	}
 	ready := 0
 	for _, id := range ids {
+		if ctx.Err() != nil {
+			return ready, ctx.Err()
+		}
 		if vol, err := s.Enable(ctx, id); err == nil && vol.State == StateReady {
 			ready++
 		}

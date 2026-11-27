@@ -68,7 +68,7 @@ func (s *Store) Artifacts() artifacts.Store {
 
 // New returns a Store; pub may be nil (no realtime hints).
 func New(pool *store.Pool, pub Publisher) *Store {
-	return &Store{Pool: pool, Pub: pub, Online: func(string) bool { return false }, Blobs: blobstore.None{}, Memory: NoMemoryFiles{}}
+	return &Store{Pool: pool, Pub: pub, Online: func(string) bool { return false }, Blobs: blobstore.None{}, Memory: NoMemoryFiles{DB: pool}}
 }
 
 // Tx is one transaction plus what to do after it commits.

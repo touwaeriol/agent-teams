@@ -330,7 +330,10 @@ func allowMemoryFiles(e core.Employee, c *protocol.ClaudeSessionOptions) {
 	c.MemoryFiles = &t
 	c.Tools = mergeLists(c.Tools, memoryFileTools)
 	c.AllowedTools = mergeLists(c.AllowedTools, memoryFileTools)
-	c.DisallowedTools = slices.DeleteFunc(slices.Clone(c.DisallowedTools), func(t string) bool { return slices.Contains(memoryFileTools, t) })
+	// Lift only the platform's own denials: a tool the role itself disallows stays off.
+	c.DisallowedTools = slices.DeleteFunc(slices.Clone(c.DisallowedTools), func(t string) bool {
+		return slices.Contains(memoryFileTools, t) && !slices.Contains(e.Spec.DisallowedTools, t)
+	})
 }
 
 func readOnlyClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
@@ -470,11 +473,14 @@ func ToolsAllowed(e core.Employee, tools []string, memoryFiles bool) (bool, stri
 	return true, ""
 }
 
-// MemoryFilesOn reports whether a session may have the memory file tools: its node runs a daemon
-// that keeps them inside the memory directories.
-func MemoryFilesOn(ctx context.Context, q core.DB, s core.AgentSession) (bool, error) {
-	if s.NodeID == nil {
+// MemoryFilesOn reports whether a session reporting tools may have the memory file tools among
+// them: only asked (of its node's daemon, which keeps them inside the memory directories) when a
+// coordinator or read-only session reports one.
+func MemoryFilesOn(ctx context.Context, q core.DB, e core.Employee, s core.AgentSession, tools []string) (bool, error) {
+	if s.NodeID == nil || (e.Tier != "coordinator" && !readOnly(e)) || !slices.ContainsFunc(tools, isMemoryFileTool) {
 		return false, nil
 	}
 	return core.NodeHasFeature(ctx, q, *s.NodeID, FeatureMemoryFiles)
 }
+
+func isMemoryFileTool(t string) bool { return slices.Contains(memoryFileTools, t) }

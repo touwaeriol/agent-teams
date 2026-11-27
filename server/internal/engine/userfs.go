@@ -60,31 +60,32 @@ func (e *Engine) UseSharedFolder(s *userfs.Service) {
 const fsSweepEvery = time.Minute
 
 // runSharedFolders keeps every user's shared folder on (it is on by default): at start and every
-// fsSweepEvery it provisions the missing ones, moves deliverable versions still kept in the
-// database into their owners' folders and keeps memory and its folders in step. One replica runs
-// it (leader lock).
+// fsSweepEvery it provisions the missing ones and moves deliverable versions still kept in the
+// database into their owners' folders; beside it, on its own pace, memory and its folders are kept
+// in step. One replica runs both (leader lock).
 func (e *Engine) runSharedFolders(ctx context.Context) {
 	if !e.FS.Enabled() {
 		return
 	}
 	scheduler.RunAsLeader(ctx, e.Core.Pool, "agent-teams:shared-folders", 30*time.Second, func(ctx context.Context) {
-		var fullAt time.Time // when the memory sweep last read every folder
-		for {
-			full := time.Since(fullAt) >= memoryFullEvery
-			if full {
-				fullAt = time.Now()
-			}
-			e.sweepSharedFolders(ctx, full)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(fsSweepEvery):
-			}
-		}
+		go e.runMemorySweep(ctx)
+		every(ctx, fsSweepEvery, func() { e.sweepSharedFolders(ctx) })
 	})
 }
 
-func (e *Engine) sweepSharedFolders(ctx context.Context, fullMemory bool) {
+// every runs f now and then every d until ctx ends.
+func every(ctx context.Context, d time.Duration, f func()) {
+	for {
+		f()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(d):
+		}
+	}
+}
+
+func (e *Engine) sweepSharedFolders(ctx context.Context) {
 	if _, err := e.FS.ProvisionAll(ctx); err != nil {
 		e.log.Warn("shared folders: provisioning sweep", "err", err)
 	}
@@ -94,7 +95,6 @@ func (e *Engine) sweepSharedFolders(ctx context.Context, fullMemory bool) {
 	} else if rep.Moved > 0 || rep.Failed > 0 {
 		e.log.Info("shared folders: deliverables moved into the folders", "moved", rep.Moved, "failed", rep.Failed)
 	}
-	e.sweepMemory(ctx, fullMemory)
 }
 
 // sharedFolder is session.open fs: the project's folder and the user's shared folder, when the

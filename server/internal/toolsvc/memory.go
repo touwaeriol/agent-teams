@@ -46,6 +46,14 @@ func memoryScope(c *call, scope *protocol.MemoryScope) store.MemoryScope {
 	return store.ProjectMemory(c.emp().ProjectID)
 }
 
+// syncMemory reads the folder into the rows before a change, so it is made on the file as it is
+// now and does not put an older copy over an edit made on a node.
+func (s *Service) syncMemory(ctx context.Context, sc store.MemoryScope) {
+	if err := s.core.Memory.Sync(ctx, sc); err != nil {
+		s.log.Warn("memory folder not read", "scope", sc.Kind, "id", sc.ID, "err", err)
+	}
+}
+
 // changed announces a change and has the folder written out after the transaction.
 func (s *Service) changed(ctx context.Context, tx *core.Tx, sc store.MemoryScope, actor, op, name string) error {
 	tx.AfterCommit(func(context.Context) { s.core.Memory.Changed(sc) })
@@ -98,6 +106,7 @@ func (s *Service) memoryWrite(ctx context.Context, tx *core.Tx, c *call) (Result
 		return Result{}, err
 	}
 	sc := memoryScope(c, in.Scope)
+	s.syncMemory(ctx, sc)
 	w := store.MemoryWrite{Name: in.Name, Description: deref(in.Description), Content: in.Content, By: author(c)}
 	if in.Type != nil {
 		w.Type = string(*in.Type)
@@ -122,7 +131,8 @@ func (s *Service) memoryEdit(ctx context.Context, tx *core.Tx, c *call) (Result,
 		return Result{}, err
 	}
 	sc := memoryScope(c, in.Scope)
-	f, err := store.GetMemoryFile(ctx, tx, sc, in.Name)
+	s.syncMemory(ctx, sc)
+	f, err := store.GetMemoryFileForUpdate(ctx, tx, sc, in.Name)
 	if err != nil {
 		return memoryResult(err, nil)
 	}
@@ -158,7 +168,8 @@ func (s *Service) memoryDelete(ctx context.Context, tx *core.Tx, c *call) (Resul
 		return Result{}, err
 	}
 	sc := memoryScope(c, in.Scope)
-	err := s.core.Memory.Delete(ctx, tx, sc, in.Name, author(c))
+	s.syncMemory(ctx, sc)
+	err := s.core.Memory.Delete(ctx, sc, in.Name, author(c))
 	if err == nil {
 		err = s.changed(ctx, tx, sc, c.emp().Name, "delete", in.Name)
 	}
@@ -172,6 +183,7 @@ func (s *Service) remember(ctx context.Context, tx *core.Tx, c *call) (Result, e
 		return Result{}, err
 	}
 	sc := memoryScope(c, in.Scope)
+	s.syncMemory(ctx, sc)
 	err := store.AppendMemoryNote(ctx, tx, sc, in.Text, author(c))
 	if err == nil {
 		err = s.changed(ctx, tx, sc, c.emp().Name, "write", store.MemoryIndex)
@@ -185,6 +197,7 @@ func (s *Service) remember(ctx context.Context, tx *core.Tx, c *call) (Result, e
 
 // rememberSummary files a finished thread's summary under thread-summaries.md.
 func (s *Service) rememberSummary(ctx context.Context, tx *core.Tx, t core.Thread, summary string) error {
+	s.syncMemory(ctx, store.ProjectMemory(t.ProjectID))
 	if err := store.AppendThreadSummary(ctx, tx, t.ProjectID, t.No, t.Title, summary); err != nil {
 		return err
 	}

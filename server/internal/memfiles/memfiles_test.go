@@ -3,6 +3,7 @@ package memfiles_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -198,7 +199,7 @@ func TestPendingWinsAndRemoving(t *testing.T) {
 		t.Fatal("MEMORY.md not written again")
 	}
 
-	if err := fx.sync.Delete(ctx, q, fx.scope, "a", "user"); err != nil {
+	if err := fx.sync.Delete(ctx, fx.scope, "a", "user"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(fx.dir, "a.md")); !os.IsNotExist(err) {
@@ -207,7 +208,7 @@ func TestPendingWinsAndRemoving(t *testing.T) {
 	if _, err := store.GetMemoryFile(ctx, q, fx.scope, "a.md"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("row kept: %v", err)
 	}
-	if err := fx.sync.Delete(ctx, q, fx.scope, "MEMORY.md", "user"); !store.IsMemoryError(err) {
+	if err := fx.sync.Delete(ctx, fx.scope, "MEMORY.md", "user"); !store.IsMemoryError(err) {
 		t.Fatalf("deleting MEMORY.md: %v", err)
 	}
 
@@ -224,10 +225,10 @@ func TestPendingWinsAndRemoving(t *testing.T) {
 	if err := fx.sync.Sync(ctx, fx.scope); err != nil || !fx.row(t, "c.md").Pending {
 		t.Fatalf("an unreachable folder: %v", err)
 	}
-	if err := fx.sync.Delete(ctx, q, fx.scope, "b", "user"); !store.IsMemoryError(err) {
+	if err := fx.sync.Delete(ctx, fx.scope, "b", "user"); !store.IsMemoryError(err) {
 		t.Fatalf("deleting a written-out file without the folder: %v", err)
 	}
-	if err := fx.sync.Delete(ctx, q, fx.scope, "c", "user"); err != nil {
+	if err := fx.sync.Delete(ctx, fx.scope, "c", "user"); err != nil {
 		t.Fatalf("deleting a file never written out: %v", err)
 	}
 }
@@ -270,6 +271,55 @@ func TestParseRender(t *testing.T) {
 	}
 	if p := memfiles.Parse("z.md", []byte("\ufeff---\r\ndescription: d\r\n---\r\nbody\r\n")); p.Description != "d" || p.Content != "body" {
 		t.Fatalf("CRLF %+v", p)
+	}
+	q := store.MemoryFile{Name: "q.md", Description: `"fast" vs "slow"`, Content: "c"}
+	if p := memfiles.Parse("q.md", memfiles.Render(q)); p.Description != q.Description {
+		t.Fatalf("quoted description %q", p.Description)
+	}
+	rule := "---\n正文开头是一条分隔线\n---\n后面\n"
+	if p := memfiles.Parse("r.md", []byte(rule)); p.Frontmatter || p.Content != strings.Trim(rule, "\n") {
+		t.Fatalf("a leading rule taken for frontmatter %+v", p)
+	}
+}
+
+// TestReadBackKeepsWhatItCannotTake: MEMORY.md and a new topic file changed together both land
+// (MEMORY.md is read first); a file rewritten without frontmatter keeps its description; a file
+// over the length limit is not taken (and not cut), the row keeps its last content.
+func TestReadBackKeepsWhatItCannotTake(t *testing.T) {
+	fx := newFixture(t)
+	ctx, q := fx.ctx, fx.s.Pool
+	if _, _, err := store.WriteMemoryFile(ctx, q, fx.scope, store.MemoryWrite{Name: "a", Description: "A 的说明", Type: "project", Content: "a", By: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.sync.Sync(ctx, fx.scope); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ { // map order made this lose the MEMORY.md edit about half the time
+		name := fmt.Sprintf("n%d.md", i)
+		fx.edit(t, store.MemoryIndex, fx.file(t, store.MemoryIndex)+fmt.Sprintf("- 手记 %d\n", i), time.Duration(2+2*i)*time.Second)
+		fx.edit(t, name, "---\ndescription: 新的\n---\n\nbody\n", time.Duration(2+2*i)*time.Second)
+		if err := fx.sync.Sync(ctx, fx.scope); err != nil {
+			t.Fatal(err)
+		}
+		if idx := fx.row(t, store.MemoryIndex).Content; !strings.Contains(idx, fmt.Sprintf("手记 %d", i)) || !strings.Contains(idx, name) {
+			t.Fatalf("round %d: MEMORY.md %q", i, idx)
+		}
+	}
+
+	fx.edit(t, "a.md", "只有正文了\n", 20*time.Second)
+	if err := fx.sync.Sync(ctx, fx.scope); err != nil {
+		t.Fatal(err)
+	}
+	if r := fx.row(t, "a.md"); r.Content != "只有正文了" || r.Description != "A 的说明" || r.Type != "project" {
+		t.Fatalf("plain rewrite %+v", r)
+	}
+
+	fx.edit(t, "a.md", strings.Repeat("长", store.MemoryContentMax+1), 22*time.Second)
+	if err := fx.sync.Sync(ctx, fx.scope); err != nil {
+		t.Fatal(err)
+	}
+	if r := fx.row(t, "a.md"); r.Content != "只有正文了" {
+		t.Fatalf("an over-long file was taken (%d characters)", len([]rune(r.Content)))
 	}
 }
 
