@@ -10,7 +10,7 @@ import SharedFolder from "@/pages/settings/SharedFolder.vue";
 const EMPTY = { configured: true, project_dir: "projects/{project_id}", shared_dir: "shared" };
 const READY = {
   ...EMPTY,
-  volume: { volume: "at-0123456789abcdef", state: "ready", error: "", capacity_gb: 0, created_at: "", updated_at: "" },
+  volume: { bucket: "agent-teams-fs", prefix: "users/0123456789abcdef/", read_only: false, state: "ready", error: "", capacity_gb: 0, created_at: "", updated_at: "" },
 };
 
 function api(get: unknown) {
@@ -60,17 +60,36 @@ describe("SharedFolder page", () => {
     api(READY);
     const w = mountPage();
     await flushPromises();
-    expect(w.text()).toContain("at-0123456789abcdef");
+    expect(w.text()).toContain("agent-teams-fs/users/0123456789abcdef/");
+    expect(w.text()).not.toContain("超出容量");
+    expect(w.text()).toContain("/dev/fuse");
+    expect(w.findAll("button").some((b) => b.text().includes("Docker"))).toBe(false);
     expect(w.text()).toContain("不限");
     expect(w.text()).not.toContain("删除共享文件夹");
     expect(w.text()).not.toContain("已用空间");
   });
 
   it("shows how much the folder holds, against the cap", async () => {
-    api({ ...READY, volume: { ...READY.volume, capacity_gb: 4 }, usage: { used_bytes: 2 ** 30, inodes: 1234 } });
+    api({ ...READY, volume: { ...READY.volume, capacity_gb: 4 }, usage: { used_bytes: 2 ** 30, objects: 1234 } });
     const w = mountPage();
     await flushPromises();
     expect(w.text()).toContain("已用空间");
-    expect(w.text()).toContain("1,234 个文件和文件夹，占上限 25%");
+    expect(w.text()).toContain("1,234 个对象，占上限 25%");
+  });
+
+  it("shows a bucket of its own without a prefix", async () => {
+    api({ ...READY, volume: { ...READY.volume, bucket: "atu-0123456789abcdef", prefix: "" } });
+    const w = mountPage();
+    await flushPromises();
+    expect(w.text()).toContain("atu-0123456789abcdef");
+    expect(w.text()).not.toContain("atu-0123456789abcdef/");
+  });
+
+  it("says a folder over its capacity is read-only", async () => {
+    api({ ...READY, volume: { ...READY.volume, capacity_gb: 1, read_only: true }, usage: { used_bytes: 2 ** 31, objects: 3 } });
+    const w = mountPage();
+    await flushPromises();
+    expect(w.text()).toContain("已超出容量上限");
+    expect(w.text()).toContain("占上限 100%");
   });
 });

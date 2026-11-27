@@ -2,18 +2,22 @@ package userfs
 
 import (
 	"context"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// TestSweepOrphans: a volume whose user row is gone (teardown failed) is destroyed at the second
-// sweep that finds it ownerless, with a reset metadata password; its account and role go too,
-// and the volumes that still have an owner are left alone.
+// TestSweepOrphans: a user's folder and key whose row is gone (the removal failed) are removed at
+// the second sweep that finds them ownerless; owned folders and keys, other prefixes and keys not
+// named like a user's are left alone.
 func TestSweepOrphans(t *testing.T) {
-	s, m, iam, vols, st := newTest(t)
+	s, fs, st := newTest(t)
 	ctx := context.Background()
+	if n, err := s.SweepOrphans(ctx); err != nil || n != 0 {
+		t.Fatalf("empty volume = %d %v", n, err)
+	}
 	if _, err := store.Exec(ctx, st.Pool, `INSERT INTO at_users (id, email, password_hash) VALUES ('u2', 'b@example.com', 'x')`); err != nil {
 		t.Fatal(err)
 	}
@@ -22,32 +26,36 @@ func TestSweepOrphans(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	gone := NamesFor("u2")
-	oldPassword := m.roles[gone.Role]
 	if _, err := store.Exec(ctx, st.Pool, `DELETE FROM at_users WHERE id = 'u2'`); err != nil {
 		t.Fatal(err)
 	}
+	// Prefixes and keys not named like a user's are no one's business here.
+	for _, d := range []string{"fs/attachments", "fs/users/someone", "attachments"} {
+		if err := os.MkdirAll(filepath.Join(fs.root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fs.keys["platform"] = fakeKey{name: "agent-teams"}
 
 	if n, err := s.SweepOrphans(ctx); err != nil || n != 0 {
 		t.Fatalf("first sweep = %d %v", n, err)
 	}
-	if _, ok := m.roles[gone.Role]; !ok || vols.destroys() != 0 {
-		t.Fatal("destroyed at the first sweep")
+	if !exists(fs.userPath("u2")) {
+		t.Fatal("removed at the first sweep")
 	}
-	if n, err := s.SweepOrphans(ctx); err != nil || n != 1 {
+	if n, err := s.SweepOrphans(ctx); err != nil || n != 2 {
 		t.Fatalf("second sweep = %d %v", n, err)
 	}
-	if _, ok := m.roles[gone.Role]; ok {
-		t.Fatal("role left")
+	if n, err := s.SweepOrphans(ctx); err != nil || n != 0 {
+		t.Fatalf("u2 key revoked at the same sweep: %d %v", n, err)
 	}
-	if _, ok := iam.users[gone.AccessKey]; ok {
-		t.Fatal("object-store account left")
+	if exists(fs.userPath("u2")) || fs.keyCount() != 2 {
+		t.Fatalf("ownerless folder or its key left (%d keys)", fs.keyCount())
 	}
-	if vols.destroys() != 1 || !strings.Contains(vols.destroyAt[0], gone.Role+"@") {
-		t.Fatalf("destroy calls %v", vols.destroyAt)
-	}
-	if m.roles[NamesFor("u1").Role] == "" || oldPassword == "" {
-		t.Fatal("owned volume touched")
+	u1, _ := s.Get(ctx, "u1")
+	if _, ok := fs.key(u1.AccessKey); !ok || !exists(fs.userPath("u1", "projects")) || !exists(filepath.Join(fs.root, "fs/attachments")) ||
+		!exists(filepath.Join(fs.root, "fs/users/someone")) || !exists(filepath.Join(fs.root, "attachments")) {
+		t.Fatal("owned or foreign folder or key touched")
 	}
 	if n, err := s.SweepOrphans(ctx); err != nil || n != 0 {
 		t.Fatalf("third sweep = %d %v", n, err)

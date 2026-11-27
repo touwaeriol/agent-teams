@@ -20,9 +20,9 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
 
-// A project's files are its folder in the user's shared folder (projects/<pid>/ of the JuiceFS
-// volume, .project-files/ in every employee's working directory). The page lists, uploads,
-// downloads and deletes them through the console's gateway to the volume; paths here are relative
+// A project's files are its folder in the user's shared folder (projects/<pid>/ of the user's
+// bucket, .project-files/ in every employee's working directory). The page lists, uploads,
+// downloads and deletes them through the object store with the console's key; paths here are relative
 // to the project's folder.
 
 // maxFilesUpload is the body limit of one upload request.

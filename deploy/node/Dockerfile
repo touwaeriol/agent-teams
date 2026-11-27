@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # agent-teams node image: the node daemon (agent-teams-node) plus the CLIs its employees use
-# (Claude Code, Codex, git, ssh, gh, tini). Build from the repository root:
+# (Claude Code, Codex, git, ssh, gh, tini) and geesefs + fuse3 for the shared folder. Build from the
+# repository root:
 #   docker build -f deploy/node/Dockerfile -t agent-teams-node .
 # Runs as the non-root user "agent" (uid 1000): bypassPermissions refuses to run as root.
 # See deploy/node/README.md for auth, volumes and the compose example.
@@ -34,7 +35,15 @@ FROM ${NODE_IMAGE}
 # Same gh release the daemon would otherwise download on first use (node/src/git/gh-install.ts).
 ARG GH_VERSION=2.103.3
 ARG TINI_VERSION=0.19.0
+# Same geesefs release and checksums the console sends in fs.mount (server/internal/userfs).
+ARG GEESEFS_VERSION=0.43.9
+ARG GEESEFS_SHA256_AMD64=8253f0bad8070f504b3ca94a76919d9617252e7ffae04efca9ca54d5cfbaaca8
+ARG GEESEFS_SHA256_ARM64=d2a47ea0833c2369e1f7ba92cada1c8caadd0e91144f4219fd0ce6a483e52461
 ARG TARGETARCH
+
+# fuse3: fusermount3 (setuid) lets the daemon, as uid 1000, mount the shared folder with geesefs.
+# The container needs /dev/fuse, cap_add SYS_ADMIN and apparmor:unconfined for that (compose.yml).
+RUN apt-get update && apt-get install -y --no-install-recommends fuse3 && rm -rf /var/lib/apt/lists/*
 
 RUN --mount=type=secret,id=build_ca,required=false \
     set -eu; ca=""; [ -s /run/secrets/build_ca ] && ca="--cacert /run/secrets/build_ca"; \
@@ -47,7 +56,12 @@ RUN --mount=type=secret,id=build_ca,required=false \
     curl -fsSL $ca -o "$file" "$base/$file"; \
     curl -fsSL $ca "$base/gh_${GH_VERSION}_checksums.txt" | grep " $file\$" | sha256sum -c --quiet -; \
     tar -xzf "$file"; install -m 0755 "gh_${GH_VERSION}_linux_${arch}/bin/gh" /usr/local/bin/gh; \
-    rm -rf /tmp/gh_*
+    rm -rf /tmp/gh_*; \
+    geesefs="geesefs-linux-${arch}"; \
+    sum="$GEESEFS_SHA256_AMD64"; [ "$arch" = arm64 ] && sum="$GEESEFS_SHA256_ARM64"; \
+    curl -fsSL $ca -o "$geesefs" "https://github.com/yandex-cloud/geesefs/releases/download/v${GEESEFS_VERSION}/$geesefs"; \
+    echo "$sum  $geesefs" | sha256sum -c --quiet -; \
+    install -D -m 0755 "$geesefs" "/opt/geesefs/geesefs-${GEESEFS_VERSION}"; rm -f "$geesefs"
 
 COPY --from=build /out/agent-teams-node /opt/agent-teams-node
 COPY deploy/node/entrypoint.sh /usr/local/bin/agent-teams-entrypoint
@@ -67,7 +81,8 @@ RUN sdk="$(basename /opt/agent-teams-node/node_modules/@anthropic-ai/claude-agen
       /home/agent/.claude /home/agent/.codex /home/agent/.agents_team /home/agent/.ssh \
       /home/agent/.config /home/agent/.config/agent-teams \
       /home/agent/.local /home/agent/.local/state /home/agent/.local/state/agent-teams \
-      /home/agent/.local/share /home/agent/.local/share/agent-teams
+      /home/agent/.local/share /home/agent/.local/share/agent-teams \
+ && install -d -o agent -g agent -m 0755 /home/agent/.fs
 
 USER agent
 WORKDIR /home/agent
@@ -79,6 +94,7 @@ ENV HOME=/home/agent \
     AGENT_TEAMS_ROOT=/home/agent/.agents_team \
     AGENT_TEAMS_STATE=/home/agent/.local/state/agent-teams \
     AGENT_TEAMS_SEED=/opt/agent-teams-node \
+    AGENT_TEAMS_FS_MOUNT_DIR=/home/agent/.fs \
     DISABLE_AUTOUPDATER=1 \
     LANG=C.UTF-8
 VOLUME ["/home/agent/.claude", "/home/agent/.codex", "/home/agent/.agents_team", "/home/agent/.local/state/agent-teams", "/home/agent/.local/share/agent-teams"]

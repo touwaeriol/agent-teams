@@ -13,7 +13,7 @@ import (
 // TestRemoveRetried: a deleted project's folder that cannot be removed (volume unreachable) is
 // recorded and removed by RetryRemovals once the volume answers; no volume is nothing to do.
 func TestRemoveRetried(t *testing.T) {
-	s, _, _, vols, st := newTest(t)
+	s, fs, st := newTest(t)
 	ctx := context.Background()
 	count := func() (n, attempts int) {
 		_ = store.QueryRow(ctx, st.Pool, `SELECT count(*), COALESCE(max(attempts), 0) FROM at_fs_removals`).Scan(&n, &attempts)
@@ -25,12 +25,12 @@ func TestRemoveRetried(t *testing.T) {
 	if _, err := s.Enable(ctx, "u1"); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(vols.root, NamesFor("u1").Volume, "projects", "p1")
+	dir := fs.userPath("u1", "projects", "p1")
 	if err := os.MkdirAll(filepath.Join(dir, ".memory"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	vols.filesErr = errors.New("gateway down")
+	fs.filesErr = errors.New("gateway down")
 	if err := s.RemoveProject(ctx, "u1", "p1"); err == nil {
 		t.Fatal("failed removal not reported")
 	}
@@ -44,7 +44,7 @@ func TestRemoveRetried(t *testing.T) {
 		t.Fatalf("after a failed retry: %d rows, %d attempts", n, attempts)
 	}
 
-	vols.filesErr = nil
+	fs.filesErr = nil
 	if done, err := s.RetryRemovals(ctx); err != nil || done != 1 {
 		t.Fatalf("retry = %d %v", done, err)
 	}

@@ -28,6 +28,7 @@ python3/make/gcc 打在一个镜像里，不用在宿主机装 Node 或 systemd 
 ```bash
 docker run -d --name agent-teams-node-mynode --hostname mynode \
   --restart unless-stopped --stop-timeout 60 \
+  --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined \
   -e AGENT_TEAMS_CONSOLE=__CONSOLE__ \
   -e AGENT_TEAMS_NODE_TOKEN='<节点令牌>' \
   -v agent-teams-node-mynode-claude:/home/agent/.claude \
@@ -54,6 +55,9 @@ services:
     hostname: "mynode"              # 加引号：节点名是 123、true 这类时也按字符串处理
     restart: unless-stopped
     stop_grace_period: 60s          # 留时间让守护进程暂停会话，下次启动可恢复
+    devices: ["/dev/fuse"]          # 共享文件夹：守护进程在容器里用 geesefs 挂载（第 8 节）
+    cap_add: ["SYS_ADMIN"]
+    security_opt: ["apparmor:unconfined"]
     environment:
       AGENT_TEAMS_CONSOLE: "__CONSOLE__"
       AGENT_TEAMS_NODE_TOKEN: "<节点令牌>"
@@ -135,15 +139,16 @@ volumes:                             # 和 docker run 方式同名的卷：两�
 - **镜像**（git、gh、Node、Claude Code / Codex CLI 等系统工具）：`docker compose pull && docker compose up -d`；docker run 方式则 `docker pull` 后删掉旧容器、用同样的命令（同样的卷名）重新 `docker run`。
 - **换令牌**：在网页重新生成令牌，改 `compose.yml` / `node.env` 里的 `AGENT_TEAMS_NODE_TOKEN`，`docker compose up -d`。卷不用动。
 
-## 8. 共享文件夹（可选）
+## 8. 共享文件夹
 
-每个用户默认有一个 JuiceFS 网络文件夹（控制面板自动开通，状态见“设置 → 共享文件夹”），员工会话里用 `$AGENT_TEAMS_PROJECT_DIR`（本项目）和 `$AGENT_TEAMS_SHARED_DIR`（所有项目共用）访问。Docker 节点推荐由宿主机用 JuiceFS 官方卷插件挂载，节点容器不需要任何特权，也拿不到存储密码：
+每个用户默认有一个网络文件夹（控制面板自动开通，状态见“设置 → 共享文件夹”），员工会话里用 `$AGENT_TEAMS_PROJECT_DIR`（本项目）和 `$AGENT_TEAMS_SHARED_DIR`（所有项目共用）访问。它是平台对象存储上属于你的一块空间，守护进程在容器里用 geesefs 挂到 `/home/agent/.fs`，挂载用的密钥只通过节点连接下发，不进任何配置文件。
 
-1. 宿主机装一次插件：`docker plugin install juicedata/juicefs --alias juicedata/juicefs --grant-all-permissions`。
-2. 在“共享文件夹”页点“生成 Docker 卷配置”，把给出的 `volumes:` 片段和服务里的 `AGENT_TEAMS_FS_DIR=/home/agent/.fs`、卷挂载合进 `compose.yml`，然后 `docker compose up -d`。这段配置含存储密码，只放在这台宿主机上。
-3. “节点”页显示“共享文件夹（Docker 卷）：已挂载”即可。
+所以容器要能用 FUSE：上面两种方式里的 `--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined`（compose 里是 `devices`、`cap_add`、`security_opt` 三行）就是为它加的。旧的节点容器没有这三项时，按上面的写法重建一次容器即可（卷不用动）。“节点”页显示共享文件夹“已挂载”就好了。
 
-不想用插件时，给容器加 `--device /dev/fuse --cap-add SYS_ADMIN` 后守护进程会自己挂载（权限更大，不推荐）。插件的挂载进程退出后，节点守护进程会发现挂载丢失并自行退出，由容器的重启策略把容器拉起来、插件重新挂载（compose 里服务要有 `restart: unless-stopped`，docker run 要加 `--restart unless-stopped`）。同一个 SQLite 库同一时间只能由一个会话写。
+注意：
+- 它是对象存储挂成的目录，不支持硬链接和文件锁；Git 仓库、SQLite 这类数据库和 `node_modules` 不要放进去。别的节点改过的文件，最多几秒后可见。
+- 写满容量后新的写入会失败，通常在保存或关闭文件时报 I/O 错误。
+- 想让员工会话拿不到这些权限，可以在环境变量里加 `AGENT_TEAMS_CONFINE=on`：会话以 no_new_privs 运行，sudo 和 fusermount3 都无法提权（员工也就不能 sudo 装软件）。默认关闭。
 
 ## 9. 排错
 

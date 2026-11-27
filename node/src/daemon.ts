@@ -1,3 +1,4 @@
+import { type Confine, probeConfine } from "./sessions/confine.js";
 import { cpus, hostname, loadavg, totalmem } from "node:os";
 import { mkdirSync, statfsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -70,6 +71,8 @@ export interface DaemonOptions {
   probeRuntimes?: boolean;
   isolation?: Isolation;
   queryFn?: QueryFn;
+  /** Session confinement (tests); default probeConfine(). */
+  confine?: Confine;
   codexCommand?: string[];
   /** The agy command (tests: a fake ACP agent); default: found on PATH / ~/.local/bin. */
   agyCommand?: string[];
@@ -116,8 +119,10 @@ export interface DaemonOptions {
   updater?: Partial<Pick<UpdaterOptions, "pollMs" | "confirmAfterMs" | "fetchFn" | "npm" | "now">>;
   /** AGENT_TEAMS_FS_DIR: the shared folder mounted by something else (fs_external). */
   fsDir?: string;
+  /** AGENT_TEAMS_FS_MOUNT_DIR: where the daemon mounts the shared folder (default <data>/mnt/<name>). */
+  fsMountDir?: string;
   /** Shared-folder overrides (tests): runner, fetch, fuse probe, platform. */
-  sharedFs?: Partial<Pick<SharedFsOptions, "run" | "fetchFn" | "fuse" | "platform" | "checkMs" | "mountWaitMs">>;
+  sharedFs?: Partial<Pick<SharedFsOptions, "run" | "fetchFn" | "fuse" | "platform" | "checkMs" | "mountWaitMs" | "mounted" | "procs" | "exitWaitMs">>;
 }
 
 const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "context_detail", "session_controls", "attachments_v2", "memory_files"];
@@ -194,7 +199,7 @@ export class Daemon {
     const realSsh = installSshWrappers(this.platform.binDir, o.sshPath ?? process.env.PATH ?? "");
     this.sshClient = sshClientVersion(realSsh.ssh);
     this.sharedFs = new SharedFs({
-      dataDir, stateDir: o.stateDir, ...(o.fsDir ? { externalDir: o.fsDir } : {}), log: o.log.child({ c: "fs" }), send: (t, b) => this.link.send(t, b),
+      dataDir, stateDir: o.stateDir, ...(o.fsDir ? { externalDir: o.fsDir } : {}), ...(o.fsMountDir ? { mountDir: o.fsMountDir } : {}), log: o.log.child({ c: "fs" }), send: (t, b) => this.link.send(t, b),
       onExternalLost: () => o.onExit?.(EXIT_FS_LOST), ...o.sharedFs,
     });
     this.ssh = new SshHub({
@@ -204,11 +209,12 @@ export class Daemon {
     });
     this.credServer = new CredServer(credSocketPath(o.runtimeDir), this.creds, o.log, { gh: () => this.gh.resolve(), ghConfigRoot: join(dataDir, "gh-config") });
     this.toolhost = new LoopbackToolHost(o.log);
-    this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
+    const confine = o.confine ?? probeConfine();
+    this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, confine, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
     this.runtimes = RuntimeRegistry.builtin({
       root: o.root, employeeHome: this.employeeHome, claudeConfigDir: o.claudeConfigDir, codexHome: o.codexHome,
       sandboxOk: () => this.isolation !== "none", claudeEnv: () => this.claudeEnv({}), claudeFixed: () => this.claudeFixed(),
-      secretPaths: () => this.secretPaths(), hub: this.hub, toolhost: this.toolhost, ...(o.queryFn ? { queryFn: o.queryFn } : {}),
+      secretPaths: () => this.secretPaths(), hub: this.hub, toolhost: this.toolhost, confine, ...(o.queryFn ? { queryFn: o.queryFn } : {}),
       ...(o.codexCommand ? { codexCommand: o.codexCommand } : {}),
       agyHome: this.agyHome, ...(o.agyCommand ? { agyCommand: o.agyCommand } : {}), log: o.log,
       agyEnv: () => buildEnv({ base: process.env, home: this.agyHome, passList: [...this.o.passEnv, ...AGY_PASS_ENV] }),
@@ -289,7 +295,7 @@ export class Daemon {
     this.hub.stop();
     await this.toolhost.stop();
     await this.ssh.stop();
-    this.sharedFs.stop();
+    await this.sharedFs.shutdown();
     await this.credServer.stop();
   }
 

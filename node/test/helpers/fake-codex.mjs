@@ -11,6 +11,8 @@ const pending = new Map();
 let nextServerId = 1000;
 /** Set by a turn whose text has "steerfail": turn/steer is refused, as after the turn ended. */
 let steerFails = false;
+/** Resolves the wait of a turn that compacted by itself once the daemon steers (or tries to). */
+let steered = () => {};
 
 const write = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
 const log = (entry) => process.env.FAKE_CODEX_LOG && appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify(entry) + "\n");
@@ -47,8 +49,11 @@ async function runTurn(threadId, turnId, text) {
   if (text.includes("steerfail")) steerFails = true;
   if (text.includes("autocompact")) {
     // the runtime compacts mid-turn by itself; the daemon may steer the anchor in
+    // wait for the steer (bounded), not a fixed delay: a loaded CI runner can take longer
+    const steer = new Promise((r) => { steered = r; });
     compaction(threadId, turnId);
-    await new Promise((r) => setTimeout(r, 100));
+    await Promise.race([steer, new Promise((r) => setTimeout(r, 5000))]);
+    steered = () => {};
   }
   note("item/completed", { item: { type: "agentMessage", id: "msg_1", text: reply }, completedAtMs: Date.now() });
   usage(threadId, turnId, 12000);
@@ -103,6 +108,7 @@ const handlers = {
     return { turn: { id: turnId, status: "inProgress", items: [] } };
   },
   "turn/steer": (p) => {
+    steered();
     if (steerFails) throw new Error("no active turn to steer");
     return { turnId: p.expectedTurnId };
   },

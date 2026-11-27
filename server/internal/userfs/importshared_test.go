@@ -27,7 +27,7 @@ func (b importBlobs) Open(_ context.Context, key string) (io.ReadCloser, error) 
 // TestImportSharedFiles: the old shared files land in the owner's volume (switched on for it),
 // from the object store or the data column; a second run skips them.
 func TestImportSharedFiles(t *testing.T) {
-	s, _, _, vols, st := newTest(t)
+	s, fs, st := newTest(t)
 	ctx := context.Background()
 	if _, err := store.Exec(ctx, st.Pool, `INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
 INSERT INTO at_shared_files (project_id, path, content_type, size, sha256, data, uploaded_by, storage_key, object_id, state)
@@ -46,7 +46,7 @@ VALUES ('p1', 'data/a.csv', 'text/csv', 3, '', NULL, 'user', 'projects/p1/shared
 	if err != nil || rep.Copied != 2 || rep.Failed != 0 {
 		t.Fatalf("import: %+v %v", rep, err)
 	}
-	f, _ := vols.Files(ctx, NamesFor("u1").Volume, "", "")
+	f := DirFiles{Root: fs.userPath("u1")}
 	r, _, err := f.Open(ctx, "projects/p1/data/a.csv")
 	if err != nil {
 		t.Fatal(err)
@@ -64,14 +64,14 @@ VALUES ('p1', 'data/a.csv', 'text/csv', 3, '', NULL, 'user', 'projects/p1/shared
 // TestImportSharedFilesVolumeFails: a user whose volume cannot be switched on is one failure, not
 // one per file.
 func TestImportSharedFilesVolumeFails(t *testing.T) {
-	s, m, _, _, st := newTest(t)
+	s, fs, st := newTest(t)
 	ctx := context.Background()
 	if _, err := store.Exec(ctx, st.Pool, `INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'A');
 INSERT INTO at_shared_files (project_id, path, content_type, size, sha256, data, uploaded_by, state)
 VALUES ('p1', 'a.md', 'text/markdown', 1, '', 'a', 'user', 'ready'), ('p1', 'b.md', 'text/markdown', 1, '', 'b', 'user', 'ready')`); err != nil {
 		t.Fatal(err)
 	}
-	m.fail = errors.New("connection refused")
+	fs.fail = errors.New("connection refused")
 	rep, err := s.ImportSharedFiles(ctx, importBlobs{}, false, nil)
 	if err != nil || rep.Users != 1 || rep.Failed != 1 || rep.Copied != 0 || len(rep.Errors) != 1 {
 		t.Fatalf("%+v %v", rep, err)

@@ -1,5 +1,5 @@
 // Package memfiles keeps auto memory in the owners' shared folders: a project's files in
-// projects/<pid>/.memory/, the user's own in shared/.memory/ (juicefs-shared-storage design). The
+// projects/<pid>/.memory/, the user's own in shared/.memory/ (shared-folder design). The
 // files are the source, so employees read and edit them with their own file tools; the memory rows
 // are the cache that sessions, the web pages and a folder out of reach read. A write through the
 // platform (memory tools, thread summaries, the web page) lands in the rows as pending and is

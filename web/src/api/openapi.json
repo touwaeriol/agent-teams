@@ -2439,46 +2439,23 @@
         ],
         "type": "object"
       },
-      "FsDockerVolume": {
-        "additionalProperties": false,
-        "properties": {
-          "compose": {
-            "description": "Compose fragment: the juicedata/juicefs volume and how the node service mounts it",
-            "type": "string"
-          },
-          "mount": {
-            "description": "Where the node container sees the folder (AGENT_TEAMS_FS_DIR)",
-            "type": "string"
-          },
-          "plugin": {
-            "description": "Host command installing the volume plugin (once per host)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "compose",
-          "plugin",
-          "mount"
-        ],
-        "type": "object"
-      },
       "FsUsageView": {
         "additionalProperties": false,
         "properties": {
-          "inodes": {
-            "description": "Files and folders",
+          "objects": {
+            "description": "Objects: files, and folders geesefs keeps as markers",
             "format": "int64",
             "type": "integer"
           },
           "used_bytes": {
-            "description": "Bytes in use (JuiceFS counts in 4 KiB blocks)",
+            "description": "Bytes the bucket's objects hold",
             "format": "int64",
             "type": "integer"
           }
         },
         "required": [
           "used_bytes",
-          "inodes"
+          "objects"
         ],
         "type": "object"
       },
@@ -2499,7 +2476,7 @@
           },
           "usage": {
             "$ref": "#/components/schemas/FsUsageView",
-            "description": "What the ready volume holds; absent before it is ready or when the metadata cannot be read"
+            "description": "What the ready bucket holds; absent before it is ready or when it cannot be counted"
           },
           "volume": {
             "$ref": "#/components/schemas/FsVolumeView",
@@ -2516,6 +2493,10 @@
       "FsVolumeView": {
         "additionalProperties": false,
         "properties": {
+          "bucket": {
+            "description": "The object store bucket holding the folder",
+            "type": "string"
+          },
           "capacity_gb": {
             "format": "int64",
             "type": "integer"
@@ -2526,6 +2507,14 @@
           },
           "error": {
             "type": "string"
+          },
+          "prefix": {
+            "description": "The user's folder in the bucket (users/\u003cid\u003e/)",
+            "type": "string"
+          },
+          "read_only": {
+            "description": "Over its capacity: the nodes' key cannot write (reading and deleting still work) until the folder is back under it",
+            "type": "boolean"
           },
           "state": {
             "enum": [
@@ -2539,13 +2528,12 @@
           "updated_at": {
             "format": "date-time",
             "type": "string"
-          },
-          "volume": {
-            "type": "string"
           }
         },
         "required": [
-          "volume",
+          "bucket",
+          "prefix",
+          "read_only",
           "state",
           "error",
           "capacity_gb",
@@ -4178,7 +4166,7 @@
             "type": "string"
           },
           "mode": {
-            "description": "daemon: the node mounts it itself; external: mounted for it (Docker volume plugin)",
+            "description": "daemon: the node mounts it itself; external: mounted for it (Docker volume)",
             "enum": [
               "daemon",
               "external"
@@ -17360,7 +17348,7 @@
             "description": "Error"
           }
         },
-        "summary": "My shared folder (JuiceFS volume)",
+        "summary": "My shared folder (a bucket of the object store)",
         "tags": [
           "storage"
         ]
@@ -17390,37 +17378,6 @@
           }
         },
         "summary": "Provision the shared folder now (it is on by default; this retries a failed attempt at once)",
-        "tags": [
-          "storage"
-        ]
-      }
-    },
-    "/api/storage/fs/docker-volume": {
-      "post": {
-        "operationId": "shared-folder-docker-volume",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FsDockerVolume"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Compose volume for a Docker node (carries the metadata password)",
         "tags": [
           "storage"
         ]

@@ -5,6 +5,7 @@
 // watchPaths(): RuntimeMonitor then reports its install/login state in node.runtimes on its own), its id
 // in the protocol Runtime enum plus its session.open options block, and its entry in the control
 // plane's registry (server/internal/runtimes).
+import type { Confine } from "./confine.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { AntigravityRuntime, ClaudeRuntime, CodexRuntime, Runtime, Runtimes, RuntimeStatus } from "../protocol.js";
@@ -89,6 +90,8 @@ export interface RuntimeDeps {
   codexCommand?: string[];
   toolhost: LoopbackToolHost;
   queryFn?: QueryFn;
+  /** Wraps every session process (session confinement). */
+  confine?: Confine;
   /** HOME of every agy process on this node (its login, settings and conversations live there). */
   agyHome?: string;
   /** The agy command (tests: a fake ACP agent); default: detectInstalled (AGENT_TEAMS_AGY_BIN, PATH, ~/.local/bin). */
@@ -155,7 +158,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   fixedEnv(): Record<string, string> { return this.d.claudeFixed(); }
 
   createDriver(ctx: DriverContext, a: SessionAssets): Driver {
-    return new ClaudeDriver(ctx, { root: this.d.root, claudeConfigDir: this.d.claudeConfigDir, secretPaths: this.d.secretPaths(), skills: a.skills, plugins: a.plugins, ...(this.d.queryFn ? { queryFn: this.d.queryFn } : {}) });
+    return new ClaudeDriver(ctx, { root: this.d.root, claudeConfigDir: this.d.claudeConfigDir, secretPaths: this.d.secretPaths(), skills: a.skills, plugins: a.plugins, ...(this.d.queryFn ? { queryFn: this.d.queryFn } : {}), ...(this.d.confine ? { confine: this.d.confine } : {}) });
   }
 }
 
@@ -266,7 +269,7 @@ export class AntigravityAdapter implements RuntimeAdapter {
   }
 
   createDriver(ctx: DriverContext, a: SessionAssets): Driver {
-    return new AntigravityDriver(ctx, { toolhost: this.d.toolhost, command: () => this.resolveCommand(), pluginServers: acpMcpServers(a.plugins), onStatus: (s) => this.noteStatus(s) });
+    return new AntigravityDriver(ctx, { toolhost: this.d.toolhost, command: () => this.resolveCommand(), pluginServers: acpMcpServers(a.plugins), onStatus: (s) => this.noteStatus(s), ...(this.d.confine ? { confine: this.d.confine } : {}) });
   }
 
   /**

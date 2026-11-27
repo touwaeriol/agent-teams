@@ -749,32 +749,49 @@ export interface FileDownload {
   data: string;
 }
 /**
- * Mount the owner's JuiceFS volume (the user's shared folder, juicefs-shared-storage design). Sent on the live link only to a daemon whose hello has fs_mount: after the welcome when the owner has a ready volume, and again when the volume or its credentials change (generation grows). Unreliable and never logged or stored: it carries the volume's credentials. The daemon mounts at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.
+ * Mount the owner's shared folder: a bucket of its own on the platform's RustFS / MinIO (with a hard quota), or a prefix of the platform's Backblaze B2 bucket, reached with the owner's key, which is limited to it (shared-folder design). Sent on the live link only to a daemon whose hello has fs_s3_mount: after the welcome when the owner has a ready folder, and again when the folder or its key change (generation grows: a new key, e.g. one that cannot write while the folder is over its capacity). Unreliable and never logged or stored: it carries the owner's secret key. The daemon mounts bucket (or bucket:prefix) with the client named in client.tool at <data dir>/mnt/<name> and answers with fs.status; a generation older than the one mounted is ignored.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "FsMount".
  */
 export interface FsMount {
   /**
-   * Volume name (at-<id>), also the mount directory name.
+   * The owner's folder name (atu-<16 hex>): the mount directory, and what fs.status and fs.unmount name.
    */
-  volume: string;
+  name: string;
   /**
-   * Grows when the volume's credentials change; a remount is due when it differs from the mounted one.
+   * The bucket: the owner's own (RustFS), or the platform's shared one (B2).
+   */
+  bucket: string;
+  /**
+   * The owner's folder in the bucket: empty when the bucket is the owner's own (RustFS: a bucket per user, atu-<16 hex>), users/<16 hex>/ in a shared bucket (B2). The key reaches nothing outside it.
+   */
+  prefix: string;
+  /**
+   * Grows whenever the owner's key changes (provisioned again, switched to or from read-only); a remount is due when it or the name differs from the mounted one.
    */
   generation: number;
   /**
-   * Metadata engine URL without the password: postgres://jfs_x@host:port/db?sslmode=...&search_path=jfs_x. The volume's object storage keys live in its metadata (juicefs format).
+   * The object store's S3 address (https://...).
    */
-  meta_url: string;
+  endpoint: string;
   /**
-   * Goes in META_PASSWORD.
+   * Region to sign requests for; default us-east-1.
    */
-  meta_password: string;
+  region?: string;
   /**
-   * The juicefs client to run: the daemon picks the asset of its platform (linux-amd64, linux-arm64, darwin-arm64…), downloads it and checks sha256, unless that exact version is already present. A tar.gz holding the juicefs binary.
+   * The owner's key id.
+   */
+  access_key: string;
+  /**
+   * Its secret.
+   */
+  secret_key: string;
+  /**
+   * The S3 mount client to run (tool): the daemon picks the asset of its platform (linux-amd64, linux-arm64, darwin-arm64…), downloads it and checks sha256, unless that exact version is already present.
    */
   client: {
+    tool: "geesefs" | "rclone";
     version: string;
     /**
      * @minItems 1
@@ -798,7 +815,7 @@ export interface FsMount {
   cache_size_mb?: number;
 }
 /**
- * State of the shared folder on this node: after the welcome (external mounts), after each fs.mount or fs.unmount, and whenever a health check finds the mount gone or back. mode daemon = the daemon runs juicefs itself; external = mounted outside the daemon (Docker volume plugin, host service) at AGENT_TEAMS_FS_DIR. Unreliable (the latest state is what matters).
+ * State of the shared folder on this node: after the welcome (external mounts), after each fs.mount or fs.unmount, and whenever a health check finds the mount gone or back. mode daemon = the daemon runs the S3 mount client itself; external = mounted outside the daemon (Docker volume plugin, host service) at AGENT_TEAMS_FS_DIR. Unreliable (the latest state is what matters).
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "FsStatus".
@@ -806,18 +823,21 @@ export interface FsMount {
 export interface FsStatus {
   state: "mounting" | "mounted" | "unmounted" | "error";
   mode: "daemon" | "external";
-  volume?: string;
+  /**
+   * The folder mounted (fs.mount name); absent for an external mount that does not know it.
+   */
+  name?: string;
   generation?: number;
   error?: string;
 }
 /**
- * Unmount the owner's volume and forget its credentials (the volume was disabled or deleted). Sent to daemons with fs_mount; an unknown volume is not an error.
+ * Unmount the owner's folder and forget its key (the folder was deleted). Sent to daemons with fs_s3_mount; an unknown name is not an error.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "FsUnmount".
  */
 export interface FsUnmount {
-  volume: string;
+  name: string;
 }
 /**
  * Remove worktrees (keeping unpushed work when asked) and prune.
@@ -1107,7 +1127,7 @@ export interface Hello {
   capacity?: Capacity;
   runtimes?: Runtimes;
   /**
-   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), session_move (session.export, session.open.import, /nodes/moves), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback), attachments_v2 (session.send/first_message attachments with /nodes/attachments/<id>/url downloads into .attachments/, read_attachment attachment_download), fs_mount / fs_external (shared folder: fs.mount, session.open.fs).
+   * Feature names, e.g. sessions, codex_app_server, git_worktree, git_sync, cred_helper, upgrade, file_download (read_deliverable file.download), context_usage (turn_ended carries context), session_compact (session.compact), usage (node.usage), runtime_status (node.runtimes, node.runtimes_refresh), ssh_gateway (session.open ssh_servers, ssh.cert_request, ssh.servers_update, /nodes/ssh), session_move (session.export, session.open.import, /nodes/moves), self_update (runs under the update launcher: node.upgrade with mode, drain, rollback), attachments_v2 (session.send/first_message attachments with /nodes/attachments/<id>/url downloads into .attachments/, read_attachment attachment_download), fs_s3_mount / fs_external (shared folder: fs.mount, session.open.fs).
    */
   features?: string[];
   /**
@@ -2448,7 +2468,7 @@ export interface SessionOpen {
   }[];
   ssh_servers?: SshServers;
   /**
-   * The shared folder (juicefs-shared-storage design), sent only when the node has the owner's volume mounted or an external mount (fs_mount / fs_external) and the owner has a ready volume: paths relative to the volume root. The daemon creates both directories when missing, adds them to the session's writable directories and exports AGENT_TEAMS_PROJECT_DIR / AGENT_TEAMS_SHARED_DIR. Omitted = no shared folder.
+   * The shared folder (shared-folder design), sent only when the node has the owner's folder mounted or an external mount (fs_s3_mount / fs_external) and the owner has a ready folder: paths relative to the folder root. The daemon creates both directories when missing, adds them to the session's writable directories and exports AGENT_TEAMS_PROJECT_DIR / AGENT_TEAMS_SHARED_DIR. Omitted = no shared folder.
    */
   fs?: {
     project: RelPath;

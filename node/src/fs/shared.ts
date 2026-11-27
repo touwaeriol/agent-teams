@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { accessSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { run as defaultRun, type RunOptions, type RunResult } from "../git/exec.js";
 import type { FsMount, FsStatus, FsUnmount, SessionOpen } from "../protocol.js";
@@ -9,38 +9,47 @@ import type { Logger } from "../util/log.js";
 type SessionOpenFs = NonNullable<SessionOpen["fs"]>;
 
 /**
- * The user's JuiceFS shared folder (one volume per user, docs/v2/shared-folder.md).
- * - external: something else mounted it at AGENT_TEAMS_FS_DIR (the Docker volume plugin); the
- *   daemon only uses it and never sees credentials (feature fs_external).
- * - daemon: the console sends fs.mount on the live link; the daemon downloads the pinned juicefs
- *   client, mounts the volume with `juicefs mount -d` (a separate process that outlives daemon
- *   restarts and self-updates) and keeps it mounted (feature fs_mount).
- * Credentials live in memory only (META_PASSWORD reaches the juicefs process through its env).
+ * The user's shared folder: their prefix of the platform's object-store bucket, reached with a key
+ * limited to it (docs/v2/shared-folder.md).
+ * - external: something else mounted it at AGENT_TEAMS_FS_DIR (a host mount bound into the
+ *   container); the daemon only uses it and never sees credentials (feature fs_external).
+ * - daemon: the console sends fs.mount on the live link; the daemon downloads the pinned geesefs
+ *   binary and mounts bucket:prefix with it (geesefs forks into the background) and keeps it mounted
+ *   (feature fs_s3_mount). geesefs keeps writes in memory until it uploads them, so the daemon
+ *   unmounts and waits for geesefs to exit before it stops (shutdown).
+ * The user's key lives in memory only (it reaches geesefs through AWS_* in its env).
  */
 export interface SharedFsOptions {
-  /** <data>: the client goes to <data>/tools/juicefs-<version>, mounts to <data>/mnt/<volume>, cache to <data>/jfs-cache. */
+  /** <data>: geesefs goes to <data>/tools/geesefs-<version>, mounts to <data>/mnt/<name>. */
   dataDir: string;
-  /** AGENT_TEAMS_FS_DIR: an externally mounted volume root. */
+  /** AGENT_TEAMS_FS_MOUNT_DIR: mount here instead of <data>/mnt/<name> (Docker: /home/agent/.fs). */
+  mountDir?: string;
+  /** Where the node image keeps geesefs-<version> (default /opt/geesefs): used when its sha256 matches, instead of a download. */
+  preinstalledDir?: string;
+  /** AGENT_TEAMS_FS_DIR: an externally mounted folder. */
   externalDir?: string;
-  /** Where the mounted {volume, generation} (never secrets) is kept across daemon restarts (default dataDir). */
+  /** Where the mounted {name, generation} (never secrets) is kept across daemon restarts (default dataDir). */
   stateDir?: string;
   /** External mode: the mount that was healthy went away; the process should exit so the container restart brings it back. */
   onExternalLost?: () => void;
   log: Logger;
   send: (type: "fs.status", body: FsStatus) => void;
-  /** Tests: command runner, fetch, platform key, fuse probe, health period. */
+  /** Tests: command runner, fetch, platform key, fuse probe, mount probe, geesefs processes, health period. */
   run?: (cmd: string, args: string[], opts?: RunOptions) => Promise<RunResult>;
   fetchFn?: typeof fetch;
   platform?: string;
   fuse?: () => boolean;
+  mounted?: (dir: string) => boolean;
+  procs?: (dir: string) => number[];
   checkMs?: number;
-  /** Tests: how long to wait for a fresh mount to appear (default 30 s). */
+  /** Tests: how long to wait for a fresh mount to appear (default 30 s) and for geesefs to exit (default 120 s). */
   mountWaitMs?: number;
+  exitWaitMs?: number;
 }
 
 type Mounted = { spec: FsMount; dir: string };
-/** What survives a daemon restart: the volume and generation of the daemon's own mount. */
-type Saved = { volume: string; generation: number };
+/** What survives a daemon restart: the name and generation of the daemon's own mount. */
+type Saved = { name: string; generation: number };
 
 export class SharedFs {
   private current: Mounted | null = null;
@@ -52,8 +61,11 @@ export class SharedFs {
   /** External mode: the mount was seen healthy at least once. */
   private externalSeen = false;
 
+  private readonly isMounted: (dir: string) => boolean;
+
   constructor(private readonly o: SharedFsOptions) {
     this.run = o.run ?? defaultRun;
+    this.isMounted = o.mounted ?? isMountPoint;
     this.canMount = !o.externalDir && (o.fuse ?? hasFuse)();
     this.status = o.externalDir ? this.externalStatus() : { state: "unmounted", mode: "daemon" };
   }
@@ -61,14 +73,14 @@ export class SharedFs {
   /** hello.features. */
   features(): string[] {
     if (this.o.externalDir) return ["fs_external"];
-    return this.canMount ? ["fs_mount"] : [];
+    return this.canMount ? ["fs_s3_mount"] : [];
   }
 
-  /** Root of the mounted volume, or null. */
+  /** Root of the mounted folder, or null. */
   root(): string | null {
-    if (this.o.externalDir) return isMounted(this.o.externalDir) ? resolve(this.o.externalDir) : null;
+    if (this.o.externalDir) return this.isMounted(this.o.externalDir) ? resolve(this.o.externalDir) : null;
     const c = this.current;
-    return c && this.status.state === "mounted" && isMounted(c.dir) ? c.dir : null;
+    return c && this.status.state === "mounted" && this.isMounted(c.dir) ? c.dir : null;
   }
 
   /** Sends the current status (after welcome). */
@@ -88,6 +100,20 @@ export class SharedFs {
     this.timer = null;
   }
 
+  /**
+   * Daemon exit: unmounts the daemon's mount and waits until geesefs has uploaded what it holds
+   * and exited (a container stop would otherwise kill it with writes still in memory). The next
+   * daemon mounts again on fs.mount.
+   */
+  shutdown(): Promise<void> {
+    this.stop();
+    return this.serial(async () => {
+      if (this.o.externalDir) return;
+      const dir = this.current?.dir ?? (this.saved() ? this.mountDir(this.saved()!.name) : null);
+      if (dir) await this.umount(dir);
+    });
+  }
+
   /** fs.mount: mounts (or remounts after a generation change); a healthy same-generation mount is kept. */
   mount(m: FsMount): Promise<void> {
     return this.serial(() => this.doMount(m));
@@ -96,8 +122,8 @@ export class SharedFs {
   /** fs.unmount: unmounts and forgets the credentials (also a mount left by a previous daemon process). */
   unmount(u: FsUnmount): Promise<void> {
     return this.serial(async () => {
-      if (this.o.externalDir || (this.current && this.current.spec.volume !== u.volume)) return;
-      await this.umount(this.current?.dir ?? this.mountDir(u.volume));
+      if (this.o.externalDir || (this.current && this.current.spec.name !== u.name)) return;
+      await this.umount(this.current?.dir ?? this.mountDir(u.name));
       this.current = null;
       this.save(null);
       this.set({ state: "unmounted", mode: "daemon" });
@@ -106,7 +132,7 @@ export class SharedFs {
 
   /**
    * session.open fs: the session's project and user-shared directories under the mounted
-   * volume, created when missing; null when the volume is not mounted here.
+   * folder, created when missing; null when it is not mounted here.
    */
   sessionDirs(fs: SessionOpenFs | undefined): { project: string; shared: string } | null {
     const root = fs ? this.root() : null;
@@ -132,27 +158,27 @@ export class SharedFs {
 
   private async doMount(m: FsMount): Promise<void> {
     if (this.o.externalDir) return this.report();
-    if (!this.canMount) return this.set({ state: "error", mode: "daemon", volume: m.volume, generation: m.generation, error: "no FUSE on this node (/dev/fuse and fusermount3 are needed)" });
-    const dir = this.mountDir(m.volume);
+    if (!this.canMount) return this.set({ state: "error", mode: "daemon", name: m.name, generation: m.generation, error: "no FUSE on this node (/dev/fuse and fusermount3 are needed)" });
+    const dir = this.mountDir(m.name);
     const known: Saved | null = this.current?.spec ?? this.saved();
-    const sameVolume = known?.volume === m.volume;
-    if (sameVolume && m.generation < known.generation) {
-      this.o.log.info({ volume: m.volume, generation: m.generation, mounted: known.generation }, "shared folder: ignoring an older fs.mount");
+    const same = known?.name === m.name;
+    if (same && m.generation < known.generation) {
+      this.o.log.info({ name: m.name, generation: m.generation, mounted: known.generation }, "shared folder: ignoring an older fs.mount");
       return;
     }
-    if (sameVolume && m.generation === known.generation && isMounted(dir)) {
+    if (same && m.generation === known.generation && this.isMounted(dir)) {
       // Kept (or adopted after a daemon restart): the spec stays in memory for health remounts.
       this.current = { spec: m, dir };
       this.save(m);
       return this.set(mountedStatus(m));
     }
-    if (known && !sameVolume) await this.umount(this.mountDir(known.volume));
+    if (known && !same) await this.umount(this.mountDir(known.name));
     this.current = { spec: m, dir };
     await this.mountNow(m, dir);
   }
 
-  private mountDir(volume: string): string {
-    return join(this.o.dataDir, "mnt", volume);
+  private mountDir(name: string): string {
+    return this.o.mountDir ?? join(this.o.dataDir, "mnt", name);
   }
 
   private get stateFile(): string {
@@ -163,7 +189,7 @@ export class SharedFs {
   private saved(): Saved | null {
     try {
       const v = JSON.parse(readFileSync(this.stateFile, "utf8")) as Partial<Saved>;
-      return typeof v.volume === "string" && typeof v.generation === "number" ? { volume: v.volume, generation: v.generation } : null;
+      return typeof v.name === "string" && typeof v.generation === "number" ? { name: v.name, generation: v.generation } : null;
     } catch {
       return null;
     }
@@ -172,45 +198,57 @@ export class SharedFs {
   private save(m: Saved | null): void {
     try {
       if (!m) return rmSync(this.stateFile, { force: true });
-      writeFileSync(this.stateFile, JSON.stringify({ volume: m.volume, generation: m.generation }), { mode: 0o600 });
+      writeFileSync(this.stateFile, JSON.stringify({ name: m.name, generation: m.generation }), { mode: 0o600 });
     } catch (err) {
       this.o.log.warn({ err: (err as Error).message }, "shared folder: cannot record the mount");
     }
   }
 
   private async mountNow(m: FsMount, dir: string): Promise<void> {
-    this.set({ state: "mounting", mode: "daemon", volume: m.volume, generation: m.generation });
+    this.set({ state: "mounting", mode: "daemon", name: m.name, generation: m.generation });
     try {
       const bin = await this.client(m.client);
-      if (isMounted(dir)) await this.umount(dir);
+      if (this.isMounted(dir)) await this.umount(dir);
       mkdirSync(dir, { recursive: true, mode: 0o700 });
-      const cache = join(this.o.dataDir, "jfs-cache");
-      mkdirSync(cache, { recursive: true, mode: 0o700 });
-      const args = ["mount", "-d", "--no-usage-report", "--cache-dir", cache, "--cache-size", String(m.cache_size_mb ?? 10240),
-        "--log", join(this.o.dataDir, "jfs-mount.log"), m.meta_url, dir];
-      const r = await this.run(bin, args, { env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? "/", META_PASSWORD: m.meta_password }, timeoutMs: 120_000 });
-      if (r.code !== 0) throw new Error(lastLine(r.stderr || r.stdout) || `juicefs mount exited ${r.code}`);
-      if (!(await waitFor(() => isMounted(dir), this.o.mountWaitMs ?? 30_000))) throw new Error("the mount did not appear");
+      const r = await this.run(bin, geesefsArgs(m, dir, join(this.o.dataDir, "geesefs.log")), {
+        env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? "/", AWS_ACCESS_KEY_ID: m.access_key, AWS_SECRET_ACCESS_KEY: m.secret_key },
+        timeoutMs: 120_000,
+      });
+      if (r.code !== 0) throw new Error(lastLine(r.stderr || r.stdout) || `geesefs exited ${r.code}`);
+      if (!(await waitFor(() => this.isMounted(dir), this.o.mountWaitMs ?? 30_000))) throw new Error("the mount did not appear");
       this.save(m);
       this.set(mountedStatus(m));
     } catch (err) {
-      this.o.log.warn({ err: (err as Error).message, volume: m.volume }, "shared folder: mount failed");
-      this.set({ state: "error", mode: "daemon", volume: m.volume, generation: m.generation, error: (err as Error).message.slice(0, 500) });
+      this.o.log.warn({ err: (err as Error).message, name: m.name }, "shared folder: mount failed");
+      this.set({ state: "error", mode: "daemon", name: m.name, generation: m.generation, error: (err as Error).message.slice(0, 500) });
     }
   }
 
+  /**
+   * Unmounts dir and waits for its geesefs to exit, which it does once it has uploaded what it
+   * held. A busy mount (a file still open) is detached lazily: geesefs then exits when the last
+   * user lets go.
+   */
   private async umount(dir: string): Promise<void> {
-    if (!isMounted(dir)) return;
-    const r = await this.run("fusermount3", ["-u", "-z", dir], { timeoutMs: 30_000 });
-    if (r.code !== 0) await this.run("umount", ["-l", dir], { timeoutMs: 30_000 });
+    if (this.isMounted(dir)) {
+      const r = await this.run("fusermount3", ["-u", dir], { timeoutMs: 30_000 });
+      if (r.code !== 0) {
+        const lazy = await this.run("fusermount3", ["-u", "-z", dir], { timeoutMs: 30_000 });
+        if (lazy.code !== 0) await this.run("umount", ["-l", dir], { timeoutMs: 30_000 });
+      }
+    }
+    const procs = this.o.procs ?? geesefsProcs;
+    if (!(await waitFor(() => procs(dir).length === 0, this.o.exitWaitMs ?? 120_000))) {
+      this.o.log.warn({ dir }, "shared folder: geesefs still running after the unmount");
+    }
   }
 
   /** Health check: a daemon mount that went away is mounted again; an external one is re-reported when it changes. */
   private async check(): Promise<void> {
     if (this.o.externalDir) return this.checkExternal();
     const c = this.current;
-    if (!c || this.status.state === "mounting" || isMounted(c.dir)) return;
-    this.o.log.warn({ volume: c.spec.volume }, "shared folder: mount lost, mounting again");
+    if (!c || this.status.state === "mounting" || this.isMounted(c.dir)) return;
+    this.o.log.warn({ name: c.spec.name }, "shared folder: mount lost, mounting again");
     await this.serial(() => (this.current === c ? this.mountNow(c.spec, c.dir) : Promise.resolve()));
   }
 
@@ -225,9 +263,9 @@ export class SharedFs {
   }
 
   private externalStatus(): FsStatus {
-    const ok = isMounted(this.o.externalDir!);
+    const ok = this.isMounted(this.o.externalDir!);
     if (ok) this.externalSeen = true;
-    return ok ? { state: "mounted", mode: "external" } : { state: "error", mode: "external", error: `${this.o.externalDir} is not a JuiceFS mount` };
+    return ok ? { state: "mounted", mode: "external" } : { state: "error", mode: "external", error: `${this.o.externalDir} is not a mount point` };
   }
 
   private set(s: FsStatus): void {
@@ -235,32 +273,66 @@ export class SharedFs {
     this.o.send("fs.status", s);
   }
 
-  /** The juicefs binary of this version: downloaded once, sha256-checked. */
+  /** The geesefs binary of this version: downloaded once, sha256-checked. */
   private async client(c: FsMount["client"]): Promise<string> {
-    const dest = join(this.o.dataDir, "tools", `juicefs-${c.version}`, "juicefs");
+    if (c.tool !== "geesefs") throw new Error(`mount client ${c.tool} is not supported (geesefs only)`);
+    const dest = join(this.o.dataDir, "tools", `geesefs-${c.version}`, "geesefs");
     if (existsSync(dest)) return dest;
     const key = this.o.platform ?? platformKey();
     const asset = c.assets.find((a) => a.platform === key);
-    if (!asset) throw new Error(`no juicefs client for ${key}`);
+    if (!asset) throw new Error(`no geesefs for ${key}`);
+    const pre = join(this.o.preinstalledDir ?? "/opt/geesefs", `geesefs-${c.version}`);
+    if (existsSync(pre) && sha256File(pre) === asset.sha256) return pre;
     const r = await (this.o.fetchFn ?? fetch)(asset.url, { redirect: "follow", signal: AbortSignal.timeout(10 * 60_000) });
     if (!r.ok) throw new Error(`GET ${asset.url}: ${r.status}`);
     const data = Buffer.from(await r.arrayBuffer());
-    if (createHash("sha256").update(data).digest("hex") !== asset.sha256) throw new Error(`juicefs ${c.version} ${key}: sha256 mismatch`);
-    return unpack(dest, data);
+    if (createHash("sha256").update(data).digest("hex") !== asset.sha256) throw new Error(`geesefs ${c.version} ${key}: sha256 mismatch`);
+    return install(dest, data);
   }
+}
+
+/**
+ * geesefs's command line: the owner's bucket (RustFS) or its prefix of the shared bucket
+ * (bucket:prefix, B2) at dir. Files
+ * changed elsewhere show within 5 s (stat cache); close waits for the upload (fsync-on-close), so a
+ * closed file is in the store; at most 1000 MB of memory.
+ */
+export function geesefsArgs(m: FsMount, dir: string, log: string): string[] {
+  return ["--endpoint", m.endpoint, "--region", m.region ?? "us-east-1", "--stat-cache-ttl", "5s", "--memory-limit", "1000",
+    "--fsync-on-close", "--log-file", log, m.prefix ? `${m.bucket}:${m.prefix}` : m.bucket, dir];
 }
 
 function mountedStatus(m: FsMount): FsStatus {
-  return { state: "mounted", mode: "daemon", volume: m.volume, generation: m.generation };
+  return { state: "mounted", mode: "daemon", name: m.name, generation: m.generation };
 }
 
-/** A JuiceFS mount root has the virtual .config file. */
-export function isMounted(dir: string): boolean {
+/** dir is a mount point: on another device than its parent. */
+export function isMountPoint(dir: string): boolean {
   try {
-    return statSync(join(dir, ".config")).isFile();
+    return statSync(dir).dev !== statSync(join(dir, "..")).dev;
   } catch {
     return false;
   }
+}
+
+/** The geesefs processes serving dir (Linux /proc; none elsewhere). */
+function geesefsProcs(dir: string): number[] {
+  let pids: string[];
+  try {
+    pids = readdirSync("/proc").filter((p) => /^\d+$/.test(p));
+  } catch {
+    return [];
+  }
+  const out: number[] = [];
+  for (const pid of pids) {
+    try {
+      const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+      if (/(^|\/)geesefs[^/]*$/.test(argv[0] ?? "") && argv.includes(dir)) out.push(Number(pid));
+    } catch {
+      // gone meanwhile
+    }
+  }
+  return out;
 }
 
 /** /dev/fuse usable and fusermount3 on PATH (Linux), or macFUSE installed (macOS). */
@@ -287,21 +359,26 @@ function inside(root: string, rel: string): string | null {
   return p === root || p.startsWith(root + "/") ? p : null;
 }
 
-function unpack(dest: string, data: Buffer): string {
+function install(dest: string, data: Buffer): string {
   const parent = join(dest, "..", "..");
   mkdirSync(parent, { recursive: true, mode: 0o755 });
-  const stage = mkdtempSync(join(parent, ".jfs-"));
+  const stage = mkdtempSync(join(parent, ".geesefs-"));
   try {
-    const archive = join(stage, "juicefs.tar.gz");
-    writeFileSync(archive, data);
-    const r = spawnSync("tar", ["-xzf", archive, "-C", stage, "--no-same-owner", "juicefs"], { encoding: "utf8" });
-    if (r.status !== 0) throw new Error(`cannot unpack juicefs: ${r.stderr || r.error?.message}`);
-    chmodSync(join(stage, "juicefs"), 0o755);
+    writeFileSync(join(stage, "geesefs"), data, { mode: 0o755 });
+    chmodSync(join(stage, "geesefs"), 0o755);
     mkdirSync(join(dest, ".."), { recursive: true, mode: 0o755 });
-    renameSync(join(stage, "juicefs"), dest);
+    renameSync(join(stage, "geesefs"), dest);
     return dest;
   } finally {
     rmSync(stage, { recursive: true, force: true });
+  }
+}
+
+function sha256File(p: string): string {
+  try {
+    return createHash("sha256").update(readFileSync(p)).digest("hex");
+  } catch {
+    return "";
   }
 }
 

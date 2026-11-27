@@ -118,7 +118,7 @@ func importShared(ctx context.Context, getenv config.Getenv, db *store.Store, bs
 		return err
 	}
 	log := slog.New(slog.NewTextHandler(out, nil))
-	svc := sharedFolders(cfg.FS, db, vault, log)
+	svc := sharedFolders(cfg.FS, cfg.PublicURL, db, vault, log)
 	if !svc.Enabled() {
 		return errors.New("the shared folder is not configured (AGENT_TEAMS_FS_*, AGENT_TEAMS_SECRET_KEYS)")
 	}

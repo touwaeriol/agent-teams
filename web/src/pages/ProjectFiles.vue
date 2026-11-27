@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 共享文件: the project's folder in the user's shared folder (JuiceFS), the same tree employees see
+// 共享文件: the project's folder in the user's shared folder (a prefix of the object-store bucket), the same tree employees see
 // as .project-files/ in their working directories. Browse folders (breadcrumb), upload files or a
 // folder into the current one (pick or drop, progress, one confirmation before replacing), create
 // folders, download and delete. Until the user's shared folder is on, it says so and links to the

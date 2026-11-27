@@ -2087,28 +2087,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** My shared folder (JuiceFS volume) */
+        /** My shared folder (a bucket of the object store) */
         get: operations["get-shared-folder"];
         put?: never;
         /** Provision the shared folder now (it is on by default; this retries a failed attempt at once) */
         post: operations["enable-shared-folder"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/storage/fs/docker-volume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Compose volume for a Docker node (carries the metadata password) */
-        post: operations["shared-folder-docker-volume"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3421,23 +3404,15 @@ export interface components {
             thread_no: number;
             title: string;
         };
-        FsDockerVolume: {
-            /** @description Compose fragment: the juicedata/juicefs volume and how the node service mounts it */
-            compose: string;
-            /** @description Where the node container sees the folder (AGENT_TEAMS_FS_DIR) */
-            mount: string;
-            /** @description Host command installing the volume plugin (once per host) */
-            plugin: string;
-        };
         FsUsageView: {
             /**
              * Format: int64
-             * @description Files and folders
+             * @description Objects: files, and folders geesefs keeps as markers
              */
-            inodes: number;
+            objects: number;
             /**
              * Format: int64
-             * @description Bytes in use (JuiceFS counts in 4 KiB blocks)
+             * @description Bytes the bucket's objects hold
              */
             used_bytes: number;
         };
@@ -3448,22 +3423,27 @@ export interface components {
             project_dir: string;
             /** @description The folder every project of the user shares */
             shared_dir: string;
-            /** @description What the ready volume holds; absent before it is ready or when the metadata cannot be read */
+            /** @description What the ready bucket holds; absent before it is ready or when it cannot be counted */
             usage?: components["schemas"]["FsUsageView"];
             /** @description Absent until the console has started provisioning it */
             volume?: components["schemas"]["FsVolumeView"];
         };
         FsVolumeView: {
+            /** @description The object store bucket holding the folder */
+            bucket: string;
             /** Format: int64 */
             capacity_gb: number;
             /** Format: date-time */
             created_at: string;
             error: string;
+            /** @description The user's folder in the bucket (users/<id>/) */
+            prefix: string;
+            /** @description Over its capacity: the nodes' key cannot write (reading and deleting still work) until the folder is back under it */
+            read_only: boolean;
             /** @enum {string} */
             state: "provisioning" | "ready" | "error" | "deleting";
             /** Format: date-time */
             updated_at: string;
-            volume: string;
         };
         Gates: {
             decision: boolean;
@@ -3976,7 +3956,7 @@ export interface components {
         NodeFsView: {
             error: string;
             /**
-             * @description daemon: the node mounts it itself; external: mounted for it (Docker volume plugin)
+             * @description daemon: the node mounts it itself; external: mounted for it (Docker volume)
              * @enum {string}
              */
             mode: "daemon" | "external";
@@ -11087,35 +11067,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FsView"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "shared-folder-docker-volume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FsDockerVolume"];
                 };
             };
             /** @description Error */

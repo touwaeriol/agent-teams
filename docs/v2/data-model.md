@@ -862,7 +862,7 @@ ALTER TABLE at_employees ADD COLUMN model TEXT NOT NULL DEFAULT '';            -
 
 ### 2.13 共享文件（00312，只用于导入）
 
-> 项目文件现在是用户共享文件夹（JuiceFS 卷）里的 `projects/<pid>/`（api.md §3.5.1、`shared-folder.md`）。`at_shared_files` 和 `at_shared_uploads` 不再有读写入口，只在开通共享文件夹时由 `userfs` 的导入把旧文件搬进卷；以后的迁移会删掉这两张表。下面是它们原来的结构和规则，留作导入参考。
+> 项目文件现在是用户共享文件夹里的 `projects/<pid>/`（api.md §3.5.1、`shared-folder.md`）。`at_shared_files` 和 `at_shared_uploads` 不再有读写入口，只在开通共享文件夹时由 `userfs` 的导入把旧文件搬进卷；以后的迁移会删掉这两张表。下面是它们原来的结构和规则，留作导入参考。
 
 ```sql
 CREATE TABLE at_shared_files (          -- 项目共享文件：项目里所有会话和用户都能存取，不进 git（讨论串 #33）
@@ -1046,6 +1046,7 @@ ALTER TABLE at_deliverable_comments ADD COLUMN attachments JSONB NOT NULL DEFAUL
 `00500_memory_in_folder.sql`：记忆进共享文件夹——`at_memory_files` 加 type / pending / file_mtime / file_size，存量行全标 pending（第一次同步写进文件夹）；新建 `at_user_memory_files`（用户记忆，随用户删除）和 `at_memory_touches`。Down 删掉它们。
 `00510_fs_removals.sql`：新建 `at_fs_removals`（user_id, path 主键，attempts / error）——删项目时没删掉的卷内目录记在这里，共享文件夹巡检每分钟重试，删掉就去掉这行；随用户删除。Down 删表。
 `00520_jobs.sql`：后台任务（都在 River 上运行，作业类型 job_run）——新建 `at_jobs`（每个任务一行：kind 为 builtin 内置（代码登记，不可删）或 added 系统添加（可删，目前没有）、paused、every_seconds 覆盖间隔或 cron + timezone 定时表达式、run_requested_at、上次运行的时间/结果/错误/副本、累计次数）和 `at_job_runs`（做了事、失败或手动的运行，每日维护清理 30 天前的）。Down 删两张表。
+`00530_user_fs_object_store.sql`：共享文件夹改为对象存储直连（geesefs 挂载，不再用 JuiceFS）——清空 `at_user_fs`（旧的 JuiceFS 卷不再使用，巡检会重新开通），去掉 volume / meta_role 和 s3_access_key 的唯一约束，加 bucket、prefix（RustFS 每用户自己的 bucket 时为空，B2 为 `users/<id>/`，两者合起来唯一）和 read_only（B2 超出容量时密钥不能写）。Down 清空并恢复旧列。
 
 `00460_blob_storage.sql`、`00470_attachments_unowned.sql`（#58）：附件和共享文件改存对象存储、附件保留期、进行中的共享文件上传、删除队列、任务 / 会话首条消息 / 批注带附件（§2.15）。两个一起上线，上线前 pg_dump（存量附件 24 小时未用即删除，见 `attachments-rollout.md`）。
 

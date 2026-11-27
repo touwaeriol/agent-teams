@@ -275,7 +275,7 @@ PR 不在资料库里：它的状态在 `ThreadView.repos[].pr_*` 上，由平�
 
 ### 3.5.1 项目文件（共享文件页）
 
-项目文件是用户共享文件夹（JuiceFS，`shared-folder.md`）里的 `projects/<pid>/`，也就是员工工作目录里的 `.project-files/`。控制台经 `juicefs gateway` 读写，不进 git，没有配额以外的限制（卷容量见 `AGENT_TEAMS_FS_CAPACITY_GB`）。路径相对项目目录、`/` 分隔、≤ 1024 字节，不能有空段、`.`、`..`、反斜杠和控制字符（`userfs.CleanPath`，不合法 422）。`.deliverables/` 是交付物版本，只能看，写入、删除、建文件夹一律 403 `managed_folder`。用户的共享文件夹没开或不可用时，列表返回 `available: false` 和原因，其余接口 409 `folder_unavailable`。别人的项目一律 404。
+项目文件是用户共享文件夹（`shared-folder.md`）里的 `projects/<pid>/`，也就是员工工作目录里的 `.project-files/`。控制台用平台密钥经 S3 读写，不进 git，没有配额以外的限制（容量见 `AGENT_TEAMS_FS_CAPACITY_GB`）。路径相对项目目录、`/` 分隔、≤ 1024 字节，不能有空段、`.`、`..`、反斜杠和控制字符（`userfs.CleanPath`，不合法 422）。`.deliverables/` 是交付物版本，只能看，写入、删除、建文件夹一律 403 `managed_folder`。用户的共享文件夹没开或不可用时，列表返回 `available: false` 和原因，其余接口 409 `folder_unavailable`。别人的项目一律 404。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |

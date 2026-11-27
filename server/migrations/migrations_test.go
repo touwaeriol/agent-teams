@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 520 {
+	if migrations.Latest() != 530 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -2200,5 +2200,53 @@ INSERT INTO at_job_runs (job, started_at, finished_at, ok) VALUES ('a', now(), n
 	}
 	if _, err := db.Exec(`SELECT 1 FROM at_jobs`); err == nil {
 		t.Fatal("at_jobs survived down")
+	}
+}
+
+// TestUserFsObjectStoreMigration: 00530 drops the rows of per-user JuiceFS volumes, then a row
+// names its bucket and prefix (unique together: two users never share a folder), a key id that
+// may be empty for several rows until issued, and read_only (false by default); Down drops the rows.
+func TestUserFsObjectStoreMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 520); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x'), ('u2', 'b@example.com', 'x');
+INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb, state)
+	VALUES ('u1', 'at-u1', 'jfs_u1', 'jfs-u1', '{}', 20, 'ready');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 530); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM at_user_fs`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("old rows left: %d %v", n, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_user_fs (user_id, bucket, prefix, s3_access_key, secrets, capacity_gb)
+		VALUES ('u1', 'b', 'users/a/', '', '{}', 20), ('u2', 'b', 'users/b/', '', '{}', 20)`); err != nil {
+		t.Fatalf("two users: %v", err)
+	}
+	var ro bool
+	if err := db.QueryRow(`SELECT read_only FROM at_user_fs WHERE user_id = 'u1'`).Scan(&ro); err != nil || ro {
+		t.Fatalf("read_only %v %v", ro, err)
+	}
+	if _, err := db.Exec(`UPDATE at_user_fs SET prefix = 'users/b/' WHERE user_id = 'u1'`); err == nil {
+		t.Fatal("two users share a folder")
+	}
+	if _, err := p.DownTo(ctx, 520); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM at_user_fs`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("rows left after down: %d %v", n, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb) VALUES ('u1', 'at-u1', 'jfs_u1', 'jfs-u1', '{}', 20)`); err != nil {
+		t.Fatalf("old shape after down: %v", err)
 	}
 }

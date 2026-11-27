@@ -2,6 +2,7 @@
 // `agy acp --process-per-session` child per session, newline-delimited JSON-RPC 2.0 both ways.
 // Agent → client requests (session/request_permission) go to the request handler; notifications
 // (session/update) are emitted.
+import { type Confine, unconfined } from "../confine.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
@@ -38,6 +39,8 @@ export interface AcpClientOptions {
   env: Record<string, string>;
   cwd?: string;
   log: Logger;
+  /** Wraps the command (session confinement). */
+  confine?: Confine;
 }
 
 export class AcpClient extends EventEmitter<AcpEvents> {
@@ -63,8 +66,9 @@ export class AcpClient extends EventEmitter<AcpEvents> {
   /** Spawns the agent; rejects when the executable cannot be started. */
   start(): Promise<void> {
     if (this.child) return Promise.resolve();
-    const [cmd, ...pre] = this.opts.command;
-    const child = spawn(cmd!, [...pre, ...this.opts.args], { env: this.opts.env, cwd: this.opts.cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const [bin, ...pre] = this.opts.command;
+    const { cmd, args } = (this.opts.confine ?? unconfined)(bin!, [...pre, ...this.opts.args]);
+    const child = spawn(cmd, args, { env: this.opts.env, cwd: this.opts.cwd, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
     // A write racing the child's exit fails with EPIPE; the exit event reports it.
     child.stdin?.on("error", (err) => this.opts.log.debug({ err: err.message }, "agy stdin"));

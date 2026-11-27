@@ -1749,21 +1749,24 @@
     "id": "c_01JD3V0000000000000000F01",
     "ts": "2026-11-26T12:00:00.000Z",
     "body": {
-      "volume": "at-01jd3v0000",
+      "name": "atu-0123456789abcdef",
+      "bucket": "atu-0123456789abcdef",
+      "prefix": "",
       "generation": 1,
-      "meta_url": "postgres://jfs_01jd3v0000@db.example.net:15432/agent_teams?sslmode=verify-full&search_path=jfs_01jd3v0000",
-      "meta_password": "secret",
+      "endpoint": "https://rustfs.example.net",
+      "access_key": "atu0123456789abcdef",
+      "secret_key": "secret",
       "client": {
-        "version": "1.4.2",
+        "tool": "geesefs",
+        "version": "0.43.9",
         "assets": [
           {
             "platform": "linux-amd64",
-            "url": "https://github.com/juicedata/juicefs/releases/download/v1.4.2/juicefs-1.4.2-linux-amd64.tar.gz",
+            "url": "https://example.net/geesefs-linux-amd64",
             "sha256": "79648a0a67145bf42ca4e8336578c13a5bbc9a0bd34df340b3b93dac1e975247"
           }
         ]
-      },
-      "cache_size_mb": 10240
+      }
     }
   },
   {
@@ -1772,7 +1775,7 @@
     "id": "c_01JD3V0000000000000000F02",
     "ts": "2026-11-26T12:00:00.000Z",
     "body": {
-      "volume": "at-01jd3v0000"
+      "name": "atu-0123456789abcdef"
     }
   },
   {
@@ -1783,7 +1786,7 @@
     "body": {
       "state": "mounted",
       "mode": "daemon",
-      "volume": "at-01jd3v0000",
+      "name": "atu-0123456789abcdef",
       "generation": 1
     }
   }

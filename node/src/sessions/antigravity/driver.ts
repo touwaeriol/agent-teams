@@ -6,6 +6,7 @@
 //
 // Not verified against a logged-in agy (marked "unverified" below): the system prompt _meta shape,
 // session/set_model for the model, how platform MCP tools are titled, /compact as a prompt.
+import type { Confine } from "../confine.js";
 import type { AntigravitySessionOptions, ApprovalResolve, SessionInit } from "../../protocol.js";
 import type { LoopbackToolHost } from "../../toolhost/http-server.js";
 import { approvalId, newId } from "../../util/ids.js";
@@ -24,6 +25,8 @@ export type AcpMcpServer =
   | { type: "http" | "sse"; name: string; url: string; headers: Array<{ name: string; value: string }> };
 
 export interface AntigravityDriverDeps {
+  /** Wraps the agy process (session confinement). */
+  confine?: Confine;
   toolhost: LoopbackToolHost;
   /** The agy executable (and leading args), null when agy is not installed on this node. */
   command: () => string[] | null;
@@ -102,7 +105,7 @@ export class AntigravityDriver implements Driver {
       throw new Error(AGY_NOT_INSTALLED);
     }
     this.closed = false;
-    const client = new AcpClient({ command, args: ["acp", "--process-per-session"], env: this.ctx.env, cwd: this.ctx.absCwd, log: this.ctx.log });
+    const client = new AcpClient({ command, args: ["acp", "--process-per-session"], env: this.ctx.env, cwd: this.ctx.absCwd, log: this.ctx.log, ...(this.deps.confine ? { confine: this.deps.confine } : {}) });
     client.on("notification", (method, p) => this.onNotification(method, p));
     client.on("exit", (err) => this.onExit(client, err));
     client.onRequest((method, p) => this.onRequest(method, p));

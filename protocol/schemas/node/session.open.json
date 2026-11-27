@@ -182,7 +182,7 @@
       "$ref": "common.json#/$defs/SshServers"
     },
     "fs": {
-      "description": "The shared folder (juicefs-shared-storage design), sent only when the node has the owner's volume mounted or an external mount (fs_mount / fs_external) and the owner has a ready volume: paths relative to the volume root. The daemon creates both directories when missing, adds them to the session's writable directories and exports AGENT_TEAMS_PROJECT_DIR / AGENT_TEAMS_SHARED_DIR. Omitted = no shared folder.",
+      "description": "The shared folder (shared-folder design), sent only when the node has the owner's folder mounted or an external mount (fs_s3_mount / fs_external) and the owner has a ready folder: paths relative to the folder root. The daemon creates both directories when missing, adds them to the session's writable directories and exports AGENT_TEAMS_PROJECT_DIR / AGENT_TEAMS_SHARED_DIR. Omitted = no shared folder.",
       "type": "object",
       "additionalProperties": false,
       "required": [

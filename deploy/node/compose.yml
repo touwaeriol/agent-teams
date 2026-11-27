@@ -16,6 +16,16 @@ services:
     stop_grace_period: 60s
     # Stable hostname: Claude Code and the logs show it.
     hostname: agent-teams-node
+    # The daemon mounts the user's shared folder itself (geesefs over FUSE at /home/agent/.fs):
+    # the container needs the FUSE device, SYS_ADMIN for fusermount3, and no AppArmor profile that
+    # blocks mount. (AGENT_TEAMS_CONFINE=on in node.env runs employee sessions with no_new_privs,
+    # so they cannot use it; off by default, so employees can sudo.)
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
     volumes:
       - claude:/home/agent/.claude                     # Claude login (claude login) and session transcripts
       - codex:/home/agent/.codex                       # Codex login (codex login) and threads

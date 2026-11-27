@@ -417,7 +417,7 @@ Antigravity（`source: "antigravity_permission"`）：`tool_name` 是按 ACP 工
 
 ### 6.5 共享文件夹（没有共享文件工具）
 
-项目文件、用户文件和附件都放在用户的共享文件夹里（JuiceFS，每个用户一个卷，`shared-folder.md`）：节点挂载后，守护进程在每个会话的工作目录里建三个链接，员工用自己的文件工具直接读写，没有专门的 MCP 工具（原来的 `list_shared_files` / `read_shared_file` / `write_shared_file` / `delete_shared_file` 和 `save_attachment` 已删除）：
+项目文件、用户文件和附件都放在用户的共享文件夹里（对象存储上每个用户一块空间，节点用 geesefs 挂载，`shared-folder.md`）：节点挂载后，守护进程在每个会话的工作目录里建三个链接，员工用自己的文件工具直接读写，没有专门的 MCP 工具（原来的 `list_shared_files` / `read_shared_file` / `write_shared_file` / `delete_shared_file` 和 `save_attachment` 已删除）：
 
 - `.project-files/` → 卷里的 `projects/<pid>/`：本项目的文件，网页“共享文件”页浏览的就是它。
 - `.user-files/` → 卷里的 `shared/`：用户所有项目共用的文件。
