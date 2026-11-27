@@ -65,7 +65,9 @@ func newFixture(t *testing.T) *fixture {
 	fx := &fixture{ctx: ctx, s: s, f: &folders{root: t.TempDir()}, user: u.ID, scope: store.ProjectMemory(p.ID)}
 	fx.dir = filepath.Join(fx.f.root, u.ID, "projects", p.ID, ".memory")
 	fx.sync = &memfiles.Syncer{DB: s.Pool, Folders: fx.f, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		OnChange: func(_ context.Context, _ store.MemoryScope, name, op, by string) { fx.seen = append(fx.seen, op+" "+name+" "+by) }}
+		OnChange: func(_ context.Context, _ store.MemoryScope, name, op, by string) {
+			fx.seen = append(fx.seen, op+" "+name+" "+by)
+		}}
 	return fx
 }
 
