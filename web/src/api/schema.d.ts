@@ -2730,6 +2730,10 @@ export interface components {
             max_running_threads: number;
             /** @description Omit to clear */
             node_release?: components["schemas"]["NodeRelease"];
+            /** @description Address nodes register and connect with (an origin such as https://agent-backend.example.com, not a CDN in front of it); empty = node_url_default */
+            node_url: string;
+            /** @description What nodes use when node_url is empty: AGENT_TEAMS_NODE_URL, else the public URL */
+            readonly node_url_default?: string;
             /** @description Default office layout id */
             office_default: string;
             registration_open: boolean;

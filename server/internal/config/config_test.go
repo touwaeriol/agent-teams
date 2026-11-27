@@ -177,3 +177,23 @@ func TestFS(t *testing.T) {
 		t.Fatal("negative capacity accepted")
 	}
 }
+
+// TestNodeURL: AGENT_TEAMS_NODE_URL is where nodes register (the public URL when unset) and must be
+// a bare origin.
+func TestNodeURL(t *testing.T) {
+	base := map[string]string{"DATABASE_URL": "postgres://x", "AGENT_TEAMS_PUBLIC_URL": "https://cdn.example"}
+	cfg, err := Load(env(base))
+	if err != nil || cfg.NodeOrigin() != "https://cdn.example" {
+		t.Fatalf("default %q %v", cfg.NodeOrigin(), err)
+	}
+	base["AGENT_TEAMS_NODE_URL"] = "https://backend.example/"
+	if cfg, err = Load(env(base)); err != nil || cfg.NodeOrigin() != "https://backend.example" {
+		t.Fatalf("set %q %v", cfg.NodeOrigin(), err)
+	}
+	for _, bad := range []string{"backend.example", "https://backend.example/api", "ftp://backend.example", "https://u:p@backend.example"} {
+		base["AGENT_TEAMS_NODE_URL"] = bad
+		if _, err := Load(env(base)); err == nil {
+			t.Fatalf("%q accepted", bad)
+		}
+	}
+}

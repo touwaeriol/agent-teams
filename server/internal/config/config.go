@@ -37,6 +37,10 @@ type Config struct {
 	// GitMirrorDir (GIT_MIRROR_DIR) holds the relay's bare mirrors of standalone Git repositories
 	// (git-repos.md §5); empty disables the relay.
 	GitMirrorDir string
+	// NodeURL (AGENT_TEAMS_NODE_URL) is the address nodes register and connect with, when it is not
+	// PublicURL (the web address may be a CDN or forwarder in front of the backend); empty =
+	// PublicURL. The admin page's 节点注册地址 overrides it.
+	NodeURL string
 	// NodeImage (AGENT_TEAMS_NODE_IMAGE) is the node container image the "add node" dialog puts in its
 	// docker run / compose snippets.
 	NodeImage string
@@ -213,6 +217,7 @@ func Load(getenv Getenv) (Config, error) {
 		GitHubWeb:      strings.TrimRight(getenv("GITHUB_WEB_URL"), "/"),
 		ArtifactOrigin: strings.TrimRight(getenv("AGENT_TEAMS_ARTIFACT_ORIGIN"), "/"),
 		GitMirrorDir:   getenv("GIT_MIRROR_DIR"),
+		NodeURL:        strings.TrimRight(getenv("AGENT_TEAMS_NODE_URL"), "/"),
 		NodeImage:      first(getenv("AGENT_TEAMS_NODE_IMAGE"), "ghcr.io/touwaeriol/agent-teams-node:latest"),
 		S3:             s3Config(getenv),
 	}
@@ -234,6 +239,9 @@ func (c Config) check() error {
 	if c.PublicURL == "" {
 		return errors.New("set AGENT_TEAMS_PUBLIC_URL (or PUBLIC_URL), e.g. https://agent.example.com")
 	}
+	if c.NodeURL != "" && !IsOrigin(c.NodeURL) {
+		return errors.New("AGENT_TEAMS_NODE_URL must be an origin like https://agent-backend.example.com")
+	}
 	if err := c.S3.check(); err != nil {
 		return err
 	}
@@ -242,6 +250,16 @@ func (c Config) check() error {
 	}
 	return c.checkArtifactOrigin()
 }
+
+// IsOrigin tells whether u is a bare http(s) origin (scheme and host, no path, query or user).
+func IsOrigin(u string) bool {
+	p, err := url.Parse(u)
+	return err == nil && (p.Scheme == "https" || p.Scheme == "http") && p.Host != "" && p.User == nil &&
+		(p.Path == "" || p.Path == "/") && p.RawQuery == "" && p.Fragment == ""
+}
+
+// NodeOrigin is the address nodes register with when no administrator set one: NodeURL, else PublicURL.
+func (c Config) NodeOrigin() string { return first(c.NodeURL, c.PublicURL) }
 
 // checkArtifactOrigin: a bare http(s) origin on another host than the web app, otherwise
 // published pages would run on the app's origin and could use the session.
