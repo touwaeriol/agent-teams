@@ -13,9 +13,10 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
 
-// The user's shared folder (juicefs-shared-storage design): GET shows it, POST switches it on
-// (provisions the JuiceFS volume), DELETE removes it with every file in it, and docker-volume hands
-// out the Compose volume a Docker node mounts it with (the only response carrying a credential).
+// The user's shared folder (juicefs-shared-storage design). It is on by default: the console
+// provisions every user's volume by itself (engine.runSharedFolders) and destroys it only with the
+// account. GET shows it, POST retries a failed provisioning at once, and docker-volume hands out the
+// Compose volume a Docker node mounts it with (the only response carrying a credential).
 
 // FsVolumeView is the user's volume without any secret.
 type FsVolumeView struct {
@@ -29,19 +30,13 @@ type FsVolumeView struct {
 
 // FsView is GET /api/storage/fs.
 type FsView struct {
-	Configured bool          `json:"configured" doc:"The console has AGENT_TEAMS_FS_* (otherwise the folder cannot be switched on)"`
-	Volume     *FsVolumeView `json:"volume,omitempty" doc:"Absent until switched on"`
+	Configured bool          `json:"configured" doc:"The console has AGENT_TEAMS_FS_* (then every user's folder is switched on by itself)"`
+	Volume     *FsVolumeView `json:"volume,omitempty" doc:"Absent until the console has started provisioning it"`
 	ProjectDir string        `json:"project_dir" doc:"A project's folder inside the volume, with {project_id}"`
 	SharedDir  string        `json:"shared_dir" doc:"The folder every project of the user shares"`
 }
 
 type fsOutput struct{ Body FsView }
-
-type fsDeleteInput struct {
-	Body struct {
-		Confirm string `json:"confirm" maxLength:"64" doc:"The volume name, typed by the user: every file in it is deleted"`
-	}
-}
 
 // FsDockerVolume is POST /api/storage/fs/docker-volume.
 type FsDockerVolume struct {
@@ -59,9 +54,7 @@ func (a *API) registerUserFs(api huma.API) {
 	t := "storage"
 	huma.Register(api, op("get-shared-folder", "GET", "/api/storage/fs", t, summary("My shared folder (JuiceFS volume)")), a.getUserFs)
 	huma.Register(api, op("enable-shared-folder", "POST", "/api/storage/fs", t,
-		summary("Switch the shared folder on (or retry a failed provisioning)")), a.enableUserFs)
-	huma.Register(api, op("delete-shared-folder", "DELETE", "/api/storage/fs", t, status(204),
-		summary("Delete the shared folder and every file in it")), a.deleteUserFs)
+		summary("Provision the shared folder now (it is on by default; this retries a failed attempt at once)")), a.enableUserFs)
 	huma.Register(api, op("shared-folder-docker-volume", "POST", "/api/storage/fs/docker-volume", t,
 		summary("Compose volume for a Docker node (carries the metadata password)")), a.userFsDockerVolume)
 }
@@ -98,9 +91,6 @@ func fsErr(err error) error {
 	if userfs.IsNotFound(err) {
 		return httpapi.Fail(404, "not_found", err.Error())
 	}
-	if errors.Is(err, userfs.ErrBusy) {
-		return httpapi.Fail(409, "fs_busy", err.Error())
-	}
 	return err
 }
 
@@ -117,24 +107,6 @@ func (a *API) enableUserFs(ctx context.Context, _ *struct{}) (*fsOutput, error) 
 	}
 	v, err := a.fsView(ctx, u.ID)
 	return &fsOutput{Body: v}, err
-}
-
-func (a *API) deleteUserFs(ctx context.Context, in *fsDeleteInput) (*struct{}, error) {
-	u, err := a.user(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if a.e.FS == nil {
-		return nil, fsErr(userfs.ErrDisabled)
-	}
-	vol, err := a.e.FS.Get(ctx, u.ID)
-	if err != nil {
-		return nil, fsErr(err)
-	}
-	if in.Body.Confirm != vol.Volume {
-		return nil, httpapi.Invalid("confirm", "请输入卷名 "+vol.Volume+" 确认删除")
-	}
-	return nil, fsErr(a.e.FS.Disable(ctx, u.ID))
 }
 
 func (a *API) userFsDockerVolume(ctx context.Context, _ *struct{}) (*fsDockerOutput, error) {

@@ -647,12 +647,13 @@ CREATE TABLE at_deliverable_files (                -- publish_file 发布的文�
   PRIMARY KEY (deliverable_id, version, path)
 );
 
--- in_volume（00490，artifacts/volume.go）：所有者的共享文件夹开着时，新版本的文件写进卷、行不带 data；
--- 之前发布的版本留在库里，MoveToVolumes 可以把它们搬进卷。读取时按 size 和 sha256 校验卷里的文件，
+-- in_volume（00490，artifacts/volume.go）：共享文件夹默认开通，新版本的文件只写进所有者的卷、行不带 data；
+-- 卷还没开通好时发布被拒（ErrFolderNotReady），不再写库；只有没配置 AGENT_TEAMS_FS_* 的控制面板（本地开发）写库。
+-- 库里的旧版本由后台每分钟一次的 runSharedFolders 用 MoveToVolumes 搬进卷。读取时按 size 和 sha256 校验卷里的文件，
 -- 被删或被改过就当作取不到（签名 URL 404，@ 引用只附一句说明）。同一交付物的并发发布由 NextVersion
 -- 锁 at_deliverables 行（SELECT … FOR UPDATE）排队，已经有行的版本不会被覆盖，卷里只有失败尝试留下的
 -- 同号目录会被替换。删交付物先删行，提交后再尽力删卷里的目录；删项目提交后尽力删卷里的 projects/<pid>/。
--- 关掉共享文件夹（销毁卷）之前 MoveFromVolumes 把这个用户的 in_volume 版本读回 data；卷里已经没有的文件记日志、行不动。
+-- 共享文件夹只随账号删除而销毁（卷里的交付物一起删）。
 CREATE TABLE at_upload_chunks (                    -- file.chunk 暂存，tool.call 认领后删除；一天没认领的清掉
   upload_id  TEXT NOT NULL,
   idx        INT  NOT NULL,
@@ -679,11 +680,22 @@ CREATE TABLE at_memory_files (
   name        TEXT NOT NULL,                       -- MEMORY.md（索引）| testing.md | thread-summaries.md …
   description TEXT NOT NULL DEFAULT '',            -- 一句话，MEMORY.md 的索引行用它；MEMORY.md 自己为空
   content     TEXT NOT NULL DEFAULT '',            -- Markdown，最多 32,000 字（应用层检查）
-  updated_by  TEXT NOT NULL DEFAULT '',            -- user | platform | coordinator | lead-1 · #3
+  updated_by  TEXT NOT NULL DEFAULT '',            -- user | platform | coordinator | lead-1 · #3 | 节点上直接修改
+  type        TEXT NOT NULL DEFAULT '',            -- 00500：frontmatter 的 type（project | feedback | reference | user）
+  pending     BOOLEAN NOT NULL DEFAULT false,      -- 00500：平台写了、还没写进共享文件夹
+  file_mtime  TIMESTAMPTZ,                         -- 00500：上次看到的文件（mtime、大小），用来发现节点上的修改
+  file_size   BIGINT NOT NULL DEFAULT 0,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (project_id, name)
 );
+
+-- 00500：开了共享文件夹时文件（projects/<pid>/.memory/）是正本，这两张表是缓存（memfiles）。
+-- 用户记忆：所有项目共用，文件在 shared/.memory/，列同上。
+CREATE TABLE at_user_memory_files (user_id TEXT REFERENCES at_users(id) ON DELETE CASCADE, name TEXT, …同上…, PRIMARY KEY (user_id, name));
+-- 员工的工具调用点到 .memory/ 下的文件时记一笔（10 分钟内有效）：同步把下一次修改记在它名下。
+CREATE TABLE at_memory_touches (scope TEXT CHECK (scope IN ('project','user')), scope_id TEXT, name TEXT, by TEXT, at TIMESTAMPTZ,
+  PRIMARY KEY (scope, scope_id, name));
 ```
 
 ### 2.9 事件与办公室
@@ -1030,6 +1042,8 @@ ALTER TABLE at_deliverable_comments ADD COLUMN attachments JSONB NOT NULL DEFAUL
 `00095_thread_lifecycle_images.sql`：`at_threads.archived_from`、`at_attachments`（§2.11）。
 
 `00312_shared_files.sql`：`at_shared_files`（§2.13，项目共享文件）；Down 删表。
+
+`00500_memory_in_folder.sql`：记忆进共享文件夹——`at_memory_files` 加 type / pending / file_mtime / file_size，存量行全标 pending（第一次同步写进文件夹）；新建 `at_user_memory_files`（用户记忆，随用户删除）和 `at_memory_touches`。Down 删掉它们。
 
 `00460_blob_storage.sql`、`00470_attachments_unowned.sql`（#58）：附件和共享文件改存对象存储、附件保留期、进行中的共享文件上传、删除队列、任务 / 会话首条消息 / 批注带附件（§2.15）。两个一起上线，上线前 pg_dump（存量附件 24 小时未用即删除，见 `attachments-rollout.md`）。
 

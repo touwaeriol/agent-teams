@@ -174,56 +174,35 @@ func TestDisableWithoutMetadata(t *testing.T) {
 	}
 }
 
-// TestBeforeTeardown: the hook reads the volume (read-only) before it is destroyed; its failure
-// stops the deletion with the reason.
-func TestBeforeTeardown(t *testing.T) {
-	s, _, _, vols, _ := newTest(t)
+// TestProvisionAll: the folder is on by default: every user without one gets it; a failed attempt
+// waits retryAfter before the next sweep tries again.
+func TestProvisionAll(t *testing.T) {
+	s, m, _, _, st := newTest(t)
 	ctx := context.Background()
-	if _, err := s.Enable(ctx, "u1"); err != nil {
+	if _, err := store.Exec(ctx, st.Pool, `INSERT INTO at_users (id, email, password_hash) VALUES ('u2', 'b@example.com', 'x')`); err != nil {
 		t.Fatal(err)
 	}
-	f, _ := s.Files(ctx, "u1")
-	if err := f.Put(ctx, "projects/p1/.deliverables/d1/v1/a.md", strings.NewReader("a"), 1); err != nil {
+	m.fail = errors.New("connection refused")
+	if n, err := s.ProvisionAll(ctx); err != nil || n != 0 {
+		t.Fatalf("failing sweep: %d %v", n, err)
+	}
+	m.fail = nil
+	if n, err := s.ProvisionAll(ctx); err != nil || n != 0 {
+		t.Fatalf("a failed volume is retried at once: %d %v", n, err)
+	}
+	if _, err := store.Exec(ctx, st.Pool, `UPDATE at_user_fs SET updated_at = now() - interval '11 minutes'`); err != nil {
 		t.Fatal(err)
 	}
-	var read string
-	fail := errors.New("database full")
-	s.BeforeTeardown = func(ctx context.Context, userID string) error {
-		f, err := s.Files(ctx, userID)
-		if err != nil {
-			return err
+	if n, err := s.ProvisionAll(ctx); err != nil || n != 2 {
+		t.Fatalf("retry: %d %v", n, err)
+	}
+	for _, id := range []string{"u1", "u2"} {
+		if !s.Ready(ctx, id) {
+			t.Fatalf("%s not ready", id)
 		}
-		if err := f.Put(ctx, "x", strings.NewReader("x"), 1); !errors.Is(err, ErrReadOnly) {
-			return errors.New("writable while deleting")
-		}
-		r, _, err := f.Open(ctx, "projects/p1/.deliverables/d1/v1/a.md")
-		if err != nil {
-			return err
-		}
-		defer r.Close()
-		b := make([]byte, 1)
-		_, _ = r.Read(b)
-		read = string(b)
-		return fail
 	}
-	if err := s.Disable(ctx, "u1"); err != nil {
-		t.Fatal(err)
-	}
-	s.Wait()
-	vol, err := s.Get(ctx, "u1")
-	if err != nil || vol.State != StateError || !strings.Contains(vol.Error, "database full") || vols.destroys() != 0 || read != "a" {
-		t.Fatalf("%+v %v destroyed %d read %q", vol, err, vols.destroys(), read)
-	}
-	if _, err := s.Files(ctx, "u1"); !IsNotFound(err) {
-		t.Fatalf("volume opens after the hook: %v", err)
-	}
-	s.BeforeTeardown = func(context.Context, string) error { return nil }
-	if err := s.Disable(ctx, "u1"); err != nil {
-		t.Fatal(err)
-	}
-	s.Wait()
-	if _, err := s.Get(ctx, "u1"); !IsNotFound(err) || vols.destroys() != 1 {
-		t.Fatalf("retry: %v destroyed %d", err, vols.destroys())
+	if n, err := s.ProvisionAll(ctx); err != nil || n != 0 {
+		t.Fatalf("nothing left: %d %v", n, err)
 	}
 }
 

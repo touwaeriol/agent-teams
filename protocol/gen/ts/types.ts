@@ -430,6 +430,13 @@ export type PlanStepStatus = "todo" | "doing" | "done";
  */
 export type BubbleKind = "plain" | "ask" | "error" | "done";
 /**
+ * project (default): this project's memory; user: the user's own memory, read by every project of the user.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryScope".
+ */
+export type MemoryScope = "project" | "user";
+/**
  * Thread number inside the project (#12).
  */
 export type ThreadNo1 = number;
@@ -1896,9 +1903,13 @@ export interface ClaudeSessionOptions {
   bash_policy?: BashPolicy | null;
   sandbox?: SandboxPolicy;
   /**
-   * Coordinator: PreToolUse hook rejects everything except mcp__platform__*.
+   * Coordinator: PreToolUse hook rejects everything except mcp__platform__* (and, with memory_files, the file tools inside the memory directories).
    */
   deny_non_platform_tools?: boolean;
+  /**
+   * The file tools (Read, Glob, Grep, Edit, Write) may also work inside the shared folder's memory directories (<project dir>/.memory and <shared dir>/.memory) even in a read-only or platform-only session; set only with fs.
+   */
+  memory_files?: boolean;
   protected_refs?: string[];
   /**
    * A session's employee: open in permission_mode, then switch to auto once the session's model reports supportsAutoMode (init.permission_mode says which it runs in).
@@ -4043,6 +4054,31 @@ export interface ListThreadsInput {
  */
 export interface MemoryDeleteInput {
   name: string;
+  scope?: MemoryScope;
+}
+/**
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryEditResult".
+ */
+export interface MemoryEditResult {
+  name: string;
+  replaced: number;
+}
+/**
+ * Change part of a memory file: replace old_string (which must occur exactly once, unless replace_all) with new_string, keeping the rest. Read the file first.
+ *
+ * This interface was referenced by `Envelope`'s JSON-Schema
+ * via the `definition` "MemoryEditInput".
+ */
+export interface MemoryEditInput {
+  name: string;
+  old_string: string;
+  new_string: string;
+  /**
+   * Replace every occurrence.
+   */
+  replace_all?: boolean;
+  scope?: MemoryScope;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -4068,7 +4104,9 @@ export interface MemoryFileBrief {
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "MemoryListInput".
  */
-export interface MemoryListInput {}
+export interface MemoryListInput {
+  scope?: MemoryScope;
+}
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "MemoryReadResult".
@@ -4088,6 +4126,7 @@ export interface MemoryReadResult {
  */
 export interface MemoryReadInput {
   name: string;
+  scope?: MemoryScope;
 }
 /**
  * This interface was referenced by `Envelope`'s JSON-Schema
@@ -4098,7 +4137,7 @@ export interface MemoryWriteResult {
   created: boolean;
 }
 /**
- * Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.
+ * Create or replace a memory file (the project's, or with scope user the user's own). A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself. To change part of a file use memory_edit.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "MemoryWriteInput".
@@ -4107,6 +4146,11 @@ export interface MemoryWriteInput {
   name: string;
   description?: string;
   content: string;
+  scope?: MemoryScope;
+  /**
+   * Optional kind of a topic file (written into its frontmatter).
+   */
+  type?: "project" | "feedback" | "reference" | "user";
 }
 /**
  * Send a message to the project coordinator (e.g. something another thread or the user's other work should know, or a question about scope). Status changes of your thread already reach it automatically: do not send those, and do not reply just to acknowledge. At most 20 messages an hour.
@@ -4835,6 +4879,7 @@ export interface ReadMessagesInput {}
  */
 export interface RememberInput {
   text: string;
+  scope?: MemoryScope;
 }
 /**
  * Answer a member's question ("[Question q3 from dev-1 ...]"). Answer quickly: the member is blocked until you do.

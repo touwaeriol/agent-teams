@@ -54,17 +54,25 @@ func (s Store) folder(ctx context.Context, q store.DB, deliverableID string) (fo
 	return folder{files: files, dir: dir}, ok && err == nil, err
 }
 
-// Save stores the files of one version: in the owner's shared folder when it is on (the rows
-// without data), else in the database. Call it in the publishing transaction once the version
-// number is settled (NextVersion locked the deliverable, or the deliverable is new in it): a
-// version that already has rows is refused, so only a leftover of a failed attempt is replaced.
+// ErrFolderNotReady: the owner's shared folder is still being switched on (or failed and waits for
+// the next attempt); deliverables are stored only there.
+var ErrFolderNotReady = errors.New("共享文件夹还在开通中，交付物暂时存不进去，请稍后再发布")
+
+// Save stores the files of one version in the owner's shared folder (the rows keep only
+// metadata). Only a console without a shared folder configured (local development) keeps them in
+// the database. Call it in the publishing transaction once the version number is settled
+// (NextVersion locked the deliverable, or the deliverable is new in it): a version that already
+// has rows is refused, so only a leftover of a failed attempt is replaced.
 func (s Store) Save(ctx context.Context, q store.DB, deliverableID string, version int, by Publisher, list []ArtifactFile) error {
+	if s.Volume == nil {
+		return save(ctx, q, deliverableID, version, by, list, false)
+	}
 	f, ok, err := s.folder(ctx, q, deliverableID)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return save(ctx, q, deliverableID, version, by, list, false)
+		return ErrFolderNotReady
 	}
 	if err := unstored(ctx, q, deliverableID, version); err != nil {
 		return err
@@ -228,70 +236,4 @@ func (s Store) Remover(ctx context.Context, deliverableID string) (func(context.
 		}
 		return nil
 	}, nil
-}
-
-// MoveFromVolumes puts the versions of the user's deliverables kept in the user's shared folder back
-// into the database (data in the rows, in_volume false), one version per transaction; run it before
-// the volume is destroyed, while it is still ready. A file gone from the folder (or changed there)
-// is logged and its row left as it is: it could not be served anyway. Any other failure, a folder
-// that is not available included, stops it with an error naming the version.
-func (s Store) MoveFromVolumes(ctx context.Context, userID string, log *slog.Logger) error {
-	var versions []struct {
-		DeliverableID string
-		Version       int
-	}
-	if err := s.DB.Gorm(ctx).Raw(`SELECT DISTINCT f.deliverable_id, f.version FROM at_deliverable_files f
-		JOIN at_deliverables d ON d.id = f.deliverable_id JOIN at_projects p ON p.id = d.project_id
-		WHERE p.user_id = ? AND f.in_volume ORDER BY f.deliverable_id, f.version`, userID).Scan(&versions).Error; err != nil {
-		return err
-	}
-	for _, v := range versions {
-		if err := s.moveBack(ctx, v.DeliverableID, v.Version, log); err != nil {
-			return fmt.Errorf("deliverable %s version %d: %w", v.DeliverableID, v.Version, err)
-		}
-	}
-	return nil
-}
-
-// moveBack copies one version's files from the shared folder into its rows.
-func (s Store) moveBack(ctx context.Context, deliverableID string, version int, log *slog.Logger) error {
-	f, ok, err := s.folder(ctx, s.DB, deliverableID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return errors.New("the shared folder is not available")
-	}
-	return store.InTx(ctx, s.DB, func(tx store.DB) error {
-		list, err := LoadVersion(ctx, tx, deliverableID, version)
-		if errors.Is(err, ErrNotFound) {
-			return nil // deleted meanwhile
-		}
-		if err != nil {
-			return err
-		}
-		for _, a := range list {
-			if err := moveFile(ctx, tx, f, deliverableID, version, a, log); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-func moveFile(ctx context.Context, tx store.DB, f folder, deliverableID string, version int, a ArtifactFile, log *slog.Logger) error {
-	if !a.InVolume {
-		return nil
-	}
-	a, err := f.fill(ctx, version, a)
-	if errors.Is(err, ErrNotFound) {
-		log.Warn("deliverable file unavailable in the shared folder; row left", "deliverable_id", deliverableID, "version", version, "path", a.Path, "err", err)
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	_, err = store.Exec(ctx, tx, `UPDATE at_deliverable_files SET data = $1, in_volume = false
-		WHERE deliverable_id = $2 AND version = $3 AND path = $4 AND in_volume`, a.Data, deliverableID, version, a.Path)
-	return err
 }

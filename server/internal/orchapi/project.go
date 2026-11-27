@@ -250,7 +250,7 @@ func (a *API) projectView(ctx context.Context, p store.Project) (httpapi.Project
 }
 
 func (a *API) recentMemory(ctx context.Context, pid string) ([]store.MemoryBrief, error) {
-	files, err := store.ListMemoryFiles(ctx, a.e.Core.Pool, pid)
+	files, err := store.ListMemoryFiles(ctx, a.e.Core.Pool, store.ProjectMemory(pid))
 	if len(files) > 6 {
 		files = files[:6]
 	}

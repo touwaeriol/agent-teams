@@ -93,6 +93,10 @@ p, user, /api/git/repos/:id/host-key/reset, POST
 p, user, /api/git/repos/:id/test, POST
 p, user, /api/git/repos/test, POST
 p, user, /api/me, GET
+p, user, /api/me/memory, GET
+p, user, /api/me/memory/:name, GET
+p, user, /api/me/memory/:name, PUT
+p, user, /api/me/memory/:name, DELETE
 p, user, /api/me/password, POST
 p, user, /api/me/scheduling, GET
 p, user, /api/me/scheduling, PUT
@@ -186,7 +190,6 @@ p, user, /api/projects/:pid/session-controls, PUT
 p, user, /api/session-options, GET
 p, user, /api/storage/fs, GET
 p, user, /api/storage/fs, POST
-p, user, /api/storage/fs, DELETE
 p, user, /api/storage/fs/docker-volume, POST
 p, user, /api/threads/:tid, DELETE
 p, user, /api/threads/:tid, GET

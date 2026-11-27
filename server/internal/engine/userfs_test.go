@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -54,10 +55,10 @@ func useFolder(t *testing.T, w *world) *fsFakes {
 	return fakes
 }
 
-// TestSharedFolderReachesNodesAndSessions: switching the folder on sends the user's mounting node
-// fs.mount on the live link only (never the outbox), the node's fs.status shows on the node page,
-// sessions opened there carry the folders, and deleting the folder sends fs.unmount and destroys
-// the volume only once the node reports it unmounted.
+// TestSharedFolderReachesNodesAndSessions: the folder is on by default: the sweep provisions it
+// and sends the user's mounting node fs.mount on the live link only (never the outbox), the node's
+// fs.status shows on the node page, sessions opened there carry the folders, and deleting the
+// account sends fs.unmount and destroys the volume only once the node reports it unmounted.
 func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
 	w := newWorldWith(t, nil, nil)
 	fakes := useFolder(t, w)
@@ -67,13 +68,14 @@ func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
 	tm.b.must(201, "POST", "/api/nodes", map[string]string{"name": "fake"}, &node)
 	var project struct{ ID string }
 	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "p"}, &project)
-	tm.n = w.connect(node.Token, nodetest.Options{Features: []string{"sessions", "git_worktree", "cred_helper", "file_download", "fs_mount"}})
+	tm.n = w.connect(node.Token, nodetest.Options{Features: []string{"sessions", "git_worktree", "cred_helper", "file_download", "fs_mount", "memory_files"}})
 
 	var view struct {
 		Configured bool
 		Volume     struct{ Volume, State string }
 	}
-	tm.b.must(200, "POST", "/api/storage/fs", nil, &view)
+	w.e.SweepSharedFolders(w.ctx)
+	tm.b.must(200, "GET", "/api/storage/fs", nil, &view)
 	if !view.Configured || view.Volume.State != userfs.StateReady || fakes.formatted != 1 {
 		t.Fatalf("enable: %+v formatted %d", view, fakes.formatted)
 	}
@@ -106,13 +108,17 @@ func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
 	})
 
 	tm.b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "Files", "brief": "use the folder"}, nil)
-	_, open := expectOpen(t, w, tm.n, "lead-1")
+	lead, open := expectOpen(t, w, tm.n, "lead-1")
 	if open.Fs == nil || string(open.Fs.Project) != "projects/"+project.ID || string(open.Fs.Shared) != "shared" {
 		t.Fatalf("session.open fs %+v", open.Fs)
 	}
+	if open.Claude == nil || open.Claude.MemoryFiles == nil || !*open.Claude.MemoryFiles || slices.Contains(open.Claude.DisallowedTools, "Edit") {
+		t.Fatalf("the lead cannot edit the memory files: %+v", open.Claude)
+	}
+	sharedFolderMemory(t, w, lead, fakes.root+"/"+vol, project.ID)
 
-	tm.b.must(422, "DELETE", "/api/storage/fs", map[string]string{"confirm": "nope"}, nil)
-	tm.b.must(204, "DELETE", "/api/storage/fs", map[string]string{"confirm": vol}, nil)
+	tm.projectID = project.ID
+	w.e.Hooks().UserDeleting(w.ctx, tm.ownerID(t))
 	if _, err := tm.n.Wait(ctx, protocol.TypeFsUnmount, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -181,4 +187,35 @@ func fsStatusOf(t *testing.T, w *world, nodeID string) string {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+// sharedFolderMemory: the lead edits a memory file on the node (its tool call names it): the sweep
+// reads it back credited to the lead, and the next session's prompt carries it.
+func sharedFolderMemory(t *testing.T, w *world, lead *fakeAgent, volRoot, projectID string) {
+	t.Helper()
+	lead.event("tool_started", func(e *protocol.SessionEvent) {
+		tool, cat, sum, use := "Write", "edit", "/work/lead/.project-files/.memory/testing.md", "toolu_m1"
+		e.Tool, e.Category, e.Summary, e.ToolUseID = &tool, &cat, &sum, &use
+	})
+	scope := store.ProjectMemory(projectID)
+	eventually(t, "the touch is recorded", func() bool {
+		touches, err := store.MemoryTouches(w.ctx, w.db.Pool, scope)
+		return err == nil && touches["testing.md"] == "lead-1"
+	})
+	dir := filepath.Join(volRoot, "projects", projectID, ".memory")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "testing.md"), []byte("---\nname: testing\ndescription: 怎么跑测试\n---\n\nmake test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w.e.SweepSharedFolders(w.ctx)
+	f, err := store.GetMemoryFile(w.ctx, w.db.Pool, scope, "testing.md")
+	if err != nil || f.Content != "make test" || f.UpdatedBy != "lead-1" {
+		t.Fatalf("memory file not read back: %+v %v", f, err)
+	}
+	idx, err := os.ReadFile(filepath.Join(dir, "MEMORY.md"))
+	if err != nil || !strings.Contains(string(idx), "- [testing.md](testing.md) — 怎么跑测试") {
+		t.Fatalf("MEMORY.md in the folder %q %v", idx, err)
+	}
 }

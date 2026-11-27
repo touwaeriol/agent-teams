@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// 共享文件夹 settings: switching on (the platform's storage) and the status of a ready folder.
+// 共享文件夹 settings: on by default (no switch-on, no delete), retry of a failed folder, status.
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { flushPromises, mount } from "@vue/test-utils";
 import ElementPlus from "element-plus";
@@ -35,30 +35,33 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+const FAILED = { ...EMPTY, volume: { ...READY.volume, state: "error", error: "connection refused" } };
+
 describe("SharedFolder page", () => {
-  it("switches the folder on", async () => {
-    const spy = api(EMPTY);
+  it("says the folder is being switched on by itself", async () => {
+    api(EMPTY);
     const w = mountPage();
     await flushPromises();
-    await w.findAll("button").find((b) => b.text() === "开通")!.trigger("click");
+    expect(w.text()).toContain("正在自动开通");
+    expect(w.findAll("button").some((b) => b.text() === "开通")).toBe(false);
+  });
+
+  it("retries a failed folder", async () => {
+    const spy = api(FAILED);
+    const w = mountPage();
+    await flushPromises();
+    expect(w.text()).toContain("connection refused");
+    await w.findAll("button").find((b) => b.text() === "重试")!.trigger("click");
     await flushPromises();
     expect(spy.mock.calls.map((c) => c[0] as Request).some((r) => r.method === "POST" && r.url.endsWith("/api/storage/fs"))).toBe(true);
   });
 
-  it("shows a ready folder", async () => {
+  it("shows a ready folder and offers no delete", async () => {
     api(READY);
     const w = mountPage();
     await flushPromises();
     expect(w.text()).toContain("at-0123456789abcdef");
     expect(w.text()).toContain("不限");
-    expect(w.text()).not.toContain("开通共享文件夹");
-  });
-
-  it("says what deleting keeps (published deliverables move back) and what it removes", async () => {
-    api(READY);
-    const w = mountPage();
-    await flushPromises();
-    expect(w.text()).toContain("交付物会先移回平台存储");
-    expect(w.text()).toContain("其他文件");
+    expect(w.text()).not.toContain("删除共享文件夹");
   });
 });

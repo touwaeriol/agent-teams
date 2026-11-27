@@ -75,6 +75,8 @@ export const keys = {
   gitCredentials: ["git-credentials"] as const,
   servers: ["servers"] as const,
   sharedFolder: ["shared-folder"] as const,
+  userMemory: ["user-memory"] as const,
+  userMemoryFile: (name: string) => ["user-memory", name] as const,
   serverAudit: (id: string, f: AuditFilter = {}) => ["servers", id, "audit", f] as const,
   projectServers: (pid: string) => ["p", pid, "servers"] as const,
   projectServerAudit: (pid: string, f: AuditFilter = {}) => ["p", pid, "server-audit", f] as const,
@@ -256,6 +258,17 @@ export const useProjectUsage = (pid: Arg, days: Arg<number>) =>
 export const useMemory = (pid: Arg) =>
   useKeyed(() => keys.memory(val(pid)), () => list(client.GET("/api/projects/{pid}/memory", path({ pid: val(pid) }))), { enabled: has(pid) });
 
+/** My own memory files (every project reads them), MEMORY.md first. */
+export const useUserMemory = () => useKeyed(() => keys.userMemory, () => list(client.GET("/api/me/memory")));
+
+/** One of my memory files with its content; `name` empty = nothing to load (a new file). */
+export const useUserMemoryFile = (name: Arg) =>
+  useKeyed(
+    () => keys.userMemoryFile(val(name)),
+    () => unwrap(client.GET("/api/me/memory/{name}", { params: { path: { name: val(name) } } })),
+    { enabled: has(name) },
+  );
+
 /** One folder of the project's files (the project's folder in the user's shared folder); available false with a reason until the folder is on. */
 export const useProjectFiles = (pid: Arg, dir: Arg) =>
   useKeyed(
@@ -353,7 +366,11 @@ export const useSharedFolder = (enabled: Arg<boolean> = true) =>
     queryKey: keys.sharedFolder,
     enabled: computed(() => toValue(enabled)),
     queryFn: () => unwrap(client.GET("/api/storage/fs")),
-    refetchInterval: (q) => (q.state.data?.volume?.state === "provisioning" || q.state.data?.volume?.state === "deleting" ? 2000 : false),
+    // On by default: while the console is still provisioning it (no volume yet, or provisioning), poll.
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      return d?.configured && (!d.volume || d.volume.state === "provisioning" || d.volume.state === "deleting") ? 2000 : false;
+    },
   });
 
 export const useServers = () => useQuery({ queryKey: keys.servers, queryFn: () => list(client.GET("/api/servers")) as Promise<ServerView[]> });

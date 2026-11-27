@@ -25,7 +25,7 @@ export function folderLinkText(view: Pick<FsView, "volume"> | null | undefined):
   if (state === "error") return "开通失败，去重试";
   if (state === "provisioning") return "正在开通，去查看";
   if (state === "deleting") return "正在删除，去查看";
-  return state ? "去查看" : "去开通";
+  return state ? "去查看" : "正在开通，去查看";
 }
 
 const utf8Length = (s: string) => new TextEncoder().encode(s).length;

@@ -28,7 +28,7 @@ export const projects = {
   update: (pid: string, body: S["ProjectUpdate"]) => unwrap(client.PATCH("/api/projects/{pid}", { params: { path: { pid } }, body })),
   remove: (pid: string) => unwrap(client.DELETE("/api/projects/{pid}", { params: { path: { pid } } })),
   /** Create or replace a memory file (MEMORY.md or a topic file; topic files need a description). */
-  putMemory: (pid: string, name: string, body: S["MemoryPutInputBody"]) =>
+  putMemory: (pid: string, name: string, body: S["MemoryBody"]) =>
     unwrap(client.PUT("/api/projects/{pid}/memory/{name}", { params: { path: { pid, name } }, body })),
   removeMemory: (pid: string, name: string) => unwrap(client.DELETE("/api/projects/{pid}/memory/{name}", { params: { path: { pid, name } } })),
   requestDeliverable: (pid: string, kind: string, brief: string) =>
@@ -143,9 +143,14 @@ export const servers = {
 };
 
 /** The user's JuiceFS shared folder (one volume per user). */
+/** My own memory: every project of mine reads it (MEMORY.md + topic files). */
+export const userMemory = {
+  put: (name: string, body: S["MemoryBody"]) => unwrap(client.PUT("/api/me/memory/{name}", { params: { path: { name } }, body })),
+  remove: (name: string) => unwrap(client.DELETE("/api/me/memory/{name}", { params: { path: { name } } })),
+};
+
 export const sharedFolder = {
   enable: () => unwrap(client.POST("/api/storage/fs")),
-  remove: (confirm: string) => unwrap(client.DELETE("/api/storage/fs", { body: { confirm } })),
   dockerVolume: () => unwrap(client.POST("/api/storage/fs/docker-volume")),
 };
 

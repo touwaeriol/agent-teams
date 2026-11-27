@@ -12,8 +12,13 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// Project auto memory tools (architecture.md §6.7): memory_list / memory_read for everyone,
-// memory_write / memory_delete for the coordinator and leads, remember as a MEMORY.md shortcut.
+// Auto memory tools (architecture.md §6.7): memory_list / memory_read for everyone, memory_write /
+// memory_edit / memory_delete for the coordinator and leads, remember as a MEMORY.md shortcut.
+// scope user is the user's own memory (every project of the user reads it). With the shared folder on, a change lands in the rows and is written into the
+// folder right after the call (writeKick).
+
+// writeKick is how soon a change through the tools is written into the shared folder.
+const writeKick = time.Second
 
 // author names the writer: "coordinator", or "lead-1 · #3" inside a thread.
 func author(c *call) string {
@@ -36,13 +41,36 @@ func memoryResult(err error, ok func() Result) (Result, error) {
 	return Result{}, err
 }
 
-func emitMemory(ctx context.Context, tx *core.Tx, projectID, actor, op, name string) error {
-	_, err := tx.Emit(ctx, projectID, nil, core.EvMemory, actor, map[string]any{"op": op, "name": name})
+// memoryScope is the scope a call names (the project's by default).
+func (s *Service) memoryScope(ctx context.Context, tx *core.Tx, c *call, scope *protocol.MemoryScope) (store.MemoryScope, error) {
+	if scope == nil || *scope != protocol.MemoryScopeUser {
+		return store.ProjectMemory(c.emp().ProjectID), nil
+	}
+	userID, err := store.MemoryOwner(ctx, tx, store.ProjectMemory(c.emp().ProjectID))
+	return store.UserMemory(userID), err
+}
+
+// changed reports a change: an event for a project's memory, and the folder written out after
+// the transaction.
+func (s *Service) changed(ctx context.Context, tx *core.Tx, sc store.MemoryScope, actor, op, name string) error {
+	tx.AfterCommit(func(context.Context) { s.core.Memory.Kick(sc, writeKick) })
+	if sc.Kind != store.MemoryProject {
+		return nil
+	}
+	_, err := tx.Emit(ctx, sc.ID, nil, core.EvMemory, actor, map[string]any{"op": op, "name": name})
 	return err
 }
 
 func (s *Service) memoryList(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
-	files, err := store.ListMemoryFiles(ctx, tx, c.emp().ProjectID)
+	var in protocol.MemoryListInput
+	if err := c.decode(&in); err != nil {
+		return Result{}, err
+	}
+	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
+	if err != nil {
+		return Result{}, err
+	}
+	files, err := store.ListMemoryFiles(ctx, tx, sc)
 	if err != nil {
 		return Result{}, err
 	}
@@ -64,7 +92,11 @@ func (s *Service) memoryRead(ctx context.Context, tx *core.Tx, c *call) (Result,
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	f, err := store.GetMemoryFile(ctx, tx, c.emp().ProjectID, in.Name)
+	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
+	if err != nil {
+		return Result{}, err
+	}
+	f, err := store.GetMemoryFile(ctx, tx, sc, in.Name)
 	return memoryResult(err, func() Result {
 		text := f.Content
 		if strings.TrimSpace(text) == "" {
@@ -80,14 +112,17 @@ func (s *Service) memoryWrite(ctx context.Context, tx *core.Tx, c *call) (Result
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	desc := ""
-	if in.Description != nil {
-		desc = *in.Description
+	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
+	if err != nil {
+		return memoryResult(err, nil)
 	}
-	f, created, err := store.WriteMemoryFile(ctx, tx, c.emp().ProjectID, store.MemoryWrite{Name: in.Name, Description: desc,
-		Content: in.Content, By: author(c)})
+	w := store.MemoryWrite{Name: in.Name, Description: deref(in.Description), Content: in.Content, By: author(c)}
+	if in.Type != nil {
+		w.Type = string(*in.Type)
+	}
+	f, created, err := store.WriteMemoryFile(ctx, tx, sc, w)
 	if err == nil {
-		err = emitMemory(ctx, tx, c.emp().ProjectID, c.emp().Name, "write", f.Name)
+		err = s.changed(ctx, tx, sc, c.emp().Name, "write", f.Name)
 	}
 	return memoryResult(err, func() Result {
 		verb := "已更新"
@@ -98,14 +133,61 @@ func (s *Service) memoryWrite(ctx context.Context, tx *core.Tx, c *call) (Result
 	})
 }
 
+// memoryEdit replaces part of a file, keeping its description and kind.
+func (s *Service) memoryEdit(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
+	var in protocol.MemoryEditInput
+	if err := c.decode(&in); err != nil {
+		return Result{}, err
+	}
+	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
+	if err != nil {
+		return memoryResult(err, nil)
+	}
+	f, err := store.GetMemoryFile(ctx, tx, sc, in.Name)
+	if err != nil {
+		return memoryResult(err, nil)
+	}
+	content, n, err := replaceIn(f.Content, in.OldString, in.NewString, in.ReplaceAll != nil && *in.ReplaceAll)
+	if err != nil {
+		return memoryResult(err, nil)
+	}
+	_, _, err = store.WriteMemoryFile(ctx, tx, sc, store.MemoryWrite{Name: f.Name, Description: f.Description, Type: f.Type,
+		Content: content, By: author(c)})
+	if err == nil {
+		err = s.changed(ctx, tx, sc, c.emp().Name, "write", f.Name)
+	}
+	return memoryResult(err, func() Result {
+		return okJSON(fmt.Sprintf("已修改 %s（%d 处）", f.Name, n), protocol.MemoryEditResult{Name: f.Name, Replaced: n})
+	})
+}
+
+// replaceIn replaces old with new: exactly one occurrence, or every one with all.
+func replaceIn(content, old, new string, all bool) (string, int, error) {
+	n := strings.Count(content, old)
+	switch {
+	case n == 0:
+		return "", 0, store.NewMemoryError("文件里没有 old_string（要和文件内容逐字一致，先 memory_read 看原文）")
+	case n > 1 && !all:
+		return "", 0, store.NewMemoryError(fmt.Sprintf("old_string 在文件里出现了 %d 次；多带几行上下文让它唯一，或用 replace_all", n))
+	}
+	return strings.ReplaceAll(content, old, new), n, nil
+}
+
 func (s *Service) memoryDelete(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
 	var in protocol.MemoryDeleteInput
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	err := store.DeleteMemoryFile(ctx, tx, c.emp().ProjectID, in.Name, author(c))
+	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
+	if err != nil {
+		return memoryResult(err, nil)
+	}
+	if err := s.core.Memory.Removing(ctx, sc, in.Name); err != nil {
+		return memoryResult(err, nil)
+	}
+	err = store.DeleteMemoryFile(ctx, tx, sc, in.Name, author(c))
 	if err == nil {
-		err = emitMemory(ctx, tx, c.emp().ProjectID, c.emp().Name, "delete", in.Name)
+		err = s.changed(ctx, tx, sc, c.emp().Name, "delete", in.Name)
 	}
 	return memoryResult(err, func() Result { return okText("已删除 " + in.Name) })
 }
@@ -116,11 +198,19 @@ func (s *Service) remember(ctx context.Context, tx *core.Tx, c *call) (Result, e
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	err := store.AppendMemoryNote(ctx, tx, c.emp().ProjectID, in.Text, author(c))
-	if err == nil {
-		err = emitMemory(ctx, tx, c.emp().ProjectID, c.emp().Name, "write", store.MemoryIndex)
+	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
+	if err != nil {
+		return memoryResult(err, nil)
 	}
-	return memoryResult(err, func() Result { return okText("已记入 MEMORY.md") })
+	err = store.AppendMemoryNote(ctx, tx, sc, in.Text, author(c))
+	if err == nil {
+		err = s.changed(ctx, tx, sc, c.emp().Name, "write", store.MemoryIndex)
+	}
+	where := "MEMORY.md"
+	if sc.Kind == store.MemoryUser {
+		where = "用户记忆 MEMORY.md"
+	}
+	return memoryResult(err, func() Result { return okText("已记入 " + where) })
 }
 
 // rememberSummary files a finished thread's summary under thread-summaries.md.
@@ -128,5 +218,5 @@ func (s *Service) rememberSummary(ctx context.Context, tx *core.Tx, t core.Threa
 	if err := store.AppendThreadSummary(ctx, tx, t.ProjectID, t.No, t.Title, summary); err != nil {
 		return err
 	}
-	return emitMemory(ctx, tx, t.ProjectID, fmt.Sprintf("#%d", t.No), "write", store.ThreadSummaries)
+	return s.changed(ctx, tx, store.ProjectMemory(t.ProjectID), fmt.Sprintf("#%d", t.No), "write", store.ThreadSummaries)
 }

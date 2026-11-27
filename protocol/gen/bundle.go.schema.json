@@ -2787,7 +2787,11 @@
           "$ref": "#/$defs/SandboxPolicy"
         },
         "deny_non_platform_tools": {
-          "description": "Coordinator: PreToolUse hook rejects everything except mcp__platform__*.",
+          "description": "Coordinator: PreToolUse hook rejects everything except mcp__platform__* (and, with memory_files, the file tools inside the memory directories).",
+          "type": "boolean"
+        },
+        "memory_files": {
+          "description": "The file tools (Read, Glob, Grep, Edit, Write) may also work inside the shared folder's memory directories (<project dir>/.memory and <shared dir>/.memory) even in a read-only or platform-only session; set only with fs.",
           "type": "boolean"
         },
         "protected_refs": {
@@ -4820,6 +4824,15 @@
         "$ref": "#/$defs/AttachmentId"
       }
     },
+    "MemoryScope": {
+      "title": "MemoryScope",
+      "description": "project (default): this project's memory; user: the user's own memory, read by every project of the user.",
+      "type": "string",
+      "enum": [
+        "project",
+        "user"
+      ]
+    },
     "CompleteTaskResult": {
       "title": "CompleteTaskResult",
       "type": "object",
@@ -5341,6 +5354,59 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 100
+        },
+        "scope": {
+          "$ref": "#/$defs/MemoryScope"
+        }
+      }
+    },
+    "MemoryEditResult": {
+      "title": "MemoryEditResult",
+      "type": "object",
+      "required": [
+        "name",
+        "replaced"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "replaced": {
+          "type": "integer"
+        }
+      }
+    },
+    "MemoryEditInput": {
+      "title": "MemoryEditInput",
+      "description": "Change part of a memory file: replace old_string (which must occur exactly once, unless replace_all) with new_string, keeping the rest. Read the file first.",
+      "type": "object",
+      "required": [
+        "name",
+        "old_string",
+        "new_string"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "old_string": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32000
+        },
+        "new_string": {
+          "type": "string",
+          "maxLength": 32000
+        },
+        "replace_all": {
+          "description": "Replace every occurrence.",
+          "type": "boolean"
+        },
+        "scope": {
+          "$ref": "#/$defs/MemoryScope"
         }
       }
     },
@@ -5393,7 +5459,11 @@
       "description": "List the project's memory files (MEMORY.md and topic files) with their descriptions.",
       "type": "object",
       "additionalProperties": false,
-      "properties": {}
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/MemoryScope"
+        }
+      }
     },
     "MemoryReadResult": {
       "title": "MemoryReadResult",
@@ -5436,6 +5506,9 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 100
+        },
+        "scope": {
+          "$ref": "#/$defs/MemoryScope"
         }
       }
     },
@@ -5457,7 +5530,7 @@
     },
     "MemoryWriteInput": {
       "title": "MemoryWriteInput",
-      "description": "Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.",
+      "description": "Create or replace a memory file (the project's, or with scope user the user's own). A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself. To change part of a file use memory_edit.",
       "type": "object",
       "required": [
         "name",
@@ -5477,6 +5550,19 @@
         "content": {
           "type": "string",
           "maxLength": 32000
+        },
+        "scope": {
+          "$ref": "#/$defs/MemoryScope"
+        },
+        "type": {
+          "description": "Optional kind of a topic file (written into its frontmatter).",
+          "type": "string",
+          "enum": [
+            "project",
+            "feedback",
+            "reference",
+            "user"
+          ]
         }
       }
     },
@@ -6126,6 +6212,9 @@
         "text": {
           "type": "string",
           "minLength": 1
+        },
+        "scope": {
+          "$ref": "#/$defs/MemoryScope"
         }
       }
     },

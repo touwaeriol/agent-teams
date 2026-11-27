@@ -75,7 +75,7 @@ describe("sidebars", { timeout: 30_000 }, () => {
     for (const role of ["admin", "member"] as const) {
       const w = await mountNav(SettingsNav, role);
       const hrefs = w.findAll("a").map((a) => a.attributes("href"));
-      expect(hrefs).toEqual(["/projects", "/settings/team", "/settings/nodes", "/settings/git", "/settings/servers", "/settings/storage", "/settings/appearance"]);
+      expect(hrefs).toEqual(["/projects", "/settings/team", "/settings/nodes", "/settings/git", "/settings/servers", "/settings/storage", "/settings/memory", "/settings/appearance"]);
       expect(w.findAll("a").map((a) => a.text()).join(" ")).not.toContain("管理");
     }
   });

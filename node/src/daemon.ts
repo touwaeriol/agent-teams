@@ -43,7 +43,7 @@ import { absPath } from "./sessions/claude/options.js";
 import { consoleImageFetcher } from "./sessions/images.js";
 import { consoleHttp, type AttachmentOptions, type ConsoleHttp } from "./sessions/attachments.js";
 import { SharedFs, type SharedFsOptions } from "./fs/shared.js";
-import { linkSharedDirs, safeAttachmentDir, sharedAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs, type SharedDirs } from "./fs/session.js";
+import { linkSharedDirs, memoryDirs, memoryFolderPrompt, safeAttachmentDir, sharedAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs, type SharedDirs } from "./fs/session.js";
 import { EXIT_FS_LOST } from "./release.js";
 import { DAEMON_BUILD, DAEMON_RELEASE, DAEMON_VERSION, PROTOCOLS } from "./version.js";
 
@@ -120,7 +120,7 @@ export interface DaemonOptions {
   sharedFs?: Partial<Pick<SharedFsOptions, "run" | "fetchFn" | "fuse" | "platform" | "checkMs" | "mountWaitMs">>;
 }
 
-const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "context_detail", "session_controls", "attachments_v2"];
+const FEATURES = ["sessions", "codex_app_server", "git_worktree", "git_sync", "git_review_sha", "cred_helper", "file_download", "context_usage", "session_compact", "usage", "ssh_gateway", "runtime_status", "session_move", "context_detail", "session_controls", "attachments_v2", "memory_files"];
 
 /** Wires the link, command handlers, sessions, tools, git and credentials together. */
 export class Daemon {
@@ -448,17 +448,23 @@ export class Daemon {
   // ---- session runtime construction ----
 
   private createDriver(open: SessionOpen, absCwd: string, sink: Session): { driver: Driver; ctx: DriverContext } {
-    const dirs = open.employee.tier === "coordinator" ? null : this.sharedFs.sessionDirs(open.fs);
+    const coordinator = open.employee.tier === "coordinator";
+    const fsDirs = this.sharedFs.sessionDirs(open.fs);
+    // The coordinator only gets the memory directories (claude.memory_files), not the folder.
+    const dirs = coordinator ? null : fsDirs;
+    const memory = open.claude?.memory_files && fsDirs ? memoryDirs(fsDirs) : [];
     const spec = dirs ? withSharedDirs(open, dirs) : open;
-    if (dirs) this.linkShared(absCwd, dirs);
+    if (fsDirs && (dirs || memory.length)) this.linkShared(absCwd, fsDirs);
     else this.unlinkShared(absCwd);
     const runtime = this.runtimes.get(spec.runtime);
     const skills = runtime.nativeSkills ? materializeSkills(this.skillsRoot, spec) : null;
     const plugins = materializePlugins(this.pluginsRoot, spec);
     const readable = [...(skills ? [skills.pluginDir] : []), ...plugins.map((p) => p.dir), ...(dirs ? [dirs.project, dirs.shared] : [])];
     const env: Record<string, string> = { ...this.sessionEnv(spec), ...(dirs ? { AGENT_TEAMS_PROJECT_DIR: dirs.project, AGENT_TEAMS_SHARED_DIR: dirs.shared } : {}) };
-    const extra = [env.AT_SSH_CONFIG ? sshPrompt((spec.ssh_servers ?? []).map((s) => s.name)) : "", dirs ? sharedFolderPrompt(dirs) : ""].filter(Boolean).join("\n\n");
-    const ctx: DriverContext = { spec, absCwd, env, ...(extra ? { systemExtra: extra } : {}), ...(dirs ? { extraDirs: [dirs.project, dirs.shared] } : {}), policy: this.policy(spec, absCwd, readable), sink, log: this.o.log.child({ session: spec.session_id }) };
+    const folderPrompt = dirs ? sharedFolderPrompt(dirs) : memory.length ? memoryFolderPrompt(memory) : "";
+    const extra = [env.AT_SSH_CONFIG ? sshPrompt((spec.ssh_servers ?? []).map((s) => s.name)) : "", folderPrompt].filter(Boolean).join("\n\n");
+    const extraDirs = dirs ? [dirs.project, dirs.shared] : memory;
+    const ctx: DriverContext = { spec, absCwd, env, ...(extra ? { systemExtra: extra } : {}), ...(extraDirs.length ? { extraDirs } : {}), policy: { ...this.policy(spec, absCwd, readable), memoryDirs: memory }, sink, log: this.o.log.child({ session: spec.session_id }) };
     return { driver: runtime.createDriver(ctx, { skills, plugins }), ctx };
   }
 

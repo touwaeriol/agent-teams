@@ -31,6 +31,7 @@ type logBucket struct {
 	dropped  int
 	warnedAt time.Time
 	stored   int
+	clock    func() time.Time // nil: time.Now (tests freeze it)
 }
 
 // allow takes a token if one is left at now.
@@ -70,8 +71,11 @@ func truncateUTF8(s string, n int) string {
 
 // storeLog stores one log frame of the link's node, subject to the link's rate.
 func (l *link) storeLog(ctx context.Context, b *protocol.Log) error {
-	now := time.Now()
 	lb := &l.logs
+	now := time.Now()
+	if lb.clock != nil {
+		now = lb.clock()
+	}
 	if !lb.allow(now) {
 		lb.dropped++
 		if now.Sub(lb.warnedAt) >= logDropWarnFreq {

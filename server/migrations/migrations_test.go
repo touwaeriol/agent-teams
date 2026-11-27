@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 490 {
+	if migrations.Latest() != 500 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -2080,6 +2080,57 @@ INSERT INTO at_deliverable_files (deliverable_id, version, path, content_type, s
 		t.Fatalf("deliverable files after down: %d %v", n, err)
 	}
 	if _, err := p.UpTo(ctx, 490); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestMemoryInFolderMigration: 00500 marks every memory row pending (to be written into the
+// folder), adds the user's own memory (deleted with the user) and the touches; down drops them.
+func TestMemoryInFolderMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 490); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'p');
+INSERT INTO at_memory_files (project_id, name, content) VALUES ('p1', 'MEMORY.md', '- a');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 500); err != nil {
+		t.Fatal(err)
+	}
+	var pending bool
+	if err := db.QueryRow(`SELECT pending FROM at_memory_files WHERE project_id = 'p1'`).Scan(&pending); err != nil || !pending {
+		t.Fatalf("old memory not pending: %v %v", pending, err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_user_memory_files (user_id, name, content) VALUES ('u1', 'MEMORY.md', '- 中文');
+INSERT INTO at_memory_touches (scope, scope_id, name, by) VALUES ('project', 'p1', 'a.md', 'lead-1');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_memory_touches (scope, scope_id, name, by) VALUES ('team', 'x', 'a.md', 'x')`); err == nil {
+		t.Fatal("bad scope accepted")
+	}
+	if _, err := db.Exec(`DELETE FROM at_users WHERE id = 'u1'`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM at_user_memory_files`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("user memory not deleted with the user: %d %v", n, err)
+	}
+	if _, err := p.DownTo(ctx, 490); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT pending FROM at_memory_files`); err == nil {
+		t.Fatal("pending still there after down")
+	}
+	if _, err := p.UpTo(ctx, 500); err != nil {
 		t.Fatal(err)
 	}
 }

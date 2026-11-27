@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
@@ -44,6 +45,20 @@ func (h *Hooks) ProjectDeleting(ctx context.Context, _ string, projectID string)
 func (h *Hooks) ProjectDeleted(ctx context.Context, userID, projectID string) {
 	if err := h.e.FS.RemoveProject(ctx, userID, projectID); err != nil {
 		h.e.log.Warn("project folder not removed from the shared folder", "user_id", userID, "project_id", projectID, "err", err)
+	}
+}
+
+// MemoryFiles keeps memory in the owners' shared folders.
+func (h *Hooks) MemoryFiles() store.MemoryFiles { return h.e.Core.Memory }
+
+// UserDeleting destroys the user's shared folder (in the background, from the volume as it stands
+// now: the row goes with the user). Not having one is fine.
+func (h *Hooks) UserDeleting(ctx context.Context, userID string) {
+	if !h.e.FS.Enabled() {
+		return
+	}
+	if err := h.e.FS.Disable(ctx, userID); err != nil && !userfs.IsNotFound(err) {
+		h.e.log.Warn("shared folder of a deleted user not destroyed", "user_id", userID, "err", err)
 	}
 }
 

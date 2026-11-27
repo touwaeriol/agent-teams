@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"net/http"
 	"path"
 	"strings"
 	"time"
@@ -170,6 +172,9 @@ func (a *API) uploadLibraryFile(ctx context.Context, in *uploadInput) (*delivera
 		}
 		return tx.EmitDeliverable(ctx, d)
 	})
+	if errors.Is(err, artifacts.ErrFolderNotReady) {
+		return nil, httpapi.Fail(http.StatusConflict, "folder_not_ready", err.Error())
+	}
 	if err != nil {
 		return nil, err
 	}

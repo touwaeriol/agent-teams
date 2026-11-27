@@ -158,6 +158,7 @@ export interface ToolInputs {
   list_team: T.ListTeamInput;
   list_threads: T.ListThreadsInput;
   memory_delete: T.MemoryDeleteInput;
+  memory_edit: T.MemoryEditInput;
   memory_list: T.MemoryListInput;
   memory_read: T.MemoryReadInput;
   memory_write: T.MemoryWriteInput;
@@ -209,6 +210,7 @@ export interface ToolResults {
   list_team: T.ListTeamResult;
   list_threads: T.ListThreadsResult;
   memory_delete: unknown;
+  memory_edit: T.MemoryEditResult;
   memory_list: T.MemoryListResult;
   memory_read: T.MemoryReadResult;
   memory_write: T.MemoryWriteResult;
@@ -375,28 +377,35 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     blocking: [],
     requires: null,
     description: "Delete a project memory topic file and its line in MEMORY.md (MEMORY.md itself cannot be deleted).",
-    input_schema: {"description":"Delete a project memory topic file and its line in MEMORY.md (MEMORY.md itself cannot be deleted).","type":"object","required":["name"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100}}},
+    input_schema: {"description":"Delete a project memory topic file and its line in MEMORY.md (MEMORY.md itself cannot be deleted).","type":"object","required":["name"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100},"scope":{"description":"project (default): this project's memory; user: the user's own memory, read by every project of the user.","type":"string","enum":["project","user"]}}},
+  },
+  memory_edit: {
+    tiers: ["coordinator","lead"],
+    blocking: [],
+    requires: null,
+    description: "Change part of a memory file: replace old_string (which must occur exactly once, unless replace_all) with new_string, keeping the rest. Read the file first.",
+    input_schema: {"description":"Change part of a memory file: replace old_string (which must occur exactly once, unless replace_all) with new_string, keeping the rest. Read the file first.","type":"object","required":["name","old_string","new_string"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100},"old_string":{"type":"string","minLength":1,"maxLength":32000},"new_string":{"type":"string","maxLength":32000},"replace_all":{"description":"Replace every occurrence.","type":"boolean"},"scope":{"description":"project (default): this project's memory; user: the user's own memory, read by every project of the user.","type":"string","enum":["project","user"]}}},
   },
   memory_list: {
     tiers: ["coordinator","lead","member"],
     blocking: [],
     requires: null,
     description: "List the project's memory files (MEMORY.md and topic files) with their descriptions.",
-    input_schema: {"description":"List the project's memory files (MEMORY.md and topic files) with their descriptions.","type":"object","additionalProperties":false,"properties":{}},
+    input_schema: {"description":"List the project's memory files (MEMORY.md and topic files) with their descriptions.","type":"object","additionalProperties":false,"properties":{"scope":{"description":"project (default): this project's memory; user: the user's own memory, read by every project of the user.","type":"string","enum":["project","user"]}}},
   },
   memory_read: {
     tiers: ["coordinator","lead","member"],
     blocking: [],
     requires: null,
     description: "Read one project memory file in full (MEMORY.md or a topic file listed in it).",
-    input_schema: {"description":"Read one project memory file in full (MEMORY.md or a topic file listed in it).","type":"object","required":["name"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100}}},
+    input_schema: {"description":"Read one project memory file in full (MEMORY.md or a topic file listed in it).","type":"object","required":["name"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100},"scope":{"description":"project (default): this project's memory; user: the user's own memory, read by every project of the user.","type":"string","enum":["project","user"]}}},
   },
   memory_write: {
     tiers: ["coordinator","lead"],
     blocking: [],
     requires: null,
-    description: "Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.",
-    input_schema: {"description":"Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.","type":"object","required":["name","content"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100},"description":{"type":"string","maxLength":300},"content":{"type":"string","maxLength":32000}}},
+    description: "Create or replace a memory file (the project's, or with scope user the user's own). A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself. To change part of a file use memory_edit.",
+    input_schema: {"description":"Create or replace a memory file (the project's, or with scope user the user's own). A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself. To change part of a file use memory_edit.","type":"object","required":["name","content"],"additionalProperties":false,"properties":{"name":{"type":"string","minLength":1,"maxLength":100},"description":{"type":"string","maxLength":300},"content":{"type":"string","maxLength":32000},"scope":{"description":"project (default): this project's memory; user: the user's own memory, read by every project of the user.","type":"string","enum":["project","user"]},"type":{"description":"Optional kind of a topic file (written into its frontmatter).","type":"string","enum":["project","feedback","reference","user"]}}},
   },
   message_coordinator: {
     tiers: ["lead"],
@@ -480,7 +489,7 @@ export const TOOL_META: { readonly [K in ToolName]: ToolMeta } = {
     blocking: [],
     requires: null,
     description: "Append a one-line note to the project memory index MEMORY.md (shortcut for small facts).",
-    input_schema: {"description":"Append a one-line note to the project memory index MEMORY.md (shortcut for small facts).","type":"object","required":["text"],"additionalProperties":false,"properties":{"text":{"type":"string","minLength":1}}},
+    input_schema: {"description":"Append a one-line note to the project memory index MEMORY.md (shortcut for small facts).","type":"object","required":["text"],"additionalProperties":false,"properties":{"text":{"type":"string","minLength":1},"scope":{"description":"project (default): this project's memory; user: the user's own memory, read by every project of the user.","type":"string","enum":["project","user"]}}},
   },
   reply_to: {
     tiers: ["lead"],

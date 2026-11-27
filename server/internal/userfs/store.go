@@ -136,3 +136,19 @@ func (v Volume) Names() Names {
 	n.Volume, n.Role, n.AccessKey = v.Volume, v.MetaRole, v.AccessKey
 	return n
 }
+
+// retryAfter is how long a failed volume waits before the automatic switch-on tries it again.
+const retryAfter = "10 minutes"
+
+// usersToProvision lists users without a volume, with one that failed retryAfter ago, or with a
+// provisioning left standing (the console stopped in the middle): the automatic switch-on takes
+// them, oldest account first.
+func usersToProvision(ctx context.Context, q store.DB, limit int) ([]string, error) {
+	var ids []string
+	err := q.Gorm(ctx).Raw(`SELECT u.id FROM at_users u LEFT JOIN at_user_fs f ON f.user_id = u.id
+		WHERE f.user_id IS NULL
+		   OR (f.state = 'error' AND f.updated_at < now() - ?::interval)
+		   OR (f.state = 'provisioning' AND f.updated_at < now() - ?::interval)
+		ORDER BY u.created_at LIMIT ?`, retryAfter, staleAfter, limit).Scan(&ids).Error
+	return ids, err
+}

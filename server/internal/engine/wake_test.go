@@ -313,11 +313,11 @@ func TestReadOnlyFinish(t *testing.T) {
 	if th.Summary != "调研结论：方案 A 更好" {
 		t.Fatalf("summary %v", th.Summary)
 	}
-	summaries, err := store.GetMemoryFile(tm.w.ctx, tm.w.e.Core.Pool, tm.projectID, store.ThreadSummaries)
+	summaries, err := store.GetMemoryFile(tm.w.ctx, tm.w.e.Core.Pool, store.ProjectMemory(tm.projectID), store.ThreadSummaries)
 	if err != nil || !strings.Contains(summaries.Content, "## #1 Work\n调研结论：方案 A 更好") {
 		t.Fatalf("thread summaries %q %v", summaries.Content, err)
 	}
-	index, _ := store.GetMemoryFile(tm.w.ctx, tm.w.e.Core.Pool, tm.projectID, store.MemoryIndex)
+	index, _ := store.GetMemoryFile(tm.w.ctx, tm.w.e.Core.Pool, store.ProjectMemory(tm.projectID), store.MemoryIndex)
 	if !strings.Contains(index.Content, "[thread-summaries.md](thread-summaries.md)") {
 		t.Fatalf("MEMORY.md does not link the summaries: %q", index.Content)
 	}

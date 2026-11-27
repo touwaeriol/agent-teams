@@ -11,7 +11,9 @@ One JuiceFS volume per user, `at-<id>` (`id` = first 16 hex of sha256("agent-tea
 /projects/<project_id>/                     one per project ($AGENT_TEAMS_PROJECT_DIR)
 /projects/<project_id>/attachments/         attachments fetched with read_attachment
 /projects/<project_id>/.deliverables/<id>/v<N>/   published deliverable versions (platform-kept)
+/projects/<project_id>/.memory/             the project's auto memory (MEMORY.md + topic files)
 /shared/                                    every project of the user ($AGENT_TEAMS_SHARED_DIR)
+/shared/.memory/                            the user's own memory, read by every project
 ```
 
 Every session's working directory (`projects/<pid>/threads/<no>/<emp>/` on the node) holds the
@@ -52,9 +54,13 @@ separate S3 user).
 - Only one call works on a volume at a time: `Enable` provisions only when its insert created the
   row or it claimed a failed provisioning (a conditional `UPDATE … RETURNING`), and `Disable` only
   when it moved a ready or failed volume to deleting; a provisioning or deletion left standing for
-  15 minutes (console stopped) can be taken over. Deleting while provisioning answers 409
-  `fs_busy`. Provisioning runs detached from the request, so a closed browser does not leave it
-  failed.
+  15 minutes (console stopped) can be taken over. Provisioning runs detached from the request.
+- **On by default.** Every user gets a folder without asking: one console replica (leader lock)
+  runs `engine.runSharedFolders` at start and every minute; it provisions users without a volume,
+  failed volumes 10 minutes after their last attempt and provisionings left standing
+  (`Service.ProvisionAll`), then moves deliverable versions still kept in the database into their
+  owners' folders (`artifacts.Store.MoveToVolumes`). `POST /api/storage/fs` retries a failed one at
+  once. Users cannot switch it off; it is destroyed only with the account.
 - Storage is always the platform's (no user-supplied S3 or JuiceFS).
 
 ## Quota
@@ -94,6 +100,36 @@ reported without them, counts unless it names another volume). The daemon create
 `additionalDirectories` and sandbox `allowWrite`, and to Codex's workspace-write `writable_roots`,
 exports the two variables, and appends a short note to the system prompt.
 
+## Memory
+
+Auto memory (architecture.md §6.7) lives in the folder: a project's in `projects/<pid>/.memory/`,
+the user's own (preferences every project reads) in `shared/.memory/`. Each is flat Markdown:
+`MEMORY.md` (the index every session reads at start) and topic files that start with frontmatter
+(`name`, a one-line `description`, optional `type: project|feedback|reference|user`).
+
+- **The files are the source.** Every tier edits them with its own file tools: members as any file;
+  the coordinator and read-only leads through `claude.memory_files` (the daemon's PreToolUse hook
+  allows Read/Glob/Grep/Edit/Write only inside the two `.memory/` directories, by real path; the
+  coordinator gets just those, linked into its working directory). Codex leads (read-only sandbox)
+  and sessions without the folder use the `memory_*` tools (`memory_edit` replaces part of a file;
+  `scope: "user"` for the user's own).
+- **The rows are the cache** (`at_memory_files`, `at_user_memory_files`): session prompts, the web
+  pages and a folder out of reach read them. A write through the platform (tools, thread summaries,
+  the web page) lands there as `pending` and is written out by `memfiles.Syncer` right after (and by
+  the minute sweep); a pending row wins over a file changed meanwhile.
+- **Changes on a node come back** with the sweep: a file whose mtime or size differs from what the
+  row last saw is read (frontmatter parsed, content clipped to 32,000 characters), a new topic file
+  gets its index line in MEMORY.md, a deleted one loses it (MEMORY.md itself is written again). The
+  sweep reads the scopes with pending rows or a fresh touch every minute, every ready folder once an
+  hour, and the web page reads its scope before listing.
+- **Who changed it**: an employee's tool call whose summary names a `.memory/` file records a touch
+  (`at_memory_touches`, 10 minutes) and has the folder read 5 seconds later; the change is credited
+  to that employee, otherwise to `节点上直接修改`.
+- Deleting through the platform removes the file first; with the folder out of reach a file already
+  written out is refused (it would come back).
+- Moving over: migration 00500 marks every existing row pending, so the first sweep writes all
+  memory into the folders.
+
 ## Console access
 
 The console never mounts a volume. For each volume in use it runs `juicefs gateway` as a child
@@ -108,25 +144,26 @@ with an unsigned payload, since the gateway speaks plain http. Through it:
 
 - the project's 共享文件 page lists, uploads, downloads and deletes `projects/<pid>/`
   (`/api/projects/{pid}/files…`, api.md §3.5.1) and saves attachments there;
-- deliverable versions are written and read (`artifacts.Store`): with the owner's folder on,
-  `publish_file` writes `projects/<pid>/.deliverables/<id>/v<N>/` and `at_deliverable_files` keeps
-  only the metadata (`in_volume`); signed URLs and `read_deliverable` read the files back and refuse
-  one whose size changed. The page cannot write into `.deliverables/` (403 `managed_folder`), and
-  employees are told to leave it alone. Versions from before the folder was on stay in the database.
+- deliverable versions are written and read (`artifacts.Store`): `publish_file` writes
+  `projects/<pid>/.deliverables/<id>/v<N>/` and `at_deliverable_files` keeps only the metadata
+  (`in_volume`); they never go to the database again. Until the owner's folder is ready a publish is
+  refused (`ErrFolderNotReady`: a tool refusal, 409 `folder_not_ready` for a library upload). Only a
+  console without `AGENT_TEAMS_FS_*` (local development) keeps them in the database. Signed URLs
+  and `read_deliverable` read the files back and refuse one whose size or sha256 changed. The page
+  cannot write into `.deliverables/` (403 `managed_folder`), and employees are told to leave it
+  alone. Older versions still in the database are moved in by the sweep above.
 
 ## Deleting
 
-`DELETE /api/storage/fs` marks the volume deleting, sends `fs.unmount` and returns; the deletion
-runs in the background, detached from the request:
+Only deleting the account removes the folder (admin `DELETE /api/admin/users/{id}` → hook
+`UserDeleting` → `Service.Disable`). The volume is marked deleting, `fs.unmount` goes to the
+user's nodes, and the deletion runs in the background from the secrets read at that moment (the row
+goes with the user):
 
 1. wait (60 s at most) until no node whose daemon mounts the volume still reports it mounted. A
    Docker node (external mount) cannot unmount on request: the volume is destroyed under it, which
    is logged;
-2. move the deliverable versions kept in the volume back into the database
-   (`artifacts.Store.MoveFromVolumes`, `Service.BeforeTeardown`); meanwhile the volume opens
-   read-only for the console. A failure stops the deletion (state error with the reason; deleting
-   again retries);
-3. stop the console's gateway, `juicefs destroy` (skipped when the role or schema is not there:
+2. stop the console's gateway, `juicefs destroy` (skipped when the role or schema is not there:
    provisioning failed before creating them, or an earlier attempt dropped them), remove the S3
    user and policy, drop the schema and role, delete the row.
 

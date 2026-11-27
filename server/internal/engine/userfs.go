@@ -3,9 +3,11 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
@@ -40,21 +42,53 @@ func readFsStatus(ctx context.Context, q core.DB, nodeID string) (nodeFsStatus, 
 // UseSharedFolder wires the shared-folder service (nil: none): volume changes reach the user's
 // nodes and session.open carries the folders.
 func (e *Engine) UseSharedFolder(s *userfs.Service) {
+	e.useMemoryFiles(s)
 	if e.FS = s; s == nil {
 		e.Orch.SharedFolder = nil
 		e.Core.Volume = nil
 		return
 	}
 	s.OnChange = e.pushFS
-	s.BeforeTeardown = e.moveDeliverablesBack
-	e.Core.Volume = s
+	if s.Enabled() {
+		e.Core.Volume = s // deliverables then live only in the owners' folders
+	}
 	e.Orch.SharedFolder = e.sharedFolder
 }
 
-// moveDeliverablesBack brings the deliverable versions kept in the user's volume back into the
-// database before the volume is destroyed.
-func (e *Engine) moveDeliverablesBack(ctx context.Context, userID string) error {
-	return e.Core.Artifacts().MoveFromVolumes(ctx, userID, e.log)
+// fsSweepEvery is how often the automatic switch-on looks for users without a ready folder.
+const fsSweepEvery = time.Minute
+
+// runSharedFolders keeps every user's shared folder on (it is on by default): at start and every
+// fsSweepEvery it provisions the missing ones, moves deliverable versions still kept in the
+// database into their owners' folders and keeps memory and its folders in step. One replica runs
+// it (leader lock).
+func (e *Engine) runSharedFolders(ctx context.Context) {
+	if !e.FS.Enabled() {
+		return
+	}
+	scheduler.RunAsLeader(ctx, e.Core.Pool, "agent-teams:shared-folders", 30*time.Second, func(ctx context.Context) {
+		for {
+			e.sweepSharedFolders(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(fsSweepEvery):
+			}
+		}
+	})
+}
+
+func (e *Engine) sweepSharedFolders(ctx context.Context) {
+	if _, err := e.FS.ProvisionAll(ctx); err != nil {
+		e.log.Warn("shared folders: provisioning sweep", "err", err)
+	}
+	rep, err := e.Core.Artifacts().MoveToVolumes(ctx, e.log)
+	if err != nil {
+		e.log.Warn("shared folders: moving deliverables", "err", err)
+	} else if rep.Moved > 0 || rep.Failed > 0 {
+		e.log.Info("shared folders: deliverables moved into the folders", "moved", rep.Moved, "failed", rep.Failed)
+	}
+	e.sweepMemory(ctx)
 }
 
 // sharedFolder is session.open fs: the project's folder and the user's shared folder, when the

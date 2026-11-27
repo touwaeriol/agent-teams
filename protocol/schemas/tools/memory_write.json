@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/tools/memory_write.json",
   "title": "MemoryWriteInput",
-  "description": "Create or replace a project memory file. A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself.",
+  "description": "Create or replace a memory file (the project's, or with scope user the user's own). A topic file (e.g. testing.md) needs a one-line description; the platform keeps its line in MEMORY.md. name MEMORY.md rewrites the index itself. To change part of a file use memory_edit.",
   "x-tool": {
     "tiers": [
       "coordinator",
@@ -29,6 +29,19 @@
     "content": {
       "type": "string",
       "maxLength": 32000
+    },
+    "scope": {
+      "$ref": "common.json#/$defs/MemoryScope"
+    },
+    "type": {
+      "description": "Optional kind of a topic file (written into its frontmatter).",
+      "type": "string",
+      "enum": [
+        "project",
+        "feedback",
+        "reference",
+        "user"
+      ]
     }
   },
   "$defs": {

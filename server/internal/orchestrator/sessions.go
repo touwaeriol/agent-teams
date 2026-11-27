@@ -646,6 +646,15 @@ func (o *Orchestrator) queueOpen(ctx context.Context, tx *core.Tx, env sessionEn
 			return err
 		}
 	}
+	if open.Fs != nil {
+		ok, err := core.NodeHasFeature(ctx, tx, node.ID, FeatureMemoryFiles)
+		if err != nil {
+			return err
+		}
+		if ok {
+			allowMemoryFiles(env.emp, open.Claude)
+		}
+	}
 	if err := o.addSkills(ctx, tx, env.project.UserID, env.emp, &open); err != nil {
 		return err
 	}

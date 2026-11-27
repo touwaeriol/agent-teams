@@ -93,6 +93,8 @@ INSERT INTO at_node_logs (node_id, level, msg) SELECT 'n1', 'warn', 'keep' FROM 
 
 	big := json.RawMessage(`{"blob":"` + strings.Repeat("x", 1<<20) + `"}`)
 	l := &link{g: g, node: store.Node{ID: "n2"}}
+	frozen := time.Now()
+	l.logs.clock = func() time.Time { return frozen } // slow inserts must not refill the bucket
 	for i := 0; i < int(logBurst)+100; i++ {
 		if err := l.storeLog(ctx, &protocol.Log{Level: "warn", Msg: strings.Repeat("y", 10000), Fields: &big}); err != nil {
 			t.Fatal(err)

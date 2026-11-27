@@ -311,6 +311,27 @@ func coordinatorClaude(c *protocol.ClaudeSessionOptions) {
 	c.DenyNonPlatformTools = &t
 }
 
+// FeatureMemoryFiles is the hello feature of daemons that let a coordinator or read-only session
+// use the file tools inside the memory directories (claude.memory_files).
+const FeatureMemoryFiles = "memory_files"
+
+// memoryFileTools are the file tools a coordinator or read-only session keeps for the memory
+// directories of the shared folder; the daemon refuses them anywhere else.
+var memoryFileTools = []string{"Read", "Glob", "Grep", "Edit", "Write"}
+
+// allowMemoryFiles lets a coordinator or read-only Claude session edit the memory files itself
+// (members can already); the daemon's PreToolUse hook keeps the tools inside .memory/.
+func allowMemoryFiles(e core.Employee, c *protocol.ClaudeSessionOptions) {
+	if c == nil || (e.Tier != "coordinator" && !readOnly(e)) {
+		return
+	}
+	t := true
+	c.MemoryFiles = &t
+	c.Tools = mergeLists(c.Tools, memoryFileTools)
+	c.AllowedTools = mergeLists(c.AllowedTools, memoryFileTools)
+	c.DisallowedTools = slices.DeleteFunc(slices.Clone(c.DisallowedTools), func(t string) bool { return slices.Contains(memoryFileTools, t) })
+}
+
 func readOnlyClaude(c *protocol.ClaudeSessionOptions, in sessionInput) {
 	t := true
 	c.Tools = mergeLists(leadTools, chatTools)
@@ -433,10 +454,11 @@ func mergeLists(lists ...[]string) []string {
 // ToolsAllowed checks the init tool list of a session against its role (§10.2 third line of defence).
 func ToolsAllowed(e core.Employee, tools []string) (bool, string) {
 	for _, t := range tools {
-		if e.Tier == "coordinator" && !strings.HasPrefix(t, "mcp__platform__") && !slices.Contains(chatTools, t) {
+		// The memory file tools may be on (claude.memory_files); the daemon keeps them in .memory/.
+		if e.Tier == "coordinator" && !strings.HasPrefix(t, "mcp__platform__") && !slices.Contains(chatTools, t) && !slices.Contains(memoryFileTools, t) {
 			return false, t
 		}
-		if readOnly(e) && slices.Contains(writeTools, t) {
+		if readOnly(e) && slices.Contains(writeTools, t) && !slices.Contains(memoryFileTools, t) {
 			return false, t
 		}
 	}

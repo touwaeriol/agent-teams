@@ -314,6 +314,7 @@ Codex 会话 ──(http://127.0.0.1:<port>/mcp/<sid>/<每次 ─┘            
   - 组长 `finish(summary)` 的总结进 `thread-summaries.md`（§6.3）。
   - 网页：MEMORY.md 一行（作用范围、更新时间），记忆文件列表；点开是 Markdown 查看，可编辑、删除、新建（`PUT/DELETE /api/projects/{pid}/memory/{name}`），保存后新开的会话读到。项目首页的“项目记忆”框列出 MEMORY.md 和前几个文件。
   - 迁移 `00140_memory_files.sql`：`at_project_memory` 的用户 / 统筹笔记变成 MEMORY.md 的要点（置顶在前），`#<no>` / `thread:<no>` 来源的讨论串总结变成 `thread-summaries.md` 的各节；旧表删除（Down 把每个文件还原成一条笔记，MEMORY.md 置顶）。
+- **记忆在共享文件夹里（00500，2026-11-27 用户定）**：开了共享文件夹时记忆就是文件，项目的在 `projects/<pid>/.memory/`，**用户记忆**（这个用户所有项目共用的偏好和习惯）在 `shared/.memory/`，都是 MEMORY.md + 带 frontmatter（name、description、可选 type）的主题文件；文件是正本，表是缓存（`at_memory_files`、`at_user_memory_files`），平台写入先记 pending 再写进文件夹，节点上的修改由同步读回并记到动手的员工名下（`shared-folder.md`“Memory”）。统筹、组长、成员都用自己的文件工具直接改（统筹和只读组长通过 `claude.memory_files` 只放开 `.memory/` 两个目录）；用不了文件工具时用 `memory_*`（新增 `memory_edit` 局部替换，`scope: "user"` 改用户记忆）。每个会话（包括单人会话）的提示词带“## 用户记忆”，排在“## 项目记忆”前面；冲突时项目指令 > 项目记忆 > 用户记忆。网页：设置 → 我的记忆（`/api/me/memory`）。
 
 ## 7. 讨论串、调度与任务池
 
