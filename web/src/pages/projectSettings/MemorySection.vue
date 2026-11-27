@@ -6,7 +6,7 @@ import type { ProjectView } from "@/api/views";
 import Divider from "./Divider.vue";
 import Heading from "./Heading.vue";
 import InstructionsField from "./InstructionsField.vue";
-import MemoryFileList from "./MemoryFileList.vue";
+import MemoryFileList from "@/components/memory/MemoryFileList.vue";
 
 defineProps<{ project: ProjectView }>();
 </script>
@@ -20,6 +20,6 @@ defineProps<{ project: ProjectView }>();
       <h3 class="font-medium">自动记忆</h3>
       <p class="text-[13px] leading-5 text-muted-foreground">Claude 在此项目中工作时自行记录的笔记：做过的决定、约定、你的偏好、踩过的坑。每个新会话开始时读取 MEMORY.md，需要时再读各个记忆文件。这些文件放在共享文件夹的 .memory/ 里，员工可以直接修改；跨项目的偏好在 设置 → 我的记忆。</p>
     </div>
-    <MemoryFileList :pid="project.id" :label="`${project.name} 项目`" heading="阅读所有讨论串" />
+    <MemoryFileList :key="project.id" :pid="project.id" :label="`${project.name} 项目`" heading="阅读所有讨论串" />
   </div>
 </template>

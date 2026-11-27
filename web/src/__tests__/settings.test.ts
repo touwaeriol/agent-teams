@@ -9,7 +9,8 @@ import { parseSetting } from "@/pages/admin/admin";
 import { connectionKind, usedText } from "@/pages/settings/github/github";
 import { accountView, cliLabel, cliLogin, cliRows, createRefreshCooldown, hoverIntent, recheckState, runtimeInfos, withNode, needsUsageRefresh, nodeMeta, nodeStats, planLabel, resetText, runtimeLine, settingsPatch, slotPct, updateView, usageLevel, usageView, windowLabel, withNodeUsage } from "@/pages/settings/nodes/nodes";
 import { isDirty, nodePickerText, ordered, patchAt, removeAt, toggleId, versionText } from "@/pages/settings/team/team";
-import { employeeRows, fromChoice, inlineCommit, leadTimeoutLabel, memoryFileName, memoryWriter, repoRefs, splitMemory, threadRows, toChoice } from "@/pages/projectSettings/logic";
+import { memoryFileName, memoryWriter, splitMemory } from "@/components/memory/memory";
+import { employeeRows, fromChoice, inlineCommit, leadTimeoutLabel, repoRefs, threadRows, toChoice } from "@/pages/projectSettings/logic";
 import { newRole } from "@/lib/roles";
 
 const repo = (full_name: string, used: { id: string; name: string }[] = [], extra: object = {}) =>

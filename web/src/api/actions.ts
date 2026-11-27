@@ -142,13 +142,13 @@ export const servers = {
     unwrap(client.PUT("/api/projects/{pid}/servers", { params: { path: { pid } }, body: { servers: list } })) as Promise<ProjectServersView>,
 };
 
-/** The user's JuiceFS shared folder (one volume per user). */
 /** My own memory: every project of mine reads it (MEMORY.md + topic files). */
 export const userMemory = {
   put: (name: string, body: S["MemoryBody"]) => unwrap(client.PUT("/api/me/memory/{name}", { params: { path: { name } }, body })),
   remove: (name: string) => unwrap(client.DELETE("/api/me/memory/{name}", { params: { path: { name } } })),
 };
 
+/** The user's JuiceFS shared folder (one volume per user). */
 export const sharedFolder = {
   enable: () => unwrap(client.POST("/api/storage/fs")),
   dockerVolume: () => unwrap(client.POST("/api/storage/fs/docker-volume")),

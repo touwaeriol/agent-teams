@@ -20,7 +20,8 @@ export const MANAGED_FOLDER = ".deliverables";
 export const isManaged = (e: Pick<FileEntry, "dir" | "path">) => e.dir && e.path === MANAGED_FOLDER;
 
 /** The text of the link to the shared folder setting, by the volume's state. */
-export function folderLinkText(view: Pick<FsView, "volume"> | null | undefined): string {
+export function folderLinkText(view: Pick<FsView, "volume" | "configured"> | null | undefined): string {
+  if (view?.configured === false) return "去查看"; // the console has no shared folders
   const state = view?.volume?.state;
   if (state === "error") return "开通失败，去重试";
   if (state === "provisioning") return "正在开通，去查看";
