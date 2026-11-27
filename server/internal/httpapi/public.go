@@ -50,7 +50,7 @@ func (s *Server) fallback(c *gin.Context) {
 
 // installNode renders install-node.sh with the console URL and the current daemon release.
 func (s *Server) installNode(w http.ResponseWriter, r *http.Request) {
-	script := renderInstallScript(s.cfg.PublicURL, s.currentRelease(r.Context()))
+	script := renderInstallScript(s.cfg.NodeConsole(), s.currentRelease(r.Context()))
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = io.WriteString(w, script)

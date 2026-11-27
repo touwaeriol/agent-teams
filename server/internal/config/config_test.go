@@ -79,3 +79,28 @@ func TestArtifactOrigin(t *testing.T) {
 		t.Fatalf("unset %q %v", cfg.ArtifactOrigin, err)
 	}
 }
+
+// TestNodeURL: AGENT_TEAMS_NODE_URL overrides the console address given to daemons; unset = public URL.
+func TestNodeURL(t *testing.T) {
+	base := map[string]string{"DATABASE_URL": "postgres://x", "PUBLIC_URL": "https://agent.example.com"}
+	with := func(v string) map[string]string {
+		m := map[string]string{"AGENT_TEAMS_NODE_URL": v}
+		for k, x := range base {
+			m[k] = x
+		}
+		return m
+	}
+	cfg, err := Load(env(base))
+	if err != nil || cfg.NodeConsole() != "https://agent.example.com" {
+		t.Fatalf("unset: %q %v", cfg.NodeConsole(), err)
+	}
+	cfg, err = Load(env(with("https://agent-backend.example.com/")))
+	if err != nil || cfg.NodeConsole() != "https://agent-backend.example.com" || cfg.PublicURL != "https://agent.example.com" {
+		t.Fatalf("set: node %q public %q %v", cfg.NodeConsole(), cfg.PublicURL, err)
+	}
+	for _, bad := range []string{"agent-backend.example.com", "ftp://x", "https://", "https://x?a=1"} {
+		if _, err := Load(env(with(bad))); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+}
