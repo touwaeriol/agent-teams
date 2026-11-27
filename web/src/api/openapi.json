@@ -2451,6 +2451,26 @@
         ],
         "type": "object"
       },
+      "FsUsageView": {
+        "additionalProperties": false,
+        "properties": {
+          "inodes": {
+            "description": "Files and folders",
+            "format": "int64",
+            "type": "integer"
+          },
+          "used_bytes": {
+            "description": "Bytes in use (JuiceFS counts in 4 KiB blocks)",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "used_bytes",
+          "inodes"
+        ],
+        "type": "object"
+      },
       "FsView": {
         "additionalProperties": false,
         "properties": {
@@ -2465,6 +2485,10 @@
           "shared_dir": {
             "description": "The folder every project of the user shares",
             "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/FsUsageView",
+            "description": "What the ready volume holds; absent before it is ready or when the metadata cannot be read"
           },
           "volume": {
             "$ref": "#/components/schemas/FsVolumeView",

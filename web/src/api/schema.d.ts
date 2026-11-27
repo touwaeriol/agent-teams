@@ -3357,6 +3357,18 @@ export interface components {
             /** @description Host command installing the volume plugin (once per host) */
             plugin: string;
         };
+        FsUsageView: {
+            /**
+             * Format: int64
+             * @description Files and folders
+             */
+            inodes: number;
+            /**
+             * Format: int64
+             * @description Bytes in use (JuiceFS counts in 4 KiB blocks)
+             */
+            used_bytes: number;
+        };
         FsView: {
             /** @description The console has AGENT_TEAMS_FS_* (then every user's folder is switched on by itself) */
             configured: boolean;
@@ -3364,6 +3376,8 @@ export interface components {
             project_dir: string;
             /** @description The folder every project of the user shares */
             shared_dir: string;
+            /** @description What the ready volume holds; absent before it is ready or when the metadata cannot be read */
+            usage?: components["schemas"]["FsUsageView"];
             /** @description Absent until the console has started provisioning it */
             volume?: components["schemas"]["FsVolumeView"];
         };

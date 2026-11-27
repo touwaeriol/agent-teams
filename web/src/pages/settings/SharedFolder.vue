@@ -8,6 +8,7 @@ import { sharedFolder } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useSharedFolder } from "@/api/queries";
 import type { components } from "@/api/schema";
+import { formatBytes } from "@/lib/bytes";
 import Callout from "@/components/common/Callout.vue";
 import Loading from "@/components/common/Loading.vue";
 import Panel from "@/components/common/Panel.vue";
@@ -26,6 +27,14 @@ const view = computed(() => fs.data.value);
 const vol = computed(() => view.value?.volume);
 const state = computed(() => STATE[vol.value?.state ?? ""] ?? null);
 const docker = ref<Docker | null>(null);
+// 已用空间, with the share of the cap when there is one.
+const used = computed(() => {
+  const u = view.value?.usage;
+  if (!u) return "";
+  const cap = vol.value?.capacity_gb ?? 0;
+  const share = cap > 0 ? `，占上限 ${Math.min(100, Math.round((u.used_bytes / (cap * 2 ** 30)) * 100))}%` : "";
+  return `${formatBytes(u.used_bytes)}（${u.inodes.toLocaleString("zh-CN")} 个文件和文件夹${share}）`;
+});
 
 const retry = useAction(() => sharedFolder.enable(), { invalidate: [keys.sharedFolder], success: "已重新开始开通" });
 const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker>, { onSuccess: (d) => (docker.value = d) });
@@ -58,6 +67,10 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
             <dl class="grid grid-cols-[110px_1fr] gap-y-2 text-[13px]">
               <dt class="text-muted-foreground">卷名</dt>
               <dd class="font-mono">{{ vol.volume }}</dd>
+              <template v-if="used">
+                <dt class="text-muted-foreground">已用空间</dt>
+                <dd>{{ used }}</dd>
+              </template>
               <dt class="text-muted-foreground">容量上限</dt>
               <dd>{{ vol.capacity_gb > 0 ? `${vol.capacity_gb} GB` : "不限" }}</dd>
               <dt class="text-muted-foreground">项目目录</dt>

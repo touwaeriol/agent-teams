@@ -63,5 +63,14 @@ describe("SharedFolder page", () => {
     expect(w.text()).toContain("at-0123456789abcdef");
     expect(w.text()).toContain("不限");
     expect(w.text()).not.toContain("删除共享文件夹");
+    expect(w.text()).not.toContain("已用空间");
+  });
+
+  it("shows how much the folder holds, against the cap", async () => {
+    api({ ...READY, volume: { ...READY.volume, capacity_gb: 4 }, usage: { used_bytes: 2 ** 30, inodes: 1234 } });
+    const w = mountPage();
+    await flushPromises();
+    expect(w.text()).toContain("已用空间");
+    expect(w.text()).toContain("1,234 个文件和文件夹，占上限 25%");
   });
 });

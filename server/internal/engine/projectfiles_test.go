@@ -82,7 +82,11 @@ func TestProjectFiles(t *testing.T) {
 	}
 
 	fakes := useFolder(t, w)
-	b.must(200, "POST", "/api/storage/fs", nil, nil)
+	var fs orchapi.FsView
+	b.must(200, "POST", "/api/storage/fs", nil, &fs)
+	if fs.Usage == nil || fs.Usage.UsedBytes != 12288 || fs.Usage.Inodes != 4 {
+		t.Fatalf("usage of the ready folder %+v", fs.Usage)
+	}
 	b.must(200, "GET", base, nil, &page)
 	if !page.Available || len(page.Entries) != 0 {
 		t.Fatalf("empty project %+v", page)

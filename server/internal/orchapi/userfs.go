@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"time"
 
@@ -28,12 +29,19 @@ type FsVolumeView struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// FsUsageView is what the user's volume holds.
+type FsUsageView struct {
+	UsedBytes int64 `json:"used_bytes" doc:"Bytes in use (JuiceFS counts in 4 KiB blocks)"`
+	Inodes    int64 `json:"inodes" doc:"Files and folders"`
+}
+
 // FsView is GET /api/storage/fs.
 type FsView struct {
 	Configured bool          `json:"configured" doc:"The console has AGENT_TEAMS_FS_* (then every user's folder is switched on by itself)"`
 	Volume     *FsVolumeView `json:"volume,omitempty" doc:"Absent until the console has started provisioning it"`
 	ProjectDir string        `json:"project_dir" doc:"A project's folder inside the volume, with {project_id}"`
 	SharedDir  string        `json:"shared_dir" doc:"The folder every project of the user shares"`
+	Usage      *FsUsageView  `json:"usage,omitempty" doc:"What the ready volume holds; absent before it is ready or when the metadata cannot be read"`
 }
 
 type fsOutput struct{ Body FsView }
@@ -72,7 +80,20 @@ func (a *API) fsView(ctx context.Context, userID string) (FsView, error) {
 		return v, err
 	}
 	v.Volume = &FsVolumeView{Volume: vol.Volume, State: vol.State, Error: vol.Error, CapacityGB: vol.CapacityGB, CreatedAt: vol.CreatedAt, UpdatedAt: vol.UpdatedAt}
+	if vol.State == userfs.StateReady {
+		v.Usage = a.fsUsage(ctx, userID)
+	}
 	return v, nil
+}
+
+// fsUsage is the volume's counters, or nil when they cannot be read (the page then shows none).
+func (a *API) fsUsage(ctx context.Context, userID string) *FsUsageView {
+	u, err := a.e.FS.Usage(ctx, userID)
+	if err != nil {
+		slog.Warn("shared folder usage", "user_id", userID, "err", err)
+		return nil
+	}
+	return &FsUsageView{UsedBytes: u.UsedBytes, Inodes: u.Inodes}
 }
 
 func (a *API) getUserFs(ctx context.Context, _ *struct{}) (*fsOutput, error) {

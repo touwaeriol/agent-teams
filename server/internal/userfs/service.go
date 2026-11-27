@@ -23,6 +23,15 @@ type Meta interface {
 	// Exists tells whether the role and its schema are both there (a volume whose metadata was
 	// never created, or already dropped, has nothing for juicefs destroy to work on).
 	Exists(ctx context.Context, role string) (bool, error)
+	// Usage reads the volume's space and file counters from its metadata (zero before the volume
+	// was formatted).
+	Usage(ctx context.Context, role string) (Usage, error)
+}
+
+// Usage is what a volume holds: bytes in use (JuiceFS counts in 4 KiB blocks) and files plus folders.
+type Usage struct {
+	UsedBytes int64 `json:"used_bytes"`
+	Inodes    int64 `json:"inodes"`
 }
 
 // IAM creates and removes a volume's object-store account.
@@ -91,6 +100,18 @@ func (s *Service) Enabled() bool {
 // Get returns the user's volume.
 func (s *Service) Get(ctx context.Context, userID string) (Volume, error) {
 	return Get(ctx, s.db, userID)
+}
+
+// Usage is what the user's ready volume holds (ErrNotReady-style errors from Files: not found, not ready).
+func (s *Service) Usage(ctx context.Context, userID string) (Usage, error) {
+	vol, err := s.Get(ctx, userID)
+	if err != nil {
+		return Usage{}, err
+	}
+	if vol.State != StateReady {
+		return Usage{}, nil
+	}
+	return s.meta.Usage(ctx, vol.MetaRole)
 }
 
 // Enable provisions the user's volume (or finishes a provisioning that failed). It returns the

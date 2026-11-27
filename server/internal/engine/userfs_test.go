@@ -28,6 +28,9 @@ type fsFakes struct {
 func (f *fsFakes) Ensure(context.Context, string, string) error { return nil }
 func (f *fsFakes) Drop(context.Context, string) error           { return nil }
 func (f *fsFakes) Exists(context.Context, string) (bool, error) { return true, nil }
+func (f *fsFakes) Usage(context.Context, string) (userfs.Usage, error) {
+	return userfs.Usage{UsedBytes: 12288, Inodes: 4}, nil
+}
 
 type fsIAM struct{}
 
