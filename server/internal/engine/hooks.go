@@ -42,7 +42,7 @@ func (h *Hooks) ProjectDeleting(ctx context.Context, _ string, projectID string)
 }
 
 // ProjectDeleted removes the deleted project's folder (projects/<pid>, its deliverable versions
-// included) from the owner's shared folder; a failure only leaves clutter, so it is logged.
+// included) from the owner's shared folder; a failure is logged and retried by the sweep.
 func (h *Hooks) ProjectDeleted(ctx context.Context, userID, projectID string) {
 	if err := h.e.FS.RemoveProject(ctx, userID, projectID); err != nil {
 		h.e.log.Warn("project folder not removed from the shared folder", "user_id", userID, "project_id", projectID, "err", err)

@@ -60,7 +60,7 @@ func (e *Engine) UseSharedFolder(s *userfs.Service) {
 const fsSweepEvery = time.Minute
 
 // runSharedFolders keeps every user's shared folder on (it is on by default): at start and every
-// fsSweepEvery it provisions the missing ones and moves deliverable versions still kept in the
+// fsSweepEvery it provisions the missing ones, retries failed removals and moves deliverable versions still kept in the
 // database into their owners' folders; beside it, on its own pace, memory and its folders are kept
 // in step. One replica runs both (leader lock).
 func (e *Engine) runSharedFolders(ctx context.Context) {
@@ -88,6 +88,11 @@ func every(ctx context.Context, d time.Duration, f func()) {
 func (e *Engine) sweepSharedFolders(ctx context.Context) {
 	if _, err := e.FS.ProvisionAll(ctx); err != nil {
 		e.log.Warn("shared folders: provisioning sweep", "err", err)
+	}
+	if n, err := e.FS.RetryRemovals(ctx); err != nil {
+		e.log.Warn("shared folders: retrying removals", "err", err)
+	} else if n > 0 {
+		e.log.Info("shared folders: folders left by failed removals removed", "removed", n)
 	}
 	rep, err := e.Core.Artifacts().MoveToVolumes(ctx, e.log)
 	if err != nil {

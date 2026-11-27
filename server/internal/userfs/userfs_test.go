@@ -85,12 +85,17 @@ type fakeVolumes struct {
 	closed    []string
 	opened    []string // metaURL of each Files
 	destroyAt []string // metaURL of each Destroy
+	filesErr  error    // Files fails with it (the volume cannot be reached)
 }
 
 func (f *fakeVolumes) Files(_ context.Context, volume, metaURL, _ string) (Files, error) {
 	f.mu.Lock()
 	f.opened = append(f.opened, metaURL)
+	ferr := f.filesErr
 	f.mu.Unlock()
+	if ferr != nil {
+		return nil, ferr
+	}
 	return DirFiles{Root: filepath.Join(f.root, volume)}, os.MkdirAll(filepath.Join(f.root, volume), 0o755)
 }
 func (f *fakeVolumes) Close(volume string) {

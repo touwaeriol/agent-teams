@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 500 {
+	if migrations.Latest() != 510 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -2132,5 +2132,39 @@ INSERT INTO at_memory_touches (scope, scope_id, name, by) VALUES ('project', 'p1
 	}
 	if _, err := p.UpTo(ctx, 500); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestFsRemovalsMigration: 00510 adds at_fs_removals (one row per user and path, gone with the
+// user); Down drops it.
+func TestFsRemovalsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 510); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x');
+INSERT INTO at_fs_removals (user_id, path) VALUES ('u1', 'projects/p1')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_fs_removals (user_id, path) VALUES ('u1', 'projects/p1')`); err == nil {
+		t.Fatal("duplicate path accepted")
+	}
+	if _, err := db.Exec(`DELETE FROM at_users WHERE id = 'u1'`); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM at_fs_removals`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("rows after user delete %d %v", n, err)
+	}
+	if _, err := p.DownTo(ctx, 500); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT 1 FROM at_fs_removals`); err == nil {
+		t.Fatal("at_fs_removals survived down")
 	}
 }
