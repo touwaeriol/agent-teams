@@ -2,6 +2,7 @@ package memfiles_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -197,14 +198,17 @@ func TestPendingWinsAndRemoving(t *testing.T) {
 		t.Fatal("MEMORY.md not written again")
 	}
 
-	if err := fx.sync.Removing(ctx, fx.scope, "a"); err != nil {
+	if err := fx.sync.Delete(ctx, q, fx.scope, "a", "user"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(fx.dir, "a.md")); !os.IsNotExist(err) {
 		t.Fatal("file not removed")
 	}
-	if err := store.DeleteMemoryFile(ctx, q, fx.scope, "a", "user"); err != nil {
-		t.Fatal(err)
+	if _, err := store.GetMemoryFile(ctx, q, fx.scope, "a.md"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("row kept: %v", err)
+	}
+	if err := fx.sync.Delete(ctx, q, fx.scope, "MEMORY.md", "user"); !store.IsMemoryError(err) {
+		t.Fatalf("deleting MEMORY.md: %v", err)
 	}
 
 	if _, _, err := store.WriteMemoryFile(ctx, q, fx.scope, store.MemoryWrite{Name: "b", Description: "B", Content: "b"}); err != nil {
@@ -220,11 +224,11 @@ func TestPendingWinsAndRemoving(t *testing.T) {
 	if err := fx.sync.Sync(ctx, fx.scope); err != nil || !fx.row(t, "c.md").Pending {
 		t.Fatalf("an unreachable folder: %v", err)
 	}
-	if err := fx.sync.Removing(ctx, fx.scope, "b"); !store.IsMemoryError(err) {
-		t.Fatalf("removing a written-out file without the folder: %v", err)
+	if err := fx.sync.Delete(ctx, q, fx.scope, "b", "user"); !store.IsMemoryError(err) {
+		t.Fatalf("deleting a written-out file without the folder: %v", err)
 	}
-	if err := fx.sync.Removing(ctx, fx.scope, "c"); err != nil {
-		t.Fatalf("removing a file never written out: %v", err)
+	if err := fx.sync.Delete(ctx, q, fx.scope, "c", "user"); err != nil {
+		t.Fatalf("deleting a file never written out: %v", err)
 	}
 }
 
@@ -266,5 +270,56 @@ func TestParseRender(t *testing.T) {
 	}
 	if p := memfiles.Parse("z.md", []byte("\ufeff---\r\ndescription: d\r\n---\r\nbody\r\n")); p.Description != "d" || p.Content != "body" {
 		t.Fatalf("CRLF %+v", p)
+	}
+}
+
+// TestFullIndexDoesNotStopSync: a new topic file whose line no longer fits a full MEMORY.md is
+// left out (logged), and the rest of the scope still syncs: pending rows are written out.
+func TestFullIndexDoesNotStopSync(t *testing.T) {
+	fx := newFixture(t)
+	ctx, q := fx.ctx, fx.s.Pool
+	if _, _, err := store.WriteMemoryFile(ctx, q, fx.scope, store.MemoryWrite{Name: "a", Description: "A", Content: "a", By: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.sync.Sync(ctx, fx.scope); err != nil {
+		t.Fatal(err)
+	}
+	fx.edit(t, store.MemoryIndex, strings.Repeat("x", store.MemoryContentMax), 2*time.Second)
+	fx.edit(t, "extra.md", "---\ndescription: 放不下\n---\n\nbody\n", 2*time.Second)
+	if _, err := store.Exec(ctx, q, `UPDATE at_memory_files SET content = 'z', pending = true WHERE name = 'a.md'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.sync.Sync(ctx, fx.scope); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetMemoryFile(ctx, q, fx.scope, "extra.md"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a file with no room in MEMORY.md was taken: %v", err)
+	}
+	if !strings.HasSuffix(fx.file(t, "a.md"), "\nz\n") || fx.row(t, "a.md").Pending {
+		t.Fatal("the pending row was not written out")
+	}
+}
+
+// TestIndexReadBackNotRewritten: MEMORY.md read back from the folder (no final newline) keeps its
+// node author when a topic import leaves its line as it was.
+func TestIndexReadBackNotRewritten(t *testing.T) {
+	fx := newFixture(t)
+	ctx, q := fx.ctx, fx.s.Pool
+	if _, _, err := store.WriteMemoryFile(ctx, q, fx.scope, store.MemoryWrite{Name: "a", Description: "A", Content: "a", By: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.sync.Sync(ctx, fx.scope); err != nil {
+		t.Fatal(err)
+	}
+	fx.edit(t, store.MemoryIndex, fx.file(t, store.MemoryIndex)+"- 手写的一行\n", 2*time.Second)
+	if err := fx.sync.Sync(ctx, fx.scope); err != nil {
+		t.Fatal(err)
+	}
+	fx.edit(t, "a.md", "---\ndescription: A\n---\n\nchanged\n", 4*time.Second)
+	if err := fx.sync.Sync(ctx, fx.scope); err != nil {
+		t.Fatal(err)
+	}
+	if r := fx.row(t, store.MemoryIndex); r.UpdatedBy != memfiles.ByNode || r.Pending {
+		t.Fatalf("MEMORY.md rewritten: by %q pending %v", r.UpdatedBy, r.Pending)
 	}
 }

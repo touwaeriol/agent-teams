@@ -5221,7 +5221,8 @@ type MemoryWriteInput struct {
 	// Scope corresponds to the JSON schema field "scope".
 	Scope *MemoryScope `json:"scope,omitempty,omitzero"`
 
-	// Optional kind of a topic file (written into its frontmatter).
+	// Optional kind of a topic file, written into its frontmatter (what the note is
+	// about, not where it is stored: that is scope).
 	Type *MemoryWriteInputType `json:"type,omitempty,omitzero"`
 }
 

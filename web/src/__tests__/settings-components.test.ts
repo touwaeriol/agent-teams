@@ -494,7 +494,7 @@ describe("Project settings · 记忆", () => {
   });
 
   it("opens a file, edits it and saves through PUT; deletes a topic file", async () => {
-    const file = { name: "testing.md", description: "怎么跑测试", content: "# 测试\nmake test", updated_by: "lead-1 · #2", updated_at: new Date().toISOString(), created_at: "" };
+    const file = { name: "testing.md", description: "怎么跑测试", type: "project", content: "# 测试\nmake test", updated_by: "lead-1 · #2", updated_at: new Date().toISOString(), created_at: "" };
     const spy = api([
       ["GET", /\/memory$/, [brief("MEMORY.md"), brief("testing.md", "怎么跑测试")]],
       ["GET", /\/memory\/testing\.md$/, file],
@@ -515,7 +515,7 @@ describe("Project settings · 记忆", () => {
     await flushPromises();
     [...document.body.querySelectorAll<HTMLButtonElement>(".el-dialog button")].find((b) => b.textContent?.trim() === "保存")!.click();
     await flushPromises();
-    expect(await calls(spy, "PUT", /\/memory\/testing\.md$/)[0].json()).toEqual({ description: "怎么跑测试", content: "用 docker 跑 make test" });
+    expect(await calls(spy, "PUT", /\/memory\/testing\.md$/)[0].json()).toEqual({ description: "怎么跑测试", content: "用 docker 跑 make test", type: "project" });
     await w.get("[aria-label='打开 testing.md']").trigger("click");
     await flushPromises();
     [...document.body.querySelectorAll<HTMLButtonElement>(".el-dialog button")].find((b) => b.textContent?.includes("删除"))!.click();
@@ -541,7 +541,7 @@ describe("Project settings · 记忆", () => {
     await flushPromises();
     [...document.body.querySelectorAll<HTMLButtonElement>(".el-dialog button")].find((b) => b.textContent?.trim() === "保存")!.click();
     await flushPromises();
-    expect(await calls(spy, "PUT", /\/api\/me\/memory\/MEMORY\.md$/)[0].json()).toEqual({ description: "", content: "- 回复用中文" });
+    expect(await calls(spy, "PUT", /\/api\/me\/memory\/MEMORY\.md$/)[0].json()).toEqual({ description: "", content: "- 回复用中文", type: "" });
   });
 
   it("shows 暂无其他文件 when only MEMORY.md exists", async () => {

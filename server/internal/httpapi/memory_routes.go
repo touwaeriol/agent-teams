@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -45,9 +44,6 @@ type userMemoryPutInput struct {
 	Name string `path:"name" maxLength:"100"`
 	Body memoryBody
 }
-
-// writeKick is how soon a write through the page is written into the shared folder.
-const writeKick = 200 * time.Millisecond
 
 func (s *Server) registerMemory(api huma.API) {
 	tags := []string{"projects"}
@@ -97,7 +93,7 @@ func (s *Server) userMemory(ctx context.Context) (store.MemoryScope, error) {
 // memoryList reads the folder first (an edit on a node shows at once); a folder out of reach
 // leaves the cached rows.
 func (s *Server) memoryList(ctx context.Context, sc store.MemoryScope) (*memoryListOutput, error) {
-	if err := s.hooks.MemoryFiles().Sync(ctx, sc); err != nil {
+	if err := s.memory.Sync(ctx, sc); err != nil {
 		s.log.Warn("memory folder not read", "scope", sc.Kind, "id", sc.ID, "err", err)
 	}
 	files, err := store.ListMemoryFiles(ctx, s.store.Pool, sc)
@@ -118,27 +114,28 @@ func (s *Server) memoryPut(ctx context.Context, sc store.MemoryScope, name strin
 	if err != nil {
 		return nil, memoryErr(err)
 	}
-	s.hooks.MemoryFiles().Kick(sc, writeKick)
+	s.memory.Changed(sc)
 	s.memoryEvent(ctx, sc, "write", f.Name)
 	return &memoryFileOutput{Body: f}, nil
 }
 
 func (s *Server) memoryDelete(ctx context.Context, sc store.MemoryScope, name string) error {
-	if err := s.hooks.MemoryFiles().Removing(ctx, sc, name); err != nil {
+	if err := s.memory.Delete(ctx, s.store.Pool, sc, name, "user"); err != nil {
 		return memoryErr(err)
 	}
-	if err := store.DeleteMemoryFile(ctx, s.store.Pool, sc, name, "user"); err != nil {
-		return memoryErr(err)
-	}
-	s.hooks.MemoryFiles().Kick(sc, writeKick)
+	s.memory.Changed(sc) // MEMORY.md lost the file's line
 	s.memoryEvent(ctx, sc, "delete", name)
 	return nil
 }
 
+// memoryEvent refreshes the pages showing the scope's memory: the project's, or the user's own.
 func (s *Server) memoryEvent(ctx context.Context, sc store.MemoryScope, op, name string) {
-	if sc.Kind == store.MemoryProject {
-		s.events.Project(ctx, sc.ID, "memory", map[string]any{"op": op, "name": name})
+	payload := map[string]any{"op": op, "name": name}
+	if sc.Kind == store.MemoryUser {
+		s.events.User(ctx, sc.ID, "memory", payload)
+		return
 	}
+	s.events.Project(ctx, sc.ID, "memory", payload)
 }
 
 func (s *Server) listMemory(ctx context.Context, in *projectIDInput) (*memoryListOutput, error) {

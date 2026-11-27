@@ -148,7 +148,7 @@ func TestAutoApproveAnyNode(t *testing.T) {
 // like a project's and takes a type.
 func TestUserMemory(t *testing.T) {
 	h := newHarness(t)
-	c, _ := h.signUp("a@example.com")
+	c, me := h.signUp("a@example.com")
 	other, _ := h.signUp("b@example.com")
 	var f struct {
 		Name, Type, Content string
@@ -156,6 +156,9 @@ func TestUserMemory(t *testing.T) {
 	c.must(200, "PUT", "/api/me/memory/style", map[string]string{"description": "写作风格", "type": "feedback", "content": "简洁"}, &f)
 	if f.Name != "style.md" || f.Type != "feedback" {
 		t.Fatalf("file %+v", f)
+	}
+	if !h.events.has("user:" + me.ID + ":memory") {
+		t.Fatal("my memory pages not refreshed")
 	}
 	c.must(200, "GET", "/api/me/memory/MEMORY.md", nil, &f)
 	if !strings.HasPrefix(f.Content, "# 用户记忆\n") || !strings.Contains(f.Content, "- [style.md](style.md) — 写作风格") {

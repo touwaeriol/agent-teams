@@ -1,8 +1,6 @@
 package memfiles
 
 import (
-	"bytes"
-	"io"
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -93,5 +91,3 @@ func unquote(v string) string {
 	}
 	return v
 }
-
-func bytesReader(b []byte) io.Reader { return bytes.NewReader(b) }

@@ -83,9 +83,10 @@ describe("paths", () => {
     expect(isManaged(folder(".deliverables"))).toBe(true);
     expect(isManaged(folder("data/.deliverables"))).toBe(false);
     expect(isManaged(entry(".deliverables"))).toBe(false);
-    const vol = (state: string) => ({ volume: { state } as never });
+    const vol = (state: string) => ({ configured: true, volume: { state } as never });
     expect(folderLinkText(undefined)).toBe("正在开通，去查看");
-    expect(folderLinkText({})).toBe("正在开通，去查看");
+    expect(folderLinkText({ configured: true })).toBe("正在开通，去查看");
+    expect(folderLinkText({ configured: false })).toBe("去查看");
     expect(folderLinkText(vol("error"))).toContain("重试");
     expect(folderLinkText(vol("provisioning"))).toContain("正在开通");
   });

@@ -56,9 +56,9 @@ type Store struct {
 	// set once while the engine is built (engine.New → UseSharedFolder), before anything serves, and
 	// only read afterwards.
 	Volume artifacts.Volume
-	// Memory keeps auto memory in the owners' shared folders (store.NoMemoryFiles: rows only); set
+	// Memory keeps auto memory in the owners' shared folders (NoMemoryFiles: rows only); set
 	// with Volume.
-	Memory store.MemoryFiles
+	Memory MemoryFiles
 }
 
 // Artifacts is where deliverable versions are stored and read.
@@ -68,7 +68,7 @@ func (s *Store) Artifacts() artifacts.Store {
 
 // New returns a Store; pub may be nil (no realtime hints).
 func New(pool *store.Pool, pub Publisher) *Store {
-	return &Store{Pool: pool, Pub: pub, Online: func(string) bool { return false }, Blobs: blobstore.None{}, Memory: store.NoMemoryFiles{}}
+	return &Store{Pool: pool, Pub: pub, Online: func(string) bool { return false }, Blobs: blobstore.None{}, Memory: NoMemoryFiles{}}
 }
 
 // Tx is one transaction plus what to do after it commits.

@@ -3,15 +3,14 @@
 // project reads it). Files open in MemoryFileDialog to read, edit or delete.
 import { Plus } from "lucide-vue-next";
 import { computed, ref } from "vue";
-import { useMemory, useUserMemory } from "@/api/queries";
 import Loading from "@/components/common/Loading.vue";
 import { timeAgo } from "@/lib/utils";
-import { MEMORY_INDEX, memoryWriter, splitMemory } from "./logic";
+import { MEMORY_INDEX, memorySource, memoryWriter, splitMemory } from "./memory";
 import MemoryFileDialog from "./MemoryFileDialog.vue";
 
+// The source is picked once: key the component by pid where the pid can change.
 const props = defineProps<{ pid: string | null; label: string; heading: string }>();
-const pid = props.pid;
-const memory = pid ? useMemory(() => pid) : useUserMemory();
+const memory = memorySource(props.pid).useList();
 const split = computed(() => splitMemory(memory.data.value));
 /** The open dialog: a file name, "" for a new file, null when closed. */
 const opened = ref<string | null>(null);
@@ -19,6 +18,7 @@ const ROW = "flex w-full items-center gap-3 border-b px-1 py-3 text-left text-[1
 </script>
 
 <template>
+  <div class="flex flex-col">
   <Loading v-if="memory.isLoading.value" />
   <template v-else>
     <span class="pb-1 pt-4 text-[13px] font-medium">{{ heading }}</span>
@@ -40,5 +40,6 @@ const ROW = "flex w-full items-center gap-3 border-b px-1 py-3 text-left text-[1
       </button>
     </div>
   </template>
-  <MemoryFileDialog v-if="opened !== null" :pid="pid" :name="opened" @close="opened = null" />
+  <MemoryFileDialog v-if="opened !== null" :pid="props.pid" :name="opened" @close="opened = null" />
+  </div>
 </template>

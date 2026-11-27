@@ -47,11 +47,15 @@ func (o *Orchestrator) checkOpened(ctx context.Context, tx *core.Tx, e core.Empl
 	if m.Init != nil {
 		tools = m.Init.Tools
 	}
-	if ok, bad := ToolsAllowed(e, tools); !ok {
+	memoryFiles, err := MemoryFilesOn(ctx, tx, s)
+	if err != nil {
+		return err
+	}
+	if ok, bad := ToolsAllowed(e, tools, memoryFiles); !ok {
 		return o.policyViolation(ctx, tx, e, s, bad)
 	}
 	o.touch(tx, e.ID, "session.opened")
-	_, err := o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionRelease,
+	_, err = o.gw.Enqueue(ctx, tx, *s.NodeID, nodegw.Command{Type: protocol.TypeSessionRelease,
 		Body:      protocol.SessionRelease{SessionID: protocol.SessionID(s.ID), OpenGen: protocol.OpenGen(s.OpenGen)},
 		SessionID: s.ID, OpenGen: s.OpenGen})
 	return err

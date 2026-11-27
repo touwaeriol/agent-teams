@@ -1,27 +1,6 @@
-// 项目设置 dialog helpers (pure): memory files, approval wording, lead timeouts, usage rows.
-import type { MemoryBrief, ProjectView, ProjectUsage } from "@/api/views";
+// 项目设置 dialog helpers (pure): approval wording, lead timeouts, usage rows.
+import type { ProjectView, ProjectUsage } from "@/api/views";
 import type { RepoRef } from "@/components/app/repo/repo";
-
-export const MEMORY_INDEX = "MEMORY.md";
-
-/** MEMORY.md (when it exists) and the topic files, as the 记忆 section shows them. */
-export function splitMemory(list: MemoryBrief[] | null | undefined): { index?: MemoryBrief; files: MemoryBrief[] } {
-  const all = list ?? [];
-  return { index: all.find((f) => f.name === MEMORY_INDEX), files: all.filter((f) => f.name !== MEMORY_INDEX) };
-}
-
-const WRITERS: Record<string, string> = { user: "你", platform: "平台", coordinator: "统筹" };
-
-/** Who last wrote a memory file: 你 / 平台 / 统筹 / lead-1 · #3. */
-export function memoryWriter(by: string): string {
-  return WRITERS[by] ?? by;
-}
-
-/** A new file's name as the server stores it: trimmed, ".md" added. */
-export function memoryFileName(name: string): string {
-  const n = name.trim();
-  return !n || n.toLowerCase().endsWith(".md") ? n : `${n}.md`;
-}
 
 export const APPROVAL_ROUTING_DESC: Record<string, string> = {
   lead_first: "成员的权限请求先交给讨论串的组长：放行、拒绝，或拿不准时转给你。组长自己的请求总是问你。",

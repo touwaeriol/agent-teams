@@ -14,11 +14,8 @@ import (
 
 // Auto memory tools (architecture.md §6.7): memory_list / memory_read for everyone, memory_write /
 // memory_edit / memory_delete for the coordinator and leads, remember as a MEMORY.md shortcut.
-// scope user is the user's own memory (every project of the user reads it). With the shared folder on, a change lands in the rows and is written into the
-// folder right after the call (writeKick).
-
-// writeKick is how soon a change through the tools is written into the shared folder.
-const writeKick = time.Second
+// scope user is the user's own memory (every project of the user reads it). With the shared
+// folder on, a change lands in the rows and is written into the folder right after the call.
 
 // author names the writer: "coordinator", or "lead-1 · #3" inside a thread.
 func author(c *call) string {
@@ -41,24 +38,18 @@ func memoryResult(err error, ok func() Result) (Result, error) {
 	return Result{}, err
 }
 
-// memoryScope is the scope a call names (the project's by default).
-func (s *Service) memoryScope(ctx context.Context, tx *core.Tx, c *call, scope *protocol.MemoryScope) (store.MemoryScope, error) {
-	if scope == nil || *scope != protocol.MemoryScopeUser {
-		return store.ProjectMemory(c.emp().ProjectID), nil
+// memoryScope is the scope a call names: the project's by default, or its owner's own.
+func memoryScope(c *call, scope *protocol.MemoryScope) store.MemoryScope {
+	if scope != nil && *scope == protocol.MemoryScopeUser {
+		return store.UserMemory(c.sc.OwnerID)
 	}
-	userID, err := store.MemoryOwner(ctx, tx, store.ProjectMemory(c.emp().ProjectID))
-	return store.UserMemory(userID), err
+	return store.ProjectMemory(c.emp().ProjectID)
 }
 
-// changed reports a change: an event for a project's memory, and the folder written out after
-// the transaction.
+// changed announces a change and has the folder written out after the transaction.
 func (s *Service) changed(ctx context.Context, tx *core.Tx, sc store.MemoryScope, actor, op, name string) error {
-	tx.AfterCommit(func(context.Context) { s.core.Memory.Kick(sc, writeKick) })
-	if sc.Kind != store.MemoryProject {
-		return nil
-	}
-	_, err := tx.Emit(ctx, sc.ID, nil, core.EvMemory, actor, map[string]any{"op": op, "name": name})
-	return err
+	tx.AfterCommit(func(context.Context) { s.core.Memory.Changed(sc) })
+	return tx.EmitMemory(ctx, sc, actor, op, name)
 }
 
 func (s *Service) memoryList(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
@@ -66,10 +57,7 @@ func (s *Service) memoryList(ctx context.Context, tx *core.Tx, c *call) (Result,
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
-	if err != nil {
-		return Result{}, err
-	}
+	sc := memoryScope(c, in.Scope)
 	files, err := store.ListMemoryFiles(ctx, tx, sc)
 	if err != nil {
 		return Result{}, err
@@ -92,10 +80,7 @@ func (s *Service) memoryRead(ctx context.Context, tx *core.Tx, c *call) (Result,
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
-	if err != nil {
-		return Result{}, err
-	}
+	sc := memoryScope(c, in.Scope)
 	f, err := store.GetMemoryFile(ctx, tx, sc, in.Name)
 	return memoryResult(err, func() Result {
 		text := f.Content
@@ -112,10 +97,7 @@ func (s *Service) memoryWrite(ctx context.Context, tx *core.Tx, c *call) (Result
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
-	if err != nil {
-		return memoryResult(err, nil)
-	}
+	sc := memoryScope(c, in.Scope)
 	w := store.MemoryWrite{Name: in.Name, Description: deref(in.Description), Content: in.Content, By: author(c)}
 	if in.Type != nil {
 		w.Type = string(*in.Type)
@@ -139,10 +121,7 @@ func (s *Service) memoryEdit(ctx context.Context, tx *core.Tx, c *call) (Result,
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
-	if err != nil {
-		return memoryResult(err, nil)
-	}
+	sc := memoryScope(c, in.Scope)
 	f, err := store.GetMemoryFile(ctx, tx, sc, in.Name)
 	if err != nil {
 		return memoryResult(err, nil)
@@ -178,14 +157,8 @@ func (s *Service) memoryDelete(ctx context.Context, tx *core.Tx, c *call) (Resul
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
-	if err != nil {
-		return memoryResult(err, nil)
-	}
-	if err := s.core.Memory.Removing(ctx, sc, in.Name); err != nil {
-		return memoryResult(err, nil)
-	}
-	err = store.DeleteMemoryFile(ctx, tx, sc, in.Name, author(c))
+	sc := memoryScope(c, in.Scope)
+	err := s.core.Memory.Delete(ctx, tx, sc, in.Name, author(c))
 	if err == nil {
 		err = s.changed(ctx, tx, sc, c.emp().Name, "delete", in.Name)
 	}
@@ -198,11 +171,8 @@ func (s *Service) remember(ctx context.Context, tx *core.Tx, c *call) (Result, e
 	if err := c.decode(&in); err != nil {
 		return Result{}, err
 	}
-	sc, err := s.memoryScope(ctx, tx, c, in.Scope)
-	if err != nil {
-		return memoryResult(err, nil)
-	}
-	err = store.AppendMemoryNote(ctx, tx, sc, in.Text, author(c))
+	sc := memoryScope(c, in.Scope)
+	err := store.AppendMemoryNote(ctx, tx, sc, in.Text, author(c))
 	if err == nil {
 		err = s.changed(ctx, tx, sc, c.emp().Name, "write", store.MemoryIndex)
 	}

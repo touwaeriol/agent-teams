@@ -366,10 +366,12 @@ export const useSharedFolder = (enabled: Arg<boolean> = true) =>
     queryKey: keys.sharedFolder,
     enabled: computed(() => toValue(enabled)),
     queryFn: () => unwrap(client.GET("/api/storage/fs")),
-    // On by default: while the console is still provisioning it (no volume yet, or provisioning), poll.
+    // On by default: while the folder is changing (no volume yet, provisioning, deleting), poll;
+    // every 2 s for the first two minutes, then every 30 s (the console retries every 10 minutes).
     refetchInterval: (q) => {
       const d = q.state.data;
-      return d?.configured && (!d.volume || d.volume.state === "provisioning" || d.volume.state === "deleting") ? 2000 : false;
+      const changing = d?.configured && (!d.volume || d.volume.state === "provisioning" || d.volume.state === "deleting");
+      return changing ? (q.state.dataUpdateCount < 60 ? 2000 : 30_000) : false;
     },
   });
 

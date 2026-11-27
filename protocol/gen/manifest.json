@@ -1219,7 +1219,8 @@
             "enum": [
               "project",
               "user"
-            ]
+            ],
+            "default": "project"
           }
         }
       }
@@ -1269,7 +1270,8 @@
             "enum": [
               "project",
               "user"
-            ]
+            ],
+            "default": "project"
           }
         }
       }
@@ -1297,7 +1299,8 @@
             "enum": [
               "project",
               "user"
-            ]
+            ],
+            "default": "project"
           }
         }
       }
@@ -1333,7 +1336,8 @@
             "enum": [
               "project",
               "user"
-            ]
+            ],
+            "default": "project"
           }
         }
       }
@@ -1377,10 +1381,11 @@
             "enum": [
               "project",
               "user"
-            ]
+            ],
+            "default": "project"
           },
           "type": {
-            "description": "Optional kind of a topic file (written into its frontmatter).",
+            "description": "Optional kind of a topic file, written into its frontmatter (what the note is about, not where it is stored: that is scope).",
             "type": "string",
             "enum": [
               "project",
@@ -1876,7 +1881,8 @@
             "enum": [
               "project",
               "user"
-            ]
+            ],
+            "default": "project"
           }
         }
       }

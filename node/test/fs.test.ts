@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SharedFs, platformKey, type SharedFsOptions } from "../src/fs/shared.js";
-import { linkSharedDirs, safeAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs } from "../src/fs/session.js";
+import { ensureMemoryDirs, linkSharedDirs, memoryFolderPrompt, safeAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs } from "../src/fs/session.js";
 import type { FsMount, FsStatus, SessionOpen } from "../src/protocol.js";
 import { claudeOpen, startHarness, type Harness } from "./helpers/daemon.js";
 import { silentLogger } from "../src/util/log.js";
@@ -263,6 +263,17 @@ describe("sharedFolderPrompt", () => {
   });
 });
 
+describe("memory directories", () => {
+  it("are created under the project's and the user's folder and named in the coordinator's prompt", () => {
+    const vol = tmp();
+    const dirs = { project: join(vol, "projects/p1"), shared: join(vol, "shared") };
+    expect(ensureMemoryDirs(dirs)).toEqual([join(vol, "projects/p1/.memory"), join(vol, "shared/.memory")]);
+    expect(existsSync(join(vol, "shared/.memory"))).toBe(true);
+    const p = memoryFolderPrompt(dirs);
+    for (const s of [".project-files/.memory/", ".user-files/.memory/", join(vol, "shared/.memory"), "nowhere else"]) expect(p).toContain(s);
+  });
+});
+
 describe("daemon shared folder", () => {
   let h: Harness;
   afterEach(async () => {
@@ -295,5 +306,34 @@ describe("daemon shared folder", () => {
     h.console.command("session.open", claudeOpen("s_F", 2));
     await h.console.waitType("session.opened", (b) => b.session_id === "s_F" && b.open_gen === 2);
     for (const name of [".project-files", ".user-files", ".attachments"]) expect(existsSync(join(o.cwd!, name))).toBe(false);
+  });
+
+  it("gives a coordinator with memory_files only the memory directories, and none without it", async () => {
+    const ext = tmp();
+    writeFileSync(join(ext, ".config"), "{}");
+    mkdirSync(join(ext, "shared"));
+    h = await startHarness({ fsDir: ext });
+    await h.console.waitType("fs.status");
+    const coordinator = (id: string, memory: boolean) =>
+      claudeOpen(id, 1, {
+        employee: { name: "coordinator", role: "coordinator", tier: "coordinator", project_id: "p1" },
+        cwd: `projects/p1/${id}`,
+        fs: { project: "projects/p1", shared: "shared" },
+        claude: { model: "claude-opus-5-5", tools: [], allowed_tools: ["mcp__platform__*"], permission_mode: "default", setting_sources: [], memory_files: memory },
+      });
+
+    h.console.command("session.open", coordinator("s_C", true));
+    await h.console.waitType("session.opened", (b) => b.session_id === "s_C");
+    const o = h.log.options.at(-1)!;
+    expect(o.additionalDirectories).toEqual([join(ext, "projects/p1/.memory"), join(ext, "shared/.memory")]);
+    expect(o.env?.AGENT_TEAMS_PROJECT_DIR).toBeUndefined();
+    expect(JSON.stringify(o.systemPrompt)).toContain("## Memory files");
+    expect(readlinkSync(join(o.cwd!, ".project-files"))).toBe(join(ext, "projects/p1"));
+
+    h.console.command("session.open", coordinator("s_D", false));
+    await h.console.waitType("session.opened", (b) => b.session_id === "s_D");
+    const d = h.log.options.at(-1)!;
+    expect(d.additionalDirectories).toBeUndefined();
+    expect(existsSync(join(d.cwd!, ".project-files"))).toBe(false);
   });
 });

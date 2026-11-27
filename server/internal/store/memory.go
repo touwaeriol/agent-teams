@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,9 +17,8 @@ import (
 // Auto memory (architecture.md §6.7): MEMORY.md is the index every session reads at start; topic
 // files (name, description, content) are read on demand. Writing a topic file keeps its line
 // "- [name](name) — description" in MEMORY.md, deleting it drops the line. A scope is a project's
-// memory or the user's own (every project of the user reads it). With the shared folder on, the
-// files in the owner's folder are the source and these rows their cache (memfiles keeps the two in
-// step): a write here marks the row pending until it is in the folder.
+// memory or the user's own (every project of the user reads it). A write marks the row pending
+// until something else (memfiles) has stored it elsewhere.
 
 // MemoryIndex is the index file's name.
 const MemoryIndex = "MEMORY.md"
@@ -51,26 +51,15 @@ func ProjectMemory(projectID string) MemoryScope {
 // UserMemory is the user's own memory, read by every project of the user.
 func UserMemory(userID string) MemoryScope { return MemoryScope{Kind: MemoryUser, ID: userID} }
 
-func (s MemoryScope) table() string {
-	if s.Kind == MemoryUser {
-		return "at_user_memory_files"
-	}
-	return "at_memory_files"
+// memoryScopes is each scope kind's table, owner column and MEMORY.md heading.
+var memoryScopes = map[string]struct{ table, key, heading string }{
+	MemoryProject: {"at_memory_files", "project_id", "# 项目记忆\n"},
+	MemoryUser:    {"at_user_memory_files", "user_id", "# 用户记忆\n"},
 }
 
-func (s MemoryScope) key() string {
-	if s.Kind == MemoryUser {
-		return "user_id"
-	}
-	return "project_id"
-}
-
-func (s MemoryScope) heading() string {
-	if s.Kind == MemoryUser {
-		return "# 用户记忆\n"
-	}
-	return "# 项目记忆\n"
-}
+func (s MemoryScope) table() string   { return memoryScopes[s.Kind].table }
+func (s MemoryScope) key() string     { return memoryScopes[s.Kind].key }
+func (s MemoryScope) heading() string { return memoryScopes[s.Kind].heading }
 
 // MemoryFile is a memory file (a row of at_memory_files or at_user_memory_files).
 type MemoryFile struct {
@@ -133,18 +122,25 @@ func MemoryName(name string) (string, error) {
 	return name, nil
 }
 
-// MemoryTypes are the kinds a topic file may name (empty: none).
-var MemoryTypes = []string{"project", "feedback", "reference", "user"}
+// memoryTypes are the kinds a topic file may name (empty: none).
+var memoryTypes = []string{"project", "feedback", "reference", "user"}
 
-// MemoryType normalizes a kind: one of MemoryTypes, anything else is dropped.
+// MemoryType normalizes a kind: one of memoryTypes, anything else is dropped.
 func MemoryType(t string) string {
 	t = strings.ToLower(strings.TrimSpace(t))
-	for _, k := range MemoryTypes {
-		if t == k {
-			return t
-		}
+	if slices.Contains(memoryTypes, t) {
+		return t
 	}
 	return ""
+}
+
+// normalizeMemory is a file's description and type as stored: one line, a known kind, neither
+// for MEMORY.md.
+func normalizeMemory(name, desc, typ string) (string, string) {
+	if name == MemoryIndex {
+		return "", ""
+	}
+	return oneLine(desc), MemoryType(typ)
 }
 
 func memoryRows(ctx context.Context, q DB, s MemoryScope) *gorm.DB {
@@ -181,11 +177,7 @@ func WriteMemoryFile(ctx context.Context, q DB, s MemoryScope, w MemoryWrite) (f
 	if w.Name, err = MemoryName(w.Name); err != nil {
 		return f, false, err
 	}
-	w.Description = strings.Join(strings.Fields(w.Description), " ")
-	w.Type = MemoryType(w.Type)
-	if w.Name == MemoryIndex {
-		w.Description, w.Type = "", ""
-	}
+	w.Description, w.Type = normalizeMemory(w.Name, w.Description, w.Type)
 	if err := checkMemoryWrite(w); err != nil {
 		return f, false, err
 	}
@@ -221,33 +213,33 @@ func checkMemoryWrite(w MemoryWrite) error {
 // upsertMemory writes the row (pending: it goes to the folder next); created = it did not exist.
 // Rejects a new file past the limit.
 func upsertMemory(ctx context.Context, tx DB, s MemoryScope, w MemoryWrite) (bool, error) {
-	var n int64
-	if err := memoryRows(ctx, tx, s).Where("name = ?", w.Name).Count(&n).Error; err != nil {
+	created, err := newMemoryFile(ctx, tx, s, w.Name)
+	if err != nil {
 		return false, err
-	}
-	if n == 0 {
-		if err := checkMemoryCount(ctx, tx, s); err != nil {
-			return false, err
-		}
 	}
 	row := map[string]any{s.key(): s.ID, "name": w.Name, "description": w.Description, "type": w.Type, "content": w.Content,
 		"updated_by": w.By, "pending": true, "updated_at": gorm.Expr("now()")}
-	err := tx.Gorm(ctx).Table(s.table()).Clauses(clause.OnConflict{
+	err = tx.Gorm(ctx).Table(s.table()).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: s.key()}, {Name: "name"}},
 		DoUpdates: clause.AssignmentColumns([]string{"description", "type", "content", "updated_by", "pending", "updated_at"}),
 	}).Create(row).Error
-	return n == 0, err
+	return created, err
 }
 
-func checkMemoryCount(ctx context.Context, tx DB, s MemoryScope) error {
-	var total int64
+// newMemoryFile reports whether name is not a file of the scope yet; a MemoryError when a new
+// file would pass MemoryFilesMax.
+func newMemoryFile(ctx context.Context, tx DB, s MemoryScope, name string) (bool, error) {
+	var n, total int64
+	if err := memoryRows(ctx, tx, s).Where("name = ?", name).Count(&n).Error; err != nil || n > 0 {
+		return false, err
+	}
 	if err := memoryRows(ctx, tx, s).Count(&total).Error; err != nil {
-		return err
+		return true, err
 	}
 	if total >= MemoryFilesMax {
-		return memoryErr("已经有 %d 个记忆文件，先合并或删掉一些", total)
+		return true, memoryErr("已经有 %d 个记忆文件，先合并或删掉一些", total)
 	}
-	return nil
+	return true, nil
 }
 
 // DeleteMemoryFile removes a topic file and its index line; MEMORY.md itself cannot be deleted.
@@ -270,7 +262,7 @@ func DeleteMemoryFile(ctx context.Context, q DB, s MemoryScope, name, by string)
 
 // AppendMemoryNote adds "- text" to MEMORY.md (the remember tool).
 func AppendMemoryNote(ctx context.Context, q DB, s MemoryScope, text, by string) error {
-	text = strings.Join(strings.Fields(text), " ")
+	text = oneLine(text)
 	if text == "" {
 		return memoryErr("内容不能为空")
 	}
@@ -337,7 +329,7 @@ func editIndex(ctx context.Context, tx DB, s MemoryScope, by string, edit func([
 	}
 	lines := edit(strings.Split(strings.TrimRight(content, "\n"), "\n"))
 	next := strings.Join(lines, "\n") + "\n"
-	if next == f.Content {
+	if strings.TrimRight(next, "\n") == strings.TrimRight(f.Content, "\n") { // a file read back has no final newline
 		return nil
 	}
 	if utf8.RuneCountInString(next) > MemoryContentMax {

@@ -3,13 +3,14 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"github.com/touwaeriol/agent-teams/server/internal/userfs"
+	"errors"
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
+	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
 
 // Hooks implements platform.Hooks for the REST layer.
@@ -48,18 +49,21 @@ func (h *Hooks) ProjectDeleted(ctx context.Context, userID, projectID string) {
 	}
 }
 
-// MemoryFiles keeps memory in the owners' shared folders.
-func (h *Hooks) MemoryFiles() store.MemoryFiles { return h.e.Core.Memory }
-
 // UserDeleting destroys the user's shared folder (in the background, from the volume as it stands
-// now: the row goes with the user). Not having one is fine.
-func (h *Hooks) UserDeleting(ctx context.Context, userID string) {
+// now: the row goes with the user). Not having one is fine; one being switched on refuses the
+// deletion (it would be left behind); other failures are logged.
+func (h *Hooks) UserDeleting(ctx context.Context, userID string) error {
 	if !h.e.FS.Enabled() {
-		return
+		return nil
 	}
-	if err := h.e.FS.Disable(ctx, userID); err != nil && !userfs.IsNotFound(err) {
+	err := h.e.FS.Disable(ctx, userID)
+	if errors.Is(err, userfs.ErrBusy) {
+		return err
+	}
+	if err != nil && !userfs.IsNotFound(err) {
 		h.e.log.Warn("shared folder of a deleted user not destroyed", "user_id", userID, "err", err)
 	}
+	return nil
 }
 
 // ProjectArchived pauses the project's going threads and closes every session it has.

@@ -147,9 +147,9 @@ type Hooks interface {
 	ProjectArchived(ctx context.Context, userID, projectID string) error
 	// UserCutOff runs when a user is deactivated or deleted (close sessions, cancel waits).
 	UserCutOff(ctx context.Context, userID string) error
-	// UserDeleting runs before a user's rows are deleted (destroy their shared folder; best effort,
-	// failures are logged).
-	UserDeleting(ctx context.Context, userID string)
+	// UserDeleting runs before a user's rows are deleted: it starts destroying their shared folder,
+	// or refuses (the folder is busy) and the user is not deleted.
+	UserDeleting(ctx context.Context, userID string) error
 	// NodeDeleting runs before a node row is deleted (reassign its employees).
 	NodeDeleting(ctx context.Context, userID, nodeID string) error
 	// RolesSaved runs after the user's role templates were saved (re-staff the projects).
@@ -161,8 +161,6 @@ type Hooks interface {
 	SessionCreated(ctx context.Context, p store.Project, s SessionStart) (SessionThread, error)
 	// SessionReposChanged runs after PUT /api/sessions/{pid}/repos saved the repositories.
 	SessionReposChanged(ctx context.Context, projectID string, added []SessionRepo, removed []string) error
-	// MemoryFiles keeps memory in the owners' shared folders (store.NoMemoryFiles: none).
-	MemoryFiles() store.MemoryFiles
 }
 
 // SessionStart is what POST /api/sessions asks for besides the project.
@@ -262,9 +260,6 @@ func (NoHooks) SessionCreated(context.Context, store.Project, SessionStart) (Ses
 	return SessionThread{}, nil
 }
 
-// MemoryFiles implements Hooks.
-func (NoHooks) MemoryFiles() store.MemoryFiles { return store.NoMemoryFiles{} }
-
 // SessionReposChanged implements Hooks.
 func (NoHooks) SessionReposChanged(context.Context, string, []SessionRepo, []string) error {
 	return nil
@@ -286,7 +281,7 @@ func (NoHooks) ProjectArchived(context.Context, string, string) error { return n
 func (NoHooks) UserCutOff(context.Context, string) error { return nil }
 
 // UserDeleting implements Hooks.
-func (NoHooks) UserDeleting(context.Context, string) {}
+func (NoHooks) UserDeleting(context.Context, string) error { return nil }
 
 // NodeDeleting implements Hooks.
 func (NoHooks) NodeDeleting(context.Context, string, string) error { return nil }
