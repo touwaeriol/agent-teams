@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
+	"github.com/touwaeriol/agent-teams/server/internal/config"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -66,6 +67,8 @@ type AdminSettings struct {
 	DeliveryDefault   Delivery              `json:"delivery_default"`
 	OfficeDefault     string                `json:"office_default" doc:"Default office layout id"`
 	NodeRelease       *platform.NodeRelease `json:"node_release,omitempty" doc:"Omit to clear"`
+	NodeURL           string                `json:"node_url" maxLength:"200" doc:"Address nodes register and connect with (an origin such as https://agent-backend.example.com, not a CDN in front of it); empty = node_url_default"`
+	NodeURLDefault    string                `json:"node_url_default,omitempty" readOnly:"true" doc:"What nodes use when node_url is empty: AGENT_TEAMS_NODE_URL, else the public URL"`
 }
 
 type adminSettingsOutput struct{ Body AdminSettings }
@@ -297,7 +300,8 @@ func (s *Server) adminSettings(ctx context.Context) (AdminSettings, error) {
 		return AdminSettings{}, err
 	}
 	out := AdminSettings{RegistrationOpen: p.RegistrationOpen, DefaultMaxNodes: p.DefaultMaxNodes,
-		MaxRunningThreads: p.MaxRunningThreads, DeliveryDefault: s.deliveryDefault(ctx), OfficeDefault: s.officeDefault(ctx)}
+		MaxRunningThreads: p.MaxRunningThreads, DeliveryDefault: s.deliveryDefault(ctx), OfficeDefault: s.officeDefault(ctx),
+		NodeURL: p.NodeURL, NodeURLDefault: s.cfg.NodeOrigin()}
 	var release platform.NodeRelease
 	if found, err := s.store.Setting(ctx, "node_release", &release); err == nil && found {
 		out.NodeRelease = &release
@@ -311,6 +315,10 @@ func (s *Server) adminSaveSettings(ctx context.Context, in *adminSettingsInput) 
 		return nil, err
 	}
 	b := in.Body
+	b.NodeURL = strings.TrimRight(strings.TrimSpace(b.NodeURL), "/")
+	if b.NodeURL != "" && !config.IsOrigin(b.NodeURL) {
+		return nil, invalid([]FieldError{{"node_url", "要填 https://域名 这样的地址，不带路径"}}, "节点注册地址要填 https://域名 这样的地址，不带路径")
+	}
 	if _, err := s.office.Get(b.OfficeDefault); err != nil {
 		return nil, invalid([]FieldError{{"office_default", "没有这个布局"}}, "没有这个布局："+b.OfficeDefault)
 	}
@@ -326,7 +334,7 @@ func (s *Server) adminSaveSettings(ctx context.Context, in *adminSettingsInput) 
 
 func saveSettings(ctx context.Context, tx *store.Store, b AdminSettings) error {
 	if err := tx.SaveSetting(ctx, "platform", PlatformSettings{RegistrationOpen: b.RegistrationOpen,
-		DefaultMaxNodes: b.DefaultMaxNodes, MaxRunningThreads: b.MaxRunningThreads}); err != nil {
+		DefaultMaxNodes: b.DefaultMaxNodes, MaxRunningThreads: b.MaxRunningThreads, NodeURL: b.NodeURL}); err != nil {
 		return err
 	}
 	if err := tx.SaveSetting(ctx, "delivery_default", b.DeliveryDefault); err != nil {

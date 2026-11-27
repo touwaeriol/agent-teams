@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -14,8 +15,18 @@ type Enrollment struct {
 	Compose string `json:"compose" doc:"compose.yml that starts the node container with this token (docker compose up -d)"`
 }
 
-func (s *Server) enrollment(name, token string) Enrollment {
-	console := s.cfg.PublicURL
+// nodeURL is the address nodes register and connect with: the administrator's 节点注册地址, else
+// AGENT_TEAMS_NODE_URL, else the public URL (a CDN or forwarder in front of the backend should not
+// carry the nodes' long-lived connections).
+func (s *Server) nodeURL(ctx context.Context) string {
+	if p, err := s.platformSettings(ctx); err == nil && p.NodeURL != "" {
+		return p.NodeURL
+	}
+	return s.cfg.NodeOrigin()
+}
+
+func (s *Server) enrollment(ctx context.Context, name, token string) Enrollment {
+	console := s.nodeURL(ctx)
 	cmd := fmt.Sprintf("curl -fsSL %s/install-node.sh | AGENT_TEAMS_NODE_TOKEN=%s bash -s -- --console %s --name %s",
 		console, token, shellQuote(console), shellQuote(name))
 	n := nodeContainer{name: name, host: strings.ReplaceAll(name, "_", "-"), slug: "agent-teams-node-" + strings.ToLower(name), console: console, token: token, image: s.cfg.NodeImage}

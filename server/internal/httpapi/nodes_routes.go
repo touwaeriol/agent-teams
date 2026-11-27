@@ -279,7 +279,7 @@ func (s *Server) addNode(ctx context.Context, in *newNodeInput) (*newNodeOutput,
 	s.audit(ctx, p.User.ID, "node_create", "node", node.ID, map[string]string{"name": name})
 	out := &newNodeOutput{}
 	out.Body.Node = s.nodeView(node, s.currentRelease(ctx).Version, nil)
-	out.Body.Enrollment = s.enrollment(name, token)
+	out.Body.Enrollment = s.enrollment(ctx, name, token)
 	return out, nil
 }
 
@@ -372,7 +372,7 @@ func (s *Server) rotateNodeToken(ctx context.Context, in *nodeIDInput) (*enrollm
 	}
 	s.nodes.Disconnect(ctx, in.ID, "token_rotated")
 	s.audit(ctx, p.User.ID, "node_token_rotate", "node", in.ID, nil)
-	return &enrollmentOutput{Body: s.enrollment(node.Name, token)}, nil
+	return &enrollmentOutput{Body: s.enrollment(ctx, node.Name, token)}, nil
 }
 
 // upgradeNode sends node.upgrade with the release the console serves (architecture.md §14.3).

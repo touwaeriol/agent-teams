@@ -57,11 +57,12 @@ type sessionIDInput struct {
 	ID string `path:"id" minLength:"8" maxLength:"64"`
 }
 
-// PlatformSettings is at_settings.platform (v1 fields + max_running_threads).
+// PlatformSettings is at_settings.platform (v1 fields + max_running_threads + node_url).
 type PlatformSettings struct {
-	RegistrationOpen  bool `json:"registration_open"`
-	DefaultMaxNodes   int  `json:"default_max_nodes"`
-	MaxRunningThreads int  `json:"max_running_threads"`
+	RegistrationOpen  bool   `json:"registration_open"`
+	DefaultMaxNodes   int    `json:"default_max_nodes"`
+	MaxRunningThreads int    `json:"max_running_threads"`
+	NodeURL           string `json:"node_url,omitempty"`
 }
 
 func defaultPlatform() PlatformSettings {

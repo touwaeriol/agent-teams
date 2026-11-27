@@ -149,6 +149,16 @@
             "$ref": "#/components/schemas/NodeRelease",
             "description": "Omit to clear"
           },
+          "node_url": {
+            "description": "Address nodes register and connect with (an origin such as https://agent-backend.example.com, not a CDN in front of it); empty = node_url_default",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "node_url_default": {
+            "description": "What nodes use when node_url is empty: AGENT_TEAMS_NODE_URL, else the public URL",
+            "readOnly": true,
+            "type": "string"
+          },
           "office_default": {
             "description": "Default office layout id",
             "type": "string"
@@ -162,7 +172,8 @@
           "default_max_nodes",
           "max_running_threads",
           "delivery_default",
-          "office_default"
+          "office_default",
+          "node_url"
         ],
         "type": "object"
       },
