@@ -1749,14 +1749,17 @@
     "id": "c_01JD3V0000000000000000F01",
     "ts": "2026-11-26T12:00:00.000Z",
     "body": {
-      "bucket": "u-0123456789abcdef",
+      "name": "atu-0123456789abcdef",
+      "bucket": "agent-teams-fs",
+      "prefix": "users/0123456789abcdef/",
       "generation": 1,
-      "endpoint": "https://fs.example.net",
-      "access_key": "fs0123456789abcdef",
+      "endpoint": "https://s3.us-west-004.backblazeb2.com",
+      "region": "us-west-004",
+      "access_key": "004a0123456789a0000000042",
       "secret_key": "secret",
       "client": {
         "tool": "geesefs",
-        "version": "0.43.2",
+        "version": "0.43.9",
         "assets": [
           {
             "platform": "linux-amd64",
@@ -1773,7 +1776,7 @@
     "id": "c_01JD3V0000000000000000F02",
     "ts": "2026-11-26T12:00:00.000Z",
     "body": {
-      "bucket": "u-0123456789abcdef"
+      "name": "atu-0123456789abcdef"
     }
   },
   {
@@ -1784,7 +1787,7 @@
     "body": {
       "state": "mounted",
       "mode": "daemon",
-      "bucket": "u-0123456789abcdef",
+      "name": "atu-0123456789abcdef",
       "generation": 1
     }
   }

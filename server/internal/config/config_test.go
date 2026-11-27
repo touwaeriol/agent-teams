@@ -142,33 +142,33 @@ func TestFS(t *testing.T) {
 	if err != nil || cfg.FS.Configured() {
 		t.Fatalf("off by default: %+v %v", cfg.FS, err)
 	}
-	full := map[string]string{"AGENT_TEAMS_FS_GATEWAY_URL": "https://fs.example/", "AGENT_TEAMS_FS_BUCKET": "fs",
-		"AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY": "root", "AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY": "rootpw"}
+	full := map[string]string{"AGENT_TEAMS_FS_ACCESS_KEY": "kid", "AGENT_TEAMS_FS_SECRET_KEY": "ksecret", "AGENT_TEAMS_FS_BUCKET": "fs",
+		"AGENT_TEAMS_FS_S3_ENDPOINT": "https://s3.us-west-004.backblazeb2.com"}
 	cfg, err = Load(get(full))
-	if err != nil || !cfg.FS.Configured() || cfg.FS.AdminURL != base["DATABASE_URL"] || cfg.FS.S3Endpoint != "https://s3.example" ||
-		cfg.FS.GatewayURL != "https://fs.example" || cfg.FS.GatewayListen != "" || cfg.FS.CapacityGB != 20 || cfg.FS.JuiceFS != "juicefs" {
+	if err != nil || !cfg.FS.Configured() || cfg.FS.Provider != "b2" || cfg.FS.NodeEndpoint != "" ||
+		cfg.FS.Region != "us-west-004" || cfg.FS.Bucket != "fs" || cfg.FS.CapacityGB != 20 {
 		t.Fatalf("defaults: %+v %v", cfg.FS, err)
 	}
-	if _, err := Load(get(map[string]string{"AGENT_TEAMS_FS_BUCKET": "fs"})); err == nil {
+	if _, err := Load(get(map[string]string{"AGENT_TEAMS_FS_ACCESS_KEY": "kid"})); err == nil {
 		t.Fatal("partial FS accepted")
+	}
+	rustfs := map[string]string{"AGENT_TEAMS_FS_PROVIDER": "rustfs", "AGENT_TEAMS_FS_ACCESS_KEY": "root", "AGENT_TEAMS_FS_SECRET_KEY": "rootpw", "AGENT_TEAMS_FS_BUCKET": "fs"}
+	if cfg, err := Load(get(rustfs)); err != nil || cfg.FS.S3Endpoint != "https://s3.example" || cfg.FS.Region != "us-east-1" {
+		t.Fatalf("rustfs defaults to the attachment store: %+v %v", cfg.FS, err)
+	}
+	rustfs["AGENT_TEAMS_FS_PROVIDER"] = "juicefs"
+	if _, err := Load(get(rustfs)); err == nil {
+		t.Fatal("unknown provider accepted")
 	}
 	bad := map[string]string{}
 	for k, v := range full {
 		bad[k] = v
 	}
-	bad["AGENT_TEAMS_FS_GATEWAY_URL"] = "fs.example"
+	bad["AGENT_TEAMS_FS_NODE_ENDPOINT"] = "rustfs.example"
 	if _, err := Load(get(bad)); err == nil {
-		t.Fatal("gateway url without scheme accepted")
+		t.Fatal("node endpoint without scheme accepted")
 	}
-	bad["AGENT_TEAMS_FS_GATEWAY_URL"], bad["AGENT_TEAMS_FS_GATEWAY_LISTEN"] = "https://fs.example", "9310"
-	if _, err := Load(get(bad)); err == nil {
-		t.Fatal("gateway listen without host accepted")
-	}
-	bad["AGENT_TEAMS_FS_GATEWAY_LISTEN"], bad["AGENT_TEAMS_FS_CLIENT_TOOL"] = "0.0.0.0:9310", "s3fs"
-	if _, err := Load(get(bad)); err == nil {
-		t.Fatal("unknown client tool accepted")
-	}
-	bad["AGENT_TEAMS_FS_CLIENT_TOOL"], bad["AGENT_TEAMS_FS_CLIENT_VERSION"] = "rclone", "1.5.0"
+	bad["AGENT_TEAMS_FS_NODE_ENDPOINT"], bad["AGENT_TEAMS_FS_CLIENT_VERSION"] = "https://rustfs.example", "0.44.0"
 	if _, err := Load(get(bad)); err == nil {
 		t.Fatal("client version without checksums accepted")
 	}

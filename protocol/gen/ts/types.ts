@@ -749,22 +749,30 @@ export interface FileDownload {
   data: string;
 }
 /**
- * Mount the owner's bucket of the console's shared-folder gateway (juicefs-shared-storage design: one JuiceFS volume behind a `juicefs gateway --multi-buckets`, a bucket per user). Sent on the live link only to a daemon whose hello has fs_s3_mount: after the welcome when the owner has a ready folder, and again when the folder or its key change (generation grows). Unreliable and never logged or stored: it carries the owner's S3 key, which allows that bucket only. The daemon mounts it over S3 with the client named in client.tool at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.
+ * Mount the owner's shared folder: a prefix of the platform's object-store bucket (Backblaze B2, or a RustFS / MinIO), reached with the owner's key, which is limited to that prefix (shared-folder design). Sent on the live link only to a daemon whose hello has fs_s3_mount: after the welcome when the owner has a ready folder, and again when the folder or its key change (generation grows: a new key, e.g. one that cannot write while the folder is over its capacity). Unreliable and never logged or stored: it carries the owner's secret key. The daemon mounts bucket:prefix with the client named in client.tool at <data dir>/mnt/<name> and answers with fs.status; a generation older than the one mounted is ignored.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "FsMount".
  */
 export interface FsMount {
   /**
-   * The owner's bucket (u-<16 hex>), also the mount directory name.
+   * The owner's folder name (atu-<16 hex>): the mount directory, and what fs.status and fs.unmount name.
+   */
+  name: string;
+  /**
+   * The platform's bucket.
    */
   bucket: string;
   /**
-   * Grows when the owner's folder is provisioned again; a remount is due when it or the bucket differs from the mounted one.
+   * The owner's folder in the bucket (users/<16 hex>/); the key reaches nothing outside it.
+   */
+  prefix: string;
+  /**
+   * Grows whenever the owner's key changes (provisioned again, switched to or from read-only); a remount is due when it or the name differs from the mounted one.
    */
   generation: number;
   /**
-   * The gateway's S3 address (https://..., path-style requests).
+   * The object store's S3 address (https://...).
    */
   endpoint: string;
   /**
@@ -772,7 +780,7 @@ export interface FsMount {
    */
   region?: string;
   /**
-   * The owner's gateway key.
+   * The owner's key id.
    */
   access_key: string;
   /**
@@ -816,20 +824,20 @@ export interface FsStatus {
   state: "mounting" | "mounted" | "unmounted" | "error";
   mode: "daemon" | "external";
   /**
-   * The bucket mounted (fs.mount bucket); absent for an external mount that does not know it.
+   * The folder mounted (fs.mount name); absent for an external mount that does not know it.
    */
-  bucket?: string;
+  name?: string;
   generation?: number;
   error?: string;
 }
 /**
- * Unmount the owner's bucket and forget its key (the folder was deleted). Sent to daemons with fs_s3_mount; an unknown bucket is not an error.
+ * Unmount the owner's folder and forget its key (the folder was deleted). Sent to daemons with fs_s3_mount; an unknown name is not an error.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "FsUnmount".
  */
 export interface FsUnmount {
-  bucket: string;
+  name: string;
 }
 /**
  * Remove worktrees (keeping unpushed work when asked) and prune.
@@ -2460,7 +2468,7 @@ export interface SessionOpen {
   }[];
   ssh_servers?: SshServers;
   /**
-   * The shared folder (juicefs-shared-storage design), sent only when the node has the owner's bucket mounted or an external mount (fs_s3_mount / fs_external) and the owner has a ready folder: paths relative to the bucket root. The daemon creates both directories when missing, adds them to the session's writable directories and exports AGENT_TEAMS_PROJECT_DIR / AGENT_TEAMS_SHARED_DIR. Omitted = no shared folder.
+   * The shared folder (shared-folder design), sent only when the node has the owner's folder mounted or an external mount (fs_s3_mount / fs_external) and the owner has a ready folder: paths relative to the folder root. The daemon creates both directories when missing, adds them to the session's writable directories and exports AGENT_TEAMS_PROJECT_DIR / AGENT_TEAMS_SHARED_DIR. Omitted = no shared folder.
    */
   fs?: {
     project: RelPath;

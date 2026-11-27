@@ -7,8 +7,8 @@ describe("sharedFolderLine", () => {
   });
   it("shows the mount state, the Docker mode and the error", () => {
     expect(sharedFolderLine({ online: true, shared_folder: { mode: "daemon", state: "mounted", error: "" } })).toEqual({ text: "共享文件夹：已挂载", tone: "ok" });
-    expect(sharedFolderLine({ online: true, shared_folder: { mode: "external", state: "error", error: "not a JuiceFS mount" } })).toEqual({
-      text: "共享文件夹（Docker 卷）：挂载失败", tone: "error", error: "not a JuiceFS mount",
+    expect(sharedFolderLine({ online: true, shared_folder: { mode: "external", state: "error", error: "not a mount" } })).toEqual({
+      text: "共享文件夹（Docker 卷）：挂载失败", tone: "error", error: "not a mount",
     });
     expect(sharedFolderLine({ online: false, shared_folder: { mode: "daemon", state: "mounted", error: "" } })?.tone).toBe("muted");
   });

@@ -2,18 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/fs.unmount.json",
   "title": "FsUnmount",
-  "description": "Unmount the owner's bucket and forget its key (the folder was deleted). Sent to daemons with fs_s3_mount; an unknown bucket is not an error.",
+  "description": "Unmount the owner's folder and forget its key (the folder was deleted). Sent to daemons with fs_s3_mount; an unknown name is not an error.",
   "x-direction": "console_to_node",
   "x-key": [
-    "bucket"
+    "name"
   ],
   "x-reliable": false,
   "type": "object",
   "required": [
-    "bucket"
+    "name"
   ],
   "properties": {
-    "bucket": {
+    "name": {
       "type": "string",
       "minLength": 1
     }

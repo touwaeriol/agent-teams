@@ -13,8 +13,9 @@ import (
 // what runs outside is per-replica plumbing (the gateways, the SSH gateway, authorization reloads,
 // hint listeners).
 const (
-	fsSweepEvery     = time.Minute // provisioning, removals, deliverable moves
-	orphanSweepEvery = time.Hour   // an ownerless volume goes at the second sweep that finds it
+	fsSweepEvery     = time.Minute      // provisioning, removals, deliverable moves
+	orphanSweepEvery = time.Hour        // an ownerless volume goes at the second sweep that finds it
+	fsQuotaEvery     = 15 * time.Minute // shared folders over their capacity become read-only
 )
 
 // registerJobs adds the engine's background jobs to e.Jobs (Start, before the registry starts).
@@ -56,7 +57,10 @@ func (e *Engine) registerJobs(ctx context.Context) {
 			Description: "把平台写的记忆写进文件夹、读回节点上的改动；每小时（或手动运行时）全量同步一次",
 			Run:         e.memorySweep()})
 	}
-	add(jobs.Job{Name: "orphan-volumes", Title: "无主卷清理", Every: orphanSweepEvery,
-		Description: "销毁用户已删除但没销毁掉的共享文件夹（连续两次检查都没有用户才销毁）",
+	add(jobs.Job{Name: "orphan-volumes", Title: "无主共享文件夹清理", Every: orphanSweepEvery,
+		Description: "删除用户已删除但没删掉的共享文件夹和对象存储密钥（连续两次检查都没有用户才删）",
 		Run:         func(ctx context.Context, _ jobs.Trigger) (string, error) { return e.sweepOrphanFolders(ctx) }})
+	add(jobs.Job{Name: "shared-folder-quota", Title: "共享文件夹容量", Every: fsQuotaEvery,
+		Description: "统计每个共享文件夹的用量：超出容量的换成不能写的密钥（还能读和删），降回容量以内再恢复",
+		Run:         func(ctx context.Context, _ jobs.Trigger) (string, error) { return e.enforceFolderQuotas(ctx) }})
 }

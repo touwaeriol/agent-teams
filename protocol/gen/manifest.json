@@ -94,7 +94,7 @@
       "direction": "console_to_node",
       "reliable": false,
       "key": [
-        "bucket",
+        "name",
         "generation"
       ]
     },
@@ -111,7 +111,7 @@
       "direction": "console_to_node",
       "reliable": false,
       "key": [
-        "bucket"
+        "name"
       ]
     },
     {

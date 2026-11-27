@@ -50,11 +50,7 @@ func wire(d httpapi.Deps) (httpapi.Deps, func(context.Context), error) {
 	d.Nodes, d.Events, d.Hooks, d.SSH, d.Memory = e.Gateway, e.Events, e.Hooks(), e.SSHHooks(), e.Core.Memory
 	d.Extensions = append(d.Extensions, orchapi.New(e, d.Office).WithOrigins(d.Config.ArtifactOrigin, d.Config.PublicURL).Register)
 	e.Jobs.Add(maintenanceJob(d.Store, e.Jobs))
-	start := func(ctx context.Context) {
-		e.Start(ctx)
-		go func() { <-ctx.Done(); fs.Close() }() // stop the juicefs gateways on shutdown
-	}
-	return d, start, nil
+	return d, e.Start, nil
 }
 
 // openAPIDocument builds the server exactly as serve does, without I/O, and renders the document.
@@ -81,15 +77,16 @@ func sharedFolders(c config.FS, st *store.Store, vault *credvault.Vault, log *sl
 	if c.ClientBase != "" {
 		base = c.ClientBase
 	}
-	cfg := userfs.Config{AdminURL: c.AdminURL, GatewayURL: c.GatewayURL, GatewayListen: c.GatewayListen, ClientTool: c.ClientTool, S3Endpoint: c.S3Endpoint, Bucket: c.Bucket,
-		AdminAccessKey: c.AdminAccessKey, AdminSecretKey: c.AdminSecretKey, CapacityGB: c.CapacityGB, JuiceFS: c.JuiceFS,
-		Volume: c.Volume, MetaRole: c.MetaRole, MetaUser: c.MetaUser, ClientVersion: version, ClientBase: base, Assets: assets}
+	cfg := userfs.Config{Provider: c.Provider, S3Endpoint: c.S3Endpoint, NodeEndpoint: c.NodeEndpoint, Region: c.Region, AccessKey: c.AccessKey,
+		SecretKey: c.SecretKey, Bucket: c.Bucket, CapacityGB: c.CapacityGB, ClientVersion: version, ClientBase: base, Assets: assets}
 	if !vault.Ready() {
-		log.Warn("shared folder needs AGENT_TEAMS_SECRET_KEYS to seal its credentials: switched off")
+		log.Warn("shared folder needs AGENT_TEAMS_SECRET_KEYS to seal the users' keys: switched off")
 	}
-	return userfs.New(cfg, st.Pool, vault, &userfs.PGMeta{URL: c.AdminURL, ConnLimit: c.MetaConnLimit},
-		userfs.MinioIAM{Endpoint: c.S3Endpoint, AccessKey: c.AdminAccessKey, SecretKey: c.AdminSecretKey},
-		userfs.CLI{Bin: c.JuiceFS, Gateway: &userfs.GatewayProcess{Bin: c.JuiceFS, Log: log}}, log)
+	var store userfs.Store = userfs.NewB2(c.S3Endpoint, c.Region, c.AccessKey, c.SecretKey, c.Bucket)
+	if c.Provider == userfs.ProviderRustFS {
+		store = userfs.NewRustFS(c.S3Endpoint, c.Region, c.AccessKey, c.SecretKey, c.Bucket)
+	}
+	return userfs.New(cfg, st.Pool, vault, store, log)
 }
 
 // objectStore builds the attachments and shared-files store from AGENT_TEAMS_S3_* (#58): None when

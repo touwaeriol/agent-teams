@@ -11,12 +11,13 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// Volume is an at_user_fs row without its secrets: the user's bucket of the shared volume.
+// Volume is an at_user_fs row without its secret: the user's folder.
 type Volume struct {
 	UserID     string    `json:"-"`
-	Volume     string    `json:"volume"`
 	Bucket     string    `json:"bucket"`
+	Prefix     string    `json:"prefix"`
 	AccessKey  string    `json:"-"`
+	ReadOnly   bool      `json:"read_only"`
 	Generation int       `json:"generation"`
 	State      string    `json:"state"`
 	Error      string    `json:"error"`
@@ -25,11 +26,14 @@ type Volume struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-const volumeCols = `user_id, volume, bucket, s3_access_key, generation, state, error, capacity_gb, created_at, updated_at`
+// Names are the volume's names in the object store.
+func (v Volume) Names() UserNames { return namesOf(prefixID(v.Prefix)) }
+
+const volumeCols = `user_id, bucket, prefix, s3_access_key, read_only, generation, state, error, capacity_gb, created_at, updated_at`
 
 func scanVolume(row store.Scanner) (Volume, error) {
 	var v Volume
-	err := row.Scan(&v.UserID, &v.Volume, &v.Bucket, &v.AccessKey, &v.Generation, &v.State, &v.Error, &v.CapacityGB, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.UserID, &v.Bucket, &v.Prefix, &v.AccessKey, &v.ReadOnly, &v.Generation, &v.State, &v.Error, &v.CapacityGB, &v.CreatedAt, &v.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, ErrNotFound
 	}
@@ -45,28 +49,38 @@ func Get(ctx context.Context, q store.DB, userID string) (Volume, error) {
 // over (the console stopped in the middle).
 const staleAfter = "15 minutes"
 
-// insert creates the user's row (provisioning) unless one exists; created tells whether this call
-// made it (and so owns its provisioning). The generation comes from a sequence first, since the
-// secret key is sealed with it.
-func insert(ctx context.Context, q store.DB, v *credvault.Vault, volume, userID string, capacityGB int) (vol Volume, created bool, err error) {
-	var gen int
-	if err := store.QueryRow(ctx, q, `SELECT nextval('at_user_fs_generation')`).Scan(&gen); err != nil {
-		return Volume{}, false, err
-	}
-	n := UserNamesFor(userID)
-	raw, _ := json.Marshal(UserSecrets{SecretKey: randomSecret(30)})
-	sealed, err := v.Seal(credvault.UserFsAAD(userID, n.Bucket, gen), raw)
-	if err != nil {
-		return Volume{}, false, err
-	}
-	sj, _ := json.Marshal(sealed)
-	vol, err = scanVolume(store.QueryRow(ctx, q, `INSERT INTO at_user_fs (user_id, volume, bucket, s3_access_key, secrets, capacity_gb, generation)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (user_id) DO NOTHING RETURNING `+volumeCols, userID, volume, n.Bucket, n.AccessKey, sj, capacityGB, gen))
+// insert creates the user's row (provisioning, no key yet) unless one exists; created tells
+// whether this call made it (and so owns its provisioning).
+func insert(ctx context.Context, q store.DB, bucket string, n UserNames, userID string, capacityGB int) (vol Volume, created bool, err error) {
+	vol, err = scanVolume(store.QueryRow(ctx, q, `INSERT INTO at_user_fs (user_id, bucket, prefix, s3_access_key, secrets, capacity_gb)
+		VALUES ($1, $2, $3, '', '{}', $4) ON CONFLICT (user_id) DO NOTHING RETURNING `+volumeCols, userID, bucket, n.Prefix, capacityGB))
 	if IsNotFound(err) {
 		vol, err = Get(ctx, q, userID)
 		return vol, false, err
 	}
 	return vol, err == nil, err
+}
+
+// aad is what a volume's secret is sealed with.
+func aad(userID, bucket, prefix string, generation int) []byte {
+	return credvault.UserFsAAD(userID, bucket+":"+prefix, generation)
+}
+
+// storeKey records the volume's new key under a new generation (nodes remount) and whether it can
+// write; it returns the volume as stored.
+func storeKey(ctx context.Context, q store.DB, v *credvault.Vault, vol Volume, key Key, readOnly bool) (Volume, error) {
+	var gen int
+	if err := store.QueryRow(ctx, q, `SELECT nextval('at_user_fs_generation')`).Scan(&gen); err != nil {
+		return vol, err
+	}
+	raw, _ := json.Marshal(UserSecrets{SecretKey: key.Secret})
+	sealed, err := v.Seal(aad(vol.UserID, vol.Bucket, vol.Prefix, gen), raw)
+	if err != nil {
+		return vol, err
+	}
+	sj, _ := json.Marshal(sealed)
+	return scanVolume(store.QueryRow(ctx, q, `UPDATE at_user_fs SET s3_access_key = $2, secrets = $3, generation = $4, read_only = $5, updated_at = now()
+		WHERE user_id = $1 RETURNING `+volumeCols, vol.UserID, key.ID, sj, gen, readOnly))
 }
 
 // userSecrets opens the row's sealed secret key.
@@ -79,19 +93,12 @@ func userSecrets(ctx context.Context, q store.DB, v *credvault.Vault, vol Volume
 	if err := json.Unmarshal(raw, &sealed); err != nil {
 		return UserSecrets{}, err
 	}
-	plain, err := v.Open(credvault.UserFsAAD(vol.UserID, vol.Bucket, vol.Generation), sealed)
+	plain, err := v.Open(aad(vol.UserID, vol.Bucket, vol.Prefix, vol.Generation), sealed)
 	if err != nil {
 		return UserSecrets{}, err
 	}
 	var s UserSecrets
 	return s, json.Unmarshal(plain, &s)
-}
-
-// Names are the row's gateway names (its bucket and key as stored, the policy derived).
-func (v Volume) Names() UserNames {
-	n := namesOf(userBucketID(v.Bucket))
-	n.Bucket, n.AccessKey = v.Bucket, v.AccessKey
-	return n
 }
 
 // claim moves the user's row to state when its current state is one of from, or when it has
@@ -119,11 +126,11 @@ func claimDeleting(ctx context.Context, q store.DB, userID string) (Volume, bool
 // mountedNodes are the user's nodes whose last fs.status says the folder is mounted (a node's
 // status is reset when it connects or drops, so these are online); daemonOnly keeps those whose
 // daemon mounts it itself (and so can unmount it).
-func mountedNodes(ctx context.Context, q store.DB, userID, bucket string, daemonOnly bool) ([]string, error) {
+func mountedNodes(ctx context.Context, q store.DB, userID, name string, daemonOnly bool) ([]string, error) {
 	var ids []string
 	err := store.Raw(ctx, q, `SELECT id FROM at_nodes WHERE user_id = $1 AND fs_status->>'state' = 'mounted'
-		AND coalesce(fs_status->>'bucket', $2) = $2 AND (NOT $3 OR fs_status->>'mode' = 'daemon') ORDER BY id`,
-		userID, bucket, daemonOnly).Scan(&ids).Error
+		AND coalesce(fs_status->>'name', $2) = $2 AND (NOT $3 OR fs_status->>'mode' = 'daemon') ORDER BY id`,
+		userID, name, daemonOnly).Scan(&ids).Error
 	return ids, err
 }
 
@@ -151,4 +158,22 @@ func usersToProvision(ctx context.Context, q store.DB, limit int) ([]string, err
 		   OR (f.state = 'provisioning' AND f.updated_at < now() - ?::interval))
 		ORDER BY u.created_at LIMIT ?`, retryAfter, staleAfter, limit).Scan(&ids).Error
 	return ids, err
+}
+
+// readyVolumes lists the ready volumes with a capacity (the quota check goes over them).
+func readyVolumes(ctx context.Context, q store.DB) ([]Volume, error) {
+	rows, err := q.Gorm(ctx).Raw(`SELECT ` + volumeCols + ` FROM at_user_fs WHERE state = 'ready' AND capacity_gb > 0 ORDER BY user_id`).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Volume
+	for rows.Next() {
+		v, err := scanVolume(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }

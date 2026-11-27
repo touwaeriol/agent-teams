@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { SharedFs, platformKey, type SharedFsOptions } from "../src/fs/shared.js";
+import { SharedFs, geesefsArgs, isMountPoint, platformKey, type SharedFsOptions } from "../src/fs/shared.js";
 import { ensureMemoryDirs, linkSharedDirs, memoryFolderPrompt, safeAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs } from "../src/fs/session.js";
 import type { FsMount, FsStatus, SessionOpen } from "../src/protocol.js";
 import { claudeOpen, startHarness, type Harness } from "./helpers/daemon.js";
@@ -17,35 +16,46 @@ function tmp(): string {
   return d;
 }
 
-/** A juicefs release tarball holding a fake binary. */
-function tarball(): { data: Buffer; sha: string } {
-  const d = tmp();
-  writeFileSync(join(d, "juicefs"), "#!/bin/sh\nexit 0\n");
-  spawnSync("tar", ["-czf", join(d, "j.tgz"), "-C", d, "juicefs"]);
-  const data = readFileSync(join(d, "j.tgz"));
+/** A fake geesefs release binary. */
+function binary(): { data: Buffer; sha: string } {
+  const data = Buffer.from("#!/bin/sh\nexit 0\n");
   return { data, sha: createHash("sha256").update(data).digest("hex") };
 }
 
+/** Tests stand for a mount point with a marker file in it. */
+const marker = (d: string): boolean => existsSync(join(d, ".mounted"));
+
+const NAME = "atu-0123456789abcdef";
+
 function spec(sha: string, generation = 1): FsMount {
   return {
-    volume: "at-0123456789abcdef", generation, meta_url: "postgres://jfs_x@db:5432/at?search_path=jfs_x", meta_password: "pw",
-    client: { version: "1.4.2", assets: [{ platform: "linux-amd64", url: "https://dl/juicefs.tgz", sha256: sha }] },
+    name: NAME, bucket: "agent-teams-fs", prefix: "users/0123456789abcdef/", generation, endpoint: "https://s3.example", region: "us-west-004",
+    access_key: "kid", secret_key: "sk-secret",
+    client: { tool: "geesefs", version: "0.43.9", assets: [{ platform: "linux-amd64", url: "https://dl/geesefs-linux-amd64", sha256: sha }] },
   };
 }
 
-interface Rig { fs: SharedFs; sent: FsStatus[]; calls: { cmd: string; args: string[]; env?: NodeJS.ProcessEnv }[]; data: string; fetches: number; sha: string }
+interface Rig { fs: SharedFs; sent: FsStatus[]; calls: { cmd: string; args: string[]; env?: NodeJS.ProcessEnv }[]; data: string; fetches: number; sha: string; procs: Map<string, number> }
 
 function rig(over: Partial<SharedFsOptions> = {}, data = tmp()): Rig {
-  // One tarball per rig: two builds can differ (gzip stores a timestamp), so its own sha is used.
-  const { data: tgz, sha } = tarball();
-  const r: Rig = { sent: [], calls: [], data, fetches: 0, sha } as unknown as Rig;
+  const { data: bin, sha } = binary();
+  const r: Rig = { sent: [], calls: [], data, fetches: 0, sha, procs: new Map() } as unknown as Rig;
   r.fs = new SharedFs({
-    dataDir: r.data, log: silentLogger, send: (_t, b) => r.sent.push(b), fuse: () => true, platform: "linux-amd64", mountWaitMs: 1000,
-    fetchFn: (async () => (r.fetches++, new Response(tgz))) as unknown as typeof fetch,
+    dataDir: r.data, log: silentLogger, send: (_t, b) => r.sent.push(b), fuse: () => true, platform: "linux-amd64", mountWaitMs: 1000, exitWaitMs: 1000,
+    mounted: marker, procs: (d) => (r.procs.has(d) ? [r.procs.get(d)!] : []),
+    fetchFn: (async () => (r.fetches++, new Response(bin))) as unknown as typeof fetch,
     run: async (cmd, args, opts) => {
       r.calls.push({ cmd, args, ...(opts?.env ? { env: opts.env } : {}) });
-      if (args[0] === "mount") writeFileSync(join(args.at(-1)!, ".config"), "{}");
-      if (cmd === "fusermount3") rmSync(join(args.at(-1)!, ".config"), { force: true });
+      const dir = args.at(-1)!;
+      if (cmd.endsWith("/geesefs")) {
+        writeFileSync(join(dir, ".mounted"), "");
+        r.procs.set(dir, 4242);
+      }
+      if (cmd === "fusermount3") {
+        rmSync(join(dir, ".mounted"), { force: true });
+        // geesefs uploads what it holds, then exits a little later.
+        setTimeout(() => r.procs.delete(dir), 50);
+      }
       return { code: 0, stdout: "", stderr: "" };
     },
     ...over,
@@ -53,31 +63,43 @@ function rig(over: Partial<SharedFsOptions> = {}, data = tmp()): Rig {
   return r;
 }
 
+const mounts = (r: Rig) => r.calls.filter((c) => c.cmd.endsWith("/geesefs"));
+
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
 describe("SharedFs", () => {
-  it("downloads the pinned client, mounts with the password in the env only, and keeps a healthy mount", async () => {
+  it("downloads the pinned geesefs, mounts bucket:prefix with the key in the env only, and keeps a healthy mount", async () => {
     const r = rig();
-    const sha = r.sha;
-    await r.fs.mount(spec(sha));
+    await r.fs.mount(spec(r.sha));
     expect(r.sent.map((s) => s.state)).toEqual(["mounting", "mounted"]);
-    const mount = r.calls.find((c) => c.args[0] === "mount")!;
-    expect(mount.cmd).toBe(join(r.data, "tools", "juicefs-1.4.2", "juicefs"));
-    expect(mount.args).not.toContain("pw");
-    expect(mount.env?.META_PASSWORD).toBe("pw");
-    expect(mount.args.at(-1)).toBe(join(r.data, "mnt", "at-0123456789abcdef"));
-    expect(r.fs.root()).toBe(join(r.data, "mnt", "at-0123456789abcdef"));
+    const mount = mounts(r)[0]!;
+    expect(mount.cmd).toBe(join(r.data, "tools", "geesefs-0.43.9", "geesefs"));
+    expect(readFileSync(mount.cmd, "utf8")).toContain("exit 0");
+    expect(mount.args.join(" ")).not.toMatch(/sk-secret|kid/);
+    expect(mount.env?.AWS_ACCESS_KEY_ID).toBe("kid");
+    expect(mount.env?.AWS_SECRET_ACCESS_KEY).toBe("sk-secret");
+    expect(mount.args.slice(-2)).toEqual(["agent-teams-fs:users/0123456789abcdef/", join(r.data, "mnt", NAME)]);
+    expect(mount.args).toEqual(expect.arrayContaining(["--endpoint", "https://s3.example", "--region", "us-west-004", "--fsync-on-close"]));
+    expect(r.fs.root()).toBe(join(r.data, "mnt", NAME));
 
-    await r.fs.mount(spec(sha));
-    expect(r.calls.filter((c) => c.args[0] === "mount")).toHaveLength(1);
+    await r.fs.mount(spec(r.sha));
+    expect(mounts(r)).toHaveLength(1);
     expect(r.fetches).toBe(1);
 
-    await r.fs.mount(spec(sha, 2));
-    expect(r.calls.filter((c) => c.args[0] === "mount")).toHaveLength(2);
+    await r.fs.mount(spec(r.sha, 2));
+    expect(mounts(r)).toHaveLength(2);
     expect(r.calls.some((c) => c.cmd === "fusermount3")).toBe(true);
-    expect(r.sent.at(-1)).toEqual({ state: "mounted", mode: "daemon", volume: "at-0123456789abcdef", generation: 2 });
+    expect(r.sent.at(-1)).toEqual({ state: "mounted", mode: "daemon", name: NAME, generation: 2 });
+  });
+
+  it("mounts at AGENT_TEAMS_FS_MOUNT_DIR when set", async () => {
+    const at = tmp();
+    const r = rig({ mountDir: at });
+    await r.fs.mount(spec(r.sha));
+    expect(mounts(r)[0]!.args.at(-1)).toBe(at);
+    expect(r.fs.root()).toBe(at);
   });
 
   it("ignores an fs.mount with an older generation than the mounted one", async () => {
@@ -85,7 +107,7 @@ describe("SharedFs", () => {
     await r.fs.mount(spec(r.sha, 3));
     const sent = r.sent.length;
     await r.fs.mount(spec(r.sha, 2));
-    expect(r.calls.filter((c) => c.args[0] === "mount")).toHaveLength(1);
+    expect(mounts(r)).toHaveLength(1);
     expect(r.calls.some((c) => c.cmd === "fusermount3")).toBe(false);
     expect(r.sent).toHaveLength(sent);
     expect(r.fs.root()).not.toBeNull();
@@ -94,7 +116,9 @@ describe("SharedFs", () => {
   it("adopts the mount of a previous daemon process instead of remounting it", async () => {
     const first = rig();
     await first.fs.mount(spec(first.sha, 2));
-    expect(readFileSync(join(first.data, "fs-mount.json"), "utf8")).not.toContain("pw");
+    const saved = readFileSync(join(first.data, "fs-mount.json"), "utf8");
+    expect(saved).not.toContain("sk-secret");
+    expect(JSON.parse(saved)).toEqual({ name: NAME, generation: 2 });
 
     const r = rig({}, first.data);
     expect(r.fs.root()).toBeNull();
@@ -102,57 +126,117 @@ describe("SharedFs", () => {
     expect(r.calls).toEqual([]);
     await r.fs.mount(spec(r.sha, 2));
     expect(r.calls).toEqual([]);
-    expect(r.sent.at(-1)).toEqual({ state: "mounted", mode: "daemon", volume: "at-0123456789abcdef", generation: 2 });
-    expect(r.fs.root()).toBe(join(r.data, "mnt", "at-0123456789abcdef"));
+    expect(r.sent.at(-1)).toEqual({ state: "mounted", mode: "daemon", name: NAME, generation: 2 });
+    expect(r.fs.root()).toBe(join(r.data, "mnt", NAME));
   });
 
   it("unmounts a mount left by a previous daemon process", async () => {
     const first = rig();
     await first.fs.mount(spec(first.sha));
     const r = rig({}, first.data);
-    await r.fs.unmount({ volume: "at-0123456789abcdef" });
+    await r.fs.unmount({ name: NAME });
     expect(r.calls.map((c) => c.cmd)).toEqual(["fusermount3"]);
     expect(existsSync(join(r.data, "fs-mount.json"))).toBe(false);
     expect(r.sent.at(-1)).toEqual({ state: "unmounted", mode: "daemon" });
   });
 
-  it("has no root once the mount point is no longer a JuiceFS mount", async () => {
+  it("ignores fs.unmount of another folder", async () => {
     const r = rig();
     await r.fs.mount(spec(r.sha));
-    rmSync(join(r.data, "mnt", "at-0123456789abcdef", ".config"));
+    await r.fs.unmount({ name: "atu-ffffffffffffffff" });
+    expect(r.calls.some((c) => c.cmd === "fusermount3")).toBe(false);
+    expect(r.fs.root()).not.toBeNull();
+  });
+
+  it("has no root once the mount point is no longer mounted", async () => {
+    const r = rig();
+    await r.fs.mount(spec(r.sha));
+    rmSync(join(r.data, "mnt", NAME, ".mounted"));
     expect(r.fs.root()).toBeNull();
     expect(r.fs.sessionDirs({ project: "projects/p1", shared: "shared" })).toBeNull();
-    expect(existsSync(join(r.data, "mnt", "at-0123456789abcdef", "projects"))).toBe(false);
+    expect(existsSync(join(r.data, "mnt", NAME, "projects"))).toBe(false);
+  });
+
+  it("mounts again when the health check finds the mount gone", async () => {
+    const r = rig({ checkMs: 20 });
+    await r.fs.mount(spec(r.sha));
+    r.fs.start();
+    rmSync(join(r.data, "mnt", NAME, ".mounted"));
+    await new Promise((res) => setTimeout(res, 300));
+    r.fs.stop();
+    expect(mounts(r).length).toBeGreaterThanOrEqual(2);
+    expect(r.fs.root()).not.toBeNull();
+  });
+
+  it("waits for geesefs to exit on shutdown, so writes it holds are uploaded", async () => {
+    const r = rig();
+    await r.fs.mount(spec(r.sha));
+    const dir = join(r.data, "mnt", NAME);
+    expect(r.procs.has(dir)).toBe(true);
+    await r.fs.shutdown();
+    expect(r.calls.at(-1)!.cmd).toBe("fusermount3");
+    expect(r.procs.has(dir)).toBe(false);
+  });
+
+  it("detaches a busy mount lazily", async () => {
+    const calls: string[][] = [];
+    const r = rig();
+    await r.fs.mount(spec(r.sha));
+    const busy = rig({
+      run: async (cmd, args) => {
+        calls.push([cmd, ...args]);
+        if (args.includes("-z")) rmSync(join(args.at(-1)!, ".mounted"), { force: true });
+        return { code: args.includes("-z") ? 0 : 1, stdout: "", stderr: "Device or resource busy" };
+      },
+    }, r.data);
+    await busy.fs.unmount({ name: NAME });
+    expect(calls.map((c) => c.slice(0, 3).join(" "))).toEqual(["fusermount3 -u " + join(r.data, "mnt", NAME), "fusermount3 -u -z"]);
   });
 
   it("refuses a client whose sha256 does not match", async () => {
     const r = rig();
     await r.fs.mount(spec("0".repeat(64)));
-    expect(r.sent.at(-1)).toMatchObject({ state: "error", error: expect.stringContaining("sha256 mismatch") });
-    expect(r.calls.some((c) => c.args[0] === "mount")).toBe(false);
+    expect(r.sent.at(-1)).toMatchObject({ state: "error", name: NAME, error: expect.stringContaining("sha256 mismatch") });
+    expect(mounts(r)).toHaveLength(0);
   });
 
-  it("reports an error without FUSE and does not advertise fs_mount", async () => {
+  it("refuses a mount client other than geesefs", async () => {
+    const r = rig();
+    const m = spec(r.sha);
+    await r.fs.mount({ ...m, client: { ...m.client, tool: "rclone" } });
+    expect(r.sent.at(-1)).toMatchObject({ state: "error", error: expect.stringContaining("geesefs only") });
+  });
+
+  it("reports a failed geesefs start", async () => {
+    const r = rig({ run: async () => ({ code: 1, stdout: "", stderr: "starting\nAccess Denied" }) });
+    await r.fs.mount(spec(r.sha));
+    expect(r.sent.at(-1)).toMatchObject({ state: "error", error: "Access Denied" });
+    expect(r.fs.root()).toBeNull();
+  });
+
+  it("reports an error without FUSE and does not advertise fs_s3_mount", async () => {
     const r = rig({ fuse: () => false });
     expect(r.fs.features()).toEqual([]);
     await r.fs.mount(spec("x"));
     expect(r.sent.at(-1)).toMatchObject({ state: "error", error: expect.stringContaining("FUSE") });
   });
 
+  it("advertises fs_s3_mount with FUSE", () => {
+    expect(rig().fs.features()).toEqual(["fs_s3_mount"]);
+  });
+
   it("unmounts and forgets on fs.unmount", async () => {
     const r = rig();
-    const sha = r.sha;
-    await r.fs.mount(spec(sha));
-    await r.fs.unmount({ volume: "at-0123456789abcdef" });
+    await r.fs.mount(spec(r.sha));
+    await r.fs.unmount({ name: NAME });
     expect(r.sent.at(-1)).toEqual({ state: "unmounted", mode: "daemon" });
     expect(r.fs.root()).toBeNull();
   });
 
-  it("creates the session directories and refuses paths outside the volume", async () => {
+  it("creates the session directories and refuses paths outside the folder", async () => {
     const r = rig();
-    const sha = r.sha;
     expect(r.fs.sessionDirs({ project: "projects/p1", shared: "shared" })).toBeNull();
-    await r.fs.mount(spec(sha));
+    await r.fs.mount(spec(r.sha));
     const d = r.fs.sessionDirs({ project: "projects/p1", shared: "shared" })!;
     expect(existsSync(d.project) && existsSync(d.shared)).toBe(true);
     expect(r.fs.sessionDirs({ project: "../../etc", shared: "shared" })).toBeNull();
@@ -160,7 +244,7 @@ describe("SharedFs", () => {
 
   it("uses an external mount without mounting anything", async () => {
     const ext = tmp();
-    writeFileSync(join(ext, ".config"), "{}");
+    writeFileSync(join(ext, ".mounted"), "");
     const r = rig({ externalDir: ext });
     expect(r.fs.features()).toEqual(["fs_external"]);
     r.fs.report();
@@ -179,11 +263,11 @@ describe("SharedFs", () => {
     never.fs.stop();
     expect(lost).toBe(0);
 
-    writeFileSync(join(ext, ".config"), "{}");
+    writeFileSync(join(ext, ".mounted"), "");
     const r = rig({ externalDir: ext, checkMs: 10, onExternalLost: () => lost++ });
     r.fs.start();
     await new Promise((res) => setTimeout(res, 30));
-    rmSync(join(ext, ".config"));
+    rmSync(join(ext, ".mounted"));
     await new Promise((res) => setTimeout(res, 50));
     r.fs.stop();
     expect(lost).toBe(1);
@@ -193,6 +277,17 @@ describe("SharedFs", () => {
   it("names platforms like the console", () => {
     expect(platformKey("linux", "x64")).toBe("linux-amd64");
     expect(platformKey("darwin", "arm64")).toBe("darwin-arm64");
+  });
+
+  it("geesefs arguments never carry the key", () => {
+    const args = geesefsArgs(spec("x"), "/m", "/log");
+    expect(args.join(" ")).not.toContain("sk-secret");
+    expect(args).toEqual(expect.arrayContaining(["--stat-cache-ttl", "5s", "--memory-limit", "1000", "--log-file", "/log"]));
+  });
+
+  it("knows a real mount point from a plain directory", () => {
+    expect(isMountPoint(tmp())).toBe(false);
+    expect(isMountPoint("/proc")).toBe(process.platform === "linux");
   });
 });
 
@@ -292,9 +387,9 @@ describe("daemon shared folder", () => {
 
   it("advertises fs_external, reports status and gives sessions the folders", async () => {
     const ext = tmp();
-    writeFileSync(join(ext, ".config"), "{}");
+    writeFileSync(join(ext, ".mounted"), "");
     mkdirSync(join(ext, "shared"));
-    h = await startHarness({ fsDir: ext });
+    h = await startHarness({ fsDir: ext, sharedFs: { mounted: marker } });
     expect(h.console.ofType("hello")[0]!.body.features).toContain("fs_external");
     expect((await h.console.waitType("fs.status")).body).toEqual({ state: "mounted", mode: "external" });
 
@@ -318,9 +413,9 @@ describe("daemon shared folder", () => {
 
   it("gives a coordinator with memory_files only the memory directories, and none without it", async () => {
     const ext = tmp();
-    writeFileSync(join(ext, ".config"), "{}");
+    writeFileSync(join(ext, ".mounted"), "");
     mkdirSync(join(ext, "shared"));
-    h = await startHarness({ fsDir: ext });
+    h = await startHarness({ fsDir: ext, sharedFs: { mounted: marker } });
     await h.console.waitType("fs.status");
     const coordinator = (id: string, memory: boolean) =>
       claudeOpen(id, 1, {

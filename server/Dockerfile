@@ -30,19 +30,6 @@ RUN go mod download
 COPY server/ ./
 RUN go build -ldflags="-s -w" -o /out/atctl ./cmd/atctl
 
-# juicefs formats and destroys the users' shared-folder volumes (AGENT_TEAMS_FS_*); pinned with its sha256.
-FROM debian:bookworm-slim AS juicefs
-ARG TARGETARCH=amd64
-ARG JUICEFS_VERSION=1.4.2
-ADD https://github.com/juicedata/juicefs/releases/download/v${JUICEFS_VERSION}/juicefs-${JUICEFS_VERSION}-linux-${TARGETARCH}.tar.gz /tmp/juicefs.tgz
-RUN case "$TARGETARCH" in \
-      amd64) sum=79648a0a67145bf42ca4e8336578c13a5bbc9a0bd34df340b3b93dac1e975247 ;; \
-      arm64) sum=19f72a30d3642a2f7971c8c4a31d2647de62f19520716e85c3a777de5f4c9036 ;; \
-      *) echo "no juicefs for $TARGETARCH" >&2; exit 1 ;; \
-    esac \
- && echo "$sum  /tmp/juicefs.tgz" | sha256sum -c - \
- && tar -xzf /tmp/juicefs.tgz -C /usr/local/bin juicefs
-
 FROM debian:bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git tzdata \
@@ -50,7 +37,6 @@ RUN apt-get update \
  && useradd --system --uid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin atctl \
  && mkdir -p /var/lib/agent-teams/git-mirrors && chown -R atctl /var/lib/agent-teams
 COPY --from=go /out/atctl /atctl
-COPY --from=juicefs /usr/local/bin/juicefs /usr/local/bin/juicefs
 COPY --from=web /out/web /srv/web
 COPY --from=node /out/node-dist /srv/node-dist
 COPY office/ /srv/office/

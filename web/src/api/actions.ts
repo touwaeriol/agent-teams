@@ -148,10 +148,9 @@ export const userMemory = {
   remove: (name: string) => unwrap(client.DELETE("/api/me/memory/{name}", { params: { path: { name } } })),
 };
 
-/** The user's JuiceFS shared folder (one volume per user). */
+/** The user's shared folder (a bucket of the object store per user). */
 export const sharedFolder = {
   enable: () => unwrap(client.POST("/api/storage/fs")),
-  dockerVolume: () => unwrap(client.POST("/api/storage/fs/docker-volume")),
 };
 
 export const roles = {

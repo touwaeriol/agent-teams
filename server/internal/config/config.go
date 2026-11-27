@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -50,54 +51,47 @@ type Config struct {
 	// AttachmentTTL (AGENT_TEAMS_ATTACHMENT_TTL, a Go duration such as 24h) is how long an
 	// attachment is kept after its last use, and how long daemons keep the downloaded copy.
 	AttachmentTTL time.Duration
-	// FS is the user shared folder (AGENT_TEAMS_FS_*, juicefs-shared-storage design); GatewayURL
-	// and Bucket empty = off.
+	// FS is the user shared folder (AGENT_TEAMS_FS_*, shared-folder design); the admin keys
+	// empty = off.
 	FS FS
 }
 
-// FS is the AGENT_TEAMS_FS_* settings of the JuiceFS shared folder.
+// FS is the AGENT_TEAMS_FS_* settings of the shared folder (one bucket, a prefix and a key per user).
 type FS struct {
-	GatewayURL     string // AGENT_TEAMS_FS_GATEWAY_URL: the console's JuiceFS gateway as nodes reach it (https://..., reverse proxy)
-	GatewayListen  string // AGENT_TEAMS_FS_GATEWAY_LISTEN: where that gateway listens, default 0.0.0.0:9310
-	AdminURL       string // AGENT_TEAMS_FS_META_ADMIN_URL: creates roles and schemas; default DATABASE_URL
-	S3Endpoint     string // AGENT_TEAMS_FS_S3_ENDPOINT, default AGENT_TEAMS_S3_ENDPOINT
-	Bucket         string // AGENT_TEAMS_FS_BUCKET: bucket all volumes share (one prefix each)
-	AdminAccessKey string // AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY: object store admin (users and policies)
-	AdminSecretKey string // AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY
-	CapacityGB     int    // AGENT_TEAMS_FS_CAPACITY_GB: each user's folder quota, default 20; 0 = no limit
-	Volume         string // AGENT_TEAMS_FS_VOLUME: the one shared volume, default agent-teams
-	MetaRole       string // AGENT_TEAMS_FS_META_ROLE: its metadata role and schema, default juicefs
-	MetaUser       string // AGENT_TEAMS_FS_META_USER: user name that role connects as (Supabase pooler: juicefs.<ref>)
-	MetaConnLimit  int    // AGENT_TEAMS_FS_META_CONN_LIMIT: that role's connection limit, default 30
-	JuiceFS        string // AGENT_TEAMS_FS_JUICEFS: the juicefs binary, default juicefs
-	ClientTool     string // AGENT_TEAMS_FS_CLIENT_TOOL: S3 mount client nodes run (geesefs, rclone), default the built-in one
-	ClientVersion  string // AGENT_TEAMS_FS_CLIENT_VERSION: its version, default the built-in one
-	ClientBase     string // AGENT_TEAMS_FS_CLIENT_BASE: download base, default the GitHub releases
+	Provider      string // AGENT_TEAMS_FS_PROVIDER: b2 (default) or rustfs (RustFS / MinIO)
+	S3Endpoint    string // AGENT_TEAMS_FS_S3_ENDPOINT: the store's S3 address as the console reaches it (rustfs: default AGENT_TEAMS_S3_ENDPOINT)
+	NodeEndpoint  string // AGENT_TEAMS_FS_NODE_ENDPOINT: as nodes reach it, default S3Endpoint
+	Region        string // AGENT_TEAMS_FS_REGION: b2 default from the endpoint (s3.<region>.backblazeb2.com), else AGENT_TEAMS_S3_REGION or us-east-1
+	Bucket        string // AGENT_TEAMS_FS_BUCKET: holds every user's folder under users/<id>/
+	AccessKey     string // AGENT_TEAMS_FS_ACCESS_KEY: b2 key id (needs writeKeys), rustfs admin access key; set = on
+	SecretKey     string // AGENT_TEAMS_FS_SECRET_KEY
+	CapacityGB    int    // AGENT_TEAMS_FS_CAPACITY_GB: each user's soft limit, default 20; 0 = no limit
+	ClientVersion string // AGENT_TEAMS_FS_CLIENT_VERSION: geesefs version nodes run, default the built-in one
+	ClientBase    string // AGENT_TEAMS_FS_CLIENT_BASE: download base, default the GitHub releases
 	// ClientSHA256 (AGENT_TEAMS_FS_CLIENT_SHA256: platform=sha,platform=sha) replaces the built-in
 	// checksums; required with another ClientVersion.
 	ClientSHA256 map[string]string
 }
 
 // Configured tells whether the shared folder is switched on.
-func (f FS) Configured() bool { return f.GatewayURL != "" || f.Bucket != "" }
+func (f FS) Configured() bool { return f.AccessKey != "" || f.SecretKey != "" }
+
+var b2EndpointRE = regexp.MustCompile(`^https://s3\.([a-z0-9-]+)\.backblazeb2\.com$`)
 
 func (f FS) check() error {
 	if !f.Configured() {
 		return nil
 	}
-	if f.GatewayURL == "" || f.Bucket == "" || f.S3Endpoint == "" || f.AdminAccessKey == "" || f.AdminSecretKey == "" {
-		return errors.New("shared folder: set AGENT_TEAMS_FS_GATEWAY_URL, AGENT_TEAMS_FS_BUCKET, AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY and AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY (and an S3 endpoint), or none")
+	if f.Provider != "b2" && f.Provider != "rustfs" {
+		return errors.New("AGENT_TEAMS_FS_PROVIDER must be b2 or rustfs")
 	}
-	if !IsOrigin(f.GatewayURL) {
-		return errors.New("AGENT_TEAMS_FS_GATEWAY_URL must be an http(s) origin such as https://fs.example.com")
+	if f.S3Endpoint == "" || f.Bucket == "" || f.AccessKey == "" || f.SecretKey == "" {
+		return errors.New("shared folder: set AGENT_TEAMS_FS_ACCESS_KEY, AGENT_TEAMS_FS_SECRET_KEY, AGENT_TEAMS_FS_BUCKET and AGENT_TEAMS_FS_S3_ENDPOINT, or none")
 	}
-	if f.GatewayListen != "" {
-		if _, _, err := net.SplitHostPort(f.GatewayListen); err != nil {
-			return errors.New("AGENT_TEAMS_FS_GATEWAY_LISTEN must be host:port")
+	for _, e := range []string{f.S3Endpoint, f.NodeEndpoint} {
+		if e != "" && !IsOrigin(e) {
+			return fmt.Errorf("shared folder: %q is no http(s) origin", e)
 		}
-	}
-	if f.ClientTool != "" && f.ClientTool != "geesefs" && f.ClientTool != "rclone" {
-		return errors.New("AGENT_TEAMS_FS_CLIENT_TOOL must be geesefs or rclone")
 	}
 	if f.ClientVersion != "" && len(f.ClientSHA256) == 0 {
 		return errors.New("AGENT_TEAMS_FS_CLIENT_VERSION needs AGENT_TEAMS_FS_CLIENT_SHA256 (platform=sha256,...)")
@@ -105,23 +99,28 @@ func (f FS) check() error {
 	return nil
 }
 
-func fsConfig(getenv Getenv, databaseURL, s3Endpoint string) (FS, error) {
+func fsConfig(getenv Getenv, s3Endpoint, s3Region string) (FS, error) {
 	f := FS{
-		GatewayURL:     strings.TrimRight(strings.TrimSpace(getenv("AGENT_TEAMS_FS_GATEWAY_URL")), "/"),
-		GatewayListen:  strings.TrimSpace(getenv("AGENT_TEAMS_FS_GATEWAY_LISTEN")),
-		ClientTool:     strings.TrimSpace(getenv("AGENT_TEAMS_FS_CLIENT_TOOL")),
-		AdminURL:       first(getenv("AGENT_TEAMS_FS_META_ADMIN_URL"), databaseURL),
-		S3Endpoint:     strings.TrimRight(first(getenv("AGENT_TEAMS_FS_S3_ENDPOINT"), s3Endpoint), "/"),
-		Bucket:         getenv("AGENT_TEAMS_FS_BUCKET"),
-		AdminAccessKey: getenv("AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY"),
-		AdminSecretKey: getenv("AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY"),
-		CapacityGB:     20,
-		Volume:         strings.TrimSpace(getenv("AGENT_TEAMS_FS_VOLUME")),
-		MetaRole:       strings.TrimSpace(getenv("AGENT_TEAMS_FS_META_ROLE")),
-		MetaUser:       strings.TrimSpace(getenv("AGENT_TEAMS_FS_META_USER")),
-		JuiceFS:        first(getenv("AGENT_TEAMS_FS_JUICEFS"), "juicefs"),
-		ClientVersion:  getenv("AGENT_TEAMS_FS_CLIENT_VERSION"),
-		ClientBase:     strings.TrimRight(getenv("AGENT_TEAMS_FS_CLIENT_BASE"), "/"),
+		Provider:      first(strings.ToLower(strings.TrimSpace(getenv("AGENT_TEAMS_FS_PROVIDER"))), "b2"),
+		S3Endpoint:    strings.TrimRight(strings.TrimSpace(getenv("AGENT_TEAMS_FS_S3_ENDPOINT")), "/"),
+		NodeEndpoint:  strings.TrimRight(strings.TrimSpace(getenv("AGENT_TEAMS_FS_NODE_ENDPOINT")), "/"),
+		Region:        strings.TrimSpace(getenv("AGENT_TEAMS_FS_REGION")),
+		Bucket:        strings.TrimSpace(getenv("AGENT_TEAMS_FS_BUCKET")),
+		AccessKey:     strings.TrimSpace(getenv("AGENT_TEAMS_FS_ACCESS_KEY")),
+		SecretKey:     strings.TrimSpace(getenv("AGENT_TEAMS_FS_SECRET_KEY")),
+		CapacityGB:    20,
+		ClientVersion: getenv("AGENT_TEAMS_FS_CLIENT_VERSION"),
+		ClientBase:    strings.TrimRight(getenv("AGENT_TEAMS_FS_CLIENT_BASE"), "/"),
+	}
+	if f.Provider == "rustfs" && f.S3Endpoint == "" {
+		f.S3Endpoint = s3Endpoint
+	}
+	if f.Region == "" {
+		if m := b2EndpointRE.FindStringSubmatch(f.S3Endpoint); m != nil {
+			f.Region = m[1]
+		} else {
+			f.Region = s3Region
+		}
 	}
 	if v := strings.TrimSpace(getenv("AGENT_TEAMS_FS_CAPACITY_GB")); v != "" {
 		n, err := strconv.Atoi(v)
@@ -129,13 +128,6 @@ func fsConfig(getenv Getenv, databaseURL, s3Endpoint string) (FS, error) {
 			return f, errors.New("AGENT_TEAMS_FS_CAPACITY_GB must be a number of GiB (0 = no limit)")
 		}
 		f.CapacityGB = n
-	}
-	if v := strings.TrimSpace(getenv("AGENT_TEAMS_FS_META_CONN_LIMIT")); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 {
-			return f, errors.New("AGENT_TEAMS_FS_META_CONN_LIMIT must be a positive number")
-		}
-		f.MetaConnLimit = n
 	}
 	for _, kv := range strings.Split(getenv("AGENT_TEAMS_FS_CLIENT_SHA256"), ",") {
 		k, v, ok := strings.Cut(strings.TrimSpace(kv), "=")
@@ -250,7 +242,7 @@ func Load(getenv Getenv) (Config, error) {
 		return cfg, err
 	}
 	cfg.AttachmentTTL = ttl
-	if cfg.FS, err = fsConfig(getenv, cfg.DatabaseURL, cfg.S3.Endpoint); err != nil {
+	if cfg.FS, err = fsConfig(getenv, cfg.S3.Endpoint, cfg.S3.Region); err != nil {
 		return cfg, err
 	}
 	return cfg, cfg.check()

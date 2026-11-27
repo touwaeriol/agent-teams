@@ -87,7 +87,7 @@ func (s *Service) openForImport(ctx context.Context, userID string) (Files, erro
 		return nil, err
 	}
 	if vol.State != StateReady {
-		return nil, fmt.Errorf("volume %s is %s: %s", vol.Volume, vol.State, vol.Error)
+		return nil, fmt.Errorf("bucket %s is %s: %s", vol.Bucket, vol.State, vol.Error)
 	}
 	return s.Files(ctx, userID)
 }

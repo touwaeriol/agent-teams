@@ -1,5 +1,5 @@
-// Project files: the project's folder in the user's shared folder (JuiceFS, projects/<pid>/ of the
-// volume; .project-files/ in every employee's working directory). Path rules, breadcrumbs, the
+// Project files: the project's folder in the user's shared folder (projects/<pid>/ of the
+// user's shared folder; .project-files/ in every employee's working directory). Path rules, breadcrumbs, the
 // upload plan and the multipart upload with progress live here; the page is pages/ProjectFiles.vue.
 import { ApiError, csrfToken, CSRF_HEADER, toApiError } from "@/api/client";
 import type { FileEntry, FilesUploaded, FsView } from "@/api/views";

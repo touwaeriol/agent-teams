@@ -33,8 +33,10 @@ export interface NodeConfig {
    * (total time for one attachment, all retries and fallbacks included; default 600), AGENT_TEAMS_ATTACHMENT_MIN_FREE_MB (disk space left after a download, default 512).
    */
   attachments?: Partial<AttachmentOptions>;
-  /** AGENT_TEAMS_FS_DIR: the shared folder mounted by something else (Docker volume plugin); the daemon then never mounts it itself. */
+  /** AGENT_TEAMS_FS_DIR: the shared folder mounted by something else (a host mount bound in); the daemon then never mounts it itself. */
   fsDir?: string;
+  /** AGENT_TEAMS_FS_MOUNT_DIR: where the daemon mounts the shared folder itself (default <data>/mnt/<name>; the node image sets /home/agent/.fs). */
+  fsMountDir?: string;
 }
 
 export class ConfigError extends Error {}
@@ -148,6 +150,7 @@ export function loadConfig(argv: string[], env: NodeJS.ProcessEnv = process.env)
     ...usageInterval(get("AGENT_TEAMS_USAGE_INTERVAL_S")),
     attachments: attachmentOptions(get),
     ...(get("AGENT_TEAMS_FS_DIR") ? { fsDir: resolve(get("AGENT_TEAMS_FS_DIR")!) } : {}),
+    ...(get("AGENT_TEAMS_FS_MOUNT_DIR") ? { fsMountDir: resolve(get("AGENT_TEAMS_FS_MOUNT_DIR")!) } : {}),
   };
 }
 

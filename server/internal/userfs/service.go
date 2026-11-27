@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,75 +13,40 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// Meta creates the volume's PostgreSQL role and schema and reads usage from its metadata.
-type Meta interface {
-	// Ensure creates the role (login, password) and its schema, or resets the password of an
-	// existing one. Idempotent.
-	Ensure(ctx context.Context, role, password string) error
-	// Usage reads what a folder of the volume holds from its directory quota (zero before the
-	// volume was formatted or the folder got its quota).
-	Usage(ctx context.Context, schema, dir string) (Usage, error)
-}
-
-// Usage is what a folder holds: bytes in use (JuiceFS counts in 4 KiB blocks) and files plus folders.
+// Usage is what a user's folder holds.
 type Usage struct {
 	UsedBytes int64 `json:"used_bytes"`
-	Inodes    int64 `json:"inodes"`
+	Objects   int64 `json:"objects"`
 }
 
-// IAM creates the volume's object-store account.
-type IAM interface {
-	// Ensure creates (or resets) the account and attaches a policy allowing only the volume's prefix.
-	Ensure(ctx context.Context, n Names, secretKey string, policy []byte) error
+// Store is the object store provider: the platform bucket with the users' folders as prefixes,
+// and per-user keys limited to a prefix (B2 application keys, RustFS / MinIO IAM users).
+type Store interface {
+	// Files is a folder's tree, read and written with the platform key.
+	Files(prefix string) Files
+	// Prepare makes sure the bucket is there.
+	Prepare(ctx context.Context) error
+	// RemovePrefix deletes everything under a folder (a missing one is fine).
+	RemovePrefix(ctx context.Context, prefix string) error
+	// Prefixes lists the folders under users/.
+	Prefixes(ctx context.Context) ([]string, error)
+	// Usage counts what a folder holds.
+	Usage(ctx context.Context, prefix string) (Usage, error)
+	// IssueKey makes a key for the user's folder: list, read and delete, and write when write is set.
+	IssueKey(ctx context.Context, n UserNames, write bool) (Key, error)
+	// RevokeKey deletes a key (a missing one is fine).
+	RevokeKey(ctx context.Context, n UserNames, keyID string) error
+	// Keys lists the store's keys.
+	Keys(ctx context.Context) ([]KeyInfo, error)
 }
 
-// Volumes formats the JuiceFS volume, sets folder quotas and runs the gateway over it (the juicefs CLI).
-type Volumes interface {
-	// Format creates the volume, or updates the settings of an existing one with that name.
-	Format(ctx context.Context, f FormatSpec) error
-	// Quota sets the capacity of a folder of the volume (path from the root, "/u-<id>").
-	Quota(ctx context.Context, metaURL, metaPassword, path string, capacityGB int) error
-	// Serve runs the gateway (once per process) and returns the console's root access to it.
-	Serve(ctx context.Context, spec GatewaySpec) (Gateway, error)
-}
-
-// Gateway is the console's root access to the gateway: the users' buckets (the volume's
-// top-level folders) and IAM users.
-type Gateway interface {
-	// Files is a bucket's tree.
-	Files(bucket string) Files
-	// MakeBucket creates a bucket (an existing one is fine).
-	MakeBucket(ctx context.Context, bucket string) error
-	// RemoveBucket deletes a bucket with everything in it (a missing one is fine).
-	RemoveBucket(ctx context.Context, bucket string) error
-	// Buckets lists the buckets.
-	Buckets(ctx context.Context) ([]string, error)
-	// EnsureUser creates (or resets) the user's IAM user, allowed its bucket only.
-	EnsureUser(ctx context.Context, n UserNames, secretKey string) error
-	// RemoveUser deletes the user's IAM user and policy (missing ones are fine).
-	RemoveUser(ctx context.Context, n UserNames) error
-}
-
-// FormatSpec is one juicefs format.
-type FormatSpec struct {
-	MetaURL      string
-	MetaPassword string
-	Volume       string
-	Bucket       string
-	AccessKey    string
-	SecretKey    string
-}
-
-// Service provisions the shared volume and the users' folders in it, and hands nodes their mount
-// settings.
+// Service provisions the users' folders and hands nodes their mount settings.
 type Service struct {
-	cfg     Config
-	db      store.DB
-	vault   *credvault.Vault
-	meta    Meta
-	iam     IAM
-	volumes Volumes
-	log     *slog.Logger
+	cfg   Config
+	db    store.DB
+	vault *credvault.Vault
+	store Store
+	log   *slog.Logger
 	// OnChange runs after a user's volume became ready or was removed (push fs.mount / fs.unmount
 	// to the user's nodes).
 	OnChange func(ctx context.Context, userID string)
@@ -93,23 +57,20 @@ type Service struct {
 	bg sync.WaitGroup
 
 	orphanMu sync.Mutex
-	suspects map[string]bool // folders without a row at the last SweepOrphans
-
-	volMu  sync.Mutex
-	shared *shared // the volume, once provisioned by this process
+	suspects map[string]bool // folders and keys without a row at the last SweepOrphans
 }
 
 // ErrBusy: the folder is being switched on; it can be deleted once that ends.
 var ErrBusy = errors.New("共享文件夹正在开启，请稍后再删除")
 
-// New builds the service; meta, iam and volumes nil = the real backends from cfg.
-func New(cfg Config, db store.DB, vault *credvault.Vault, meta Meta, iam IAM, volumes Volumes, log *slog.Logger) *Service {
-	return &Service{cfg: cfg, db: db, vault: vault, meta: meta, iam: iam, volumes: volumes, log: log}
+// New builds the service on st (NewB2 or NewRustFS from cfg in production).
+func New(cfg Config, db store.DB, vault *credvault.Vault, st Store, log *slog.Logger) *Service {
+	return &Service{cfg: cfg, db: db, vault: vault, store: st, log: log}
 }
 
-// Enabled tells whether the console can provision volumes.
+// Enabled tells whether the console can provision folders.
 func (s *Service) Enabled() bool {
-	return s != nil && s.cfg.Enabled() && s.vault.Ready() && s.meta != nil && s.iam != nil && s.volumes != nil
+	return s != nil && s.cfg.Enabled() && s.vault.Ready() && s.store != nil
 }
 
 // Get returns the user's folder.
@@ -126,7 +87,7 @@ func (s *Service) Usage(ctx context.Context, userID string) (Usage, error) {
 	if vol.State != StateReady {
 		return Usage{}, nil
 	}
-	return s.meta.Usage(ctx, s.cfg.SharedNames().Role, vol.Bucket)
+	return s.store.Usage(ctx, vol.Prefix)
 }
 
 // Enable provisions the user's folder (or finishes a provisioning that failed). It returns the
@@ -138,7 +99,7 @@ func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
 		return Volume{}, ErrDisabled
 	}
 	ctx = context.WithoutCancel(ctx)
-	vol, owned, err := insert(ctx, s.db, s.vault, s.cfg.SharedNames().Volume, userID, s.cfg.CapacityGB)
+	vol, owned, err := insert(ctx, s.db, s.cfg.Bucket, NamesOf(userID), userID, s.cfg.CapacityGB)
 	if err == nil && !owned {
 		var claimed Volume
 		if claimed, owned, err = claimProvisioning(ctx, s.db, userID); owned {
@@ -149,7 +110,7 @@ func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
 		return vol, err
 	}
 	if err := s.provision(ctx, vol); err != nil {
-		s.log.Warn("shared folder provisioning failed", "user_id", userID, "bucket", vol.Bucket, "err", err)
+		s.log.Warn("shared folder provisioning failed", "user_id", userID, "prefix", vol.Prefix, "err", err)
 		_ = setState(ctx, s.db, userID, StateError, err.Error())
 		return Get(ctx, s.db, userID)
 	}
@@ -184,34 +145,44 @@ func (s *Service) ProvisionAll(ctx context.Context) (int, error) {
 	return ready, nil
 }
 
-// provision makes the user's bucket (provisioning the volume and its gateway first when this
-// process has not yet), with its projects/ and shared/ folders and its quota, then the IAM user
-// allowed that bucket.
+// provision makes the user's folder with its projects/ and shared/ folders, then a key for it
+// (replacing the key of an earlier attempt).
 func (s *Service) provision(ctx context.Context, vol Volume) error {
-	v, err := s.volume(ctx)
-	if err != nil {
-		return err
+	if err := s.store.Prepare(ctx); err != nil {
+		return fmt.Errorf("对象存储 bucket：%w", err)
 	}
-	if err := v.gw.MakeBucket(ctx, vol.Bucket); err != nil {
-		return fmt.Errorf("创建 bucket：%w", err)
-	}
-	f := v.gw.Files(vol.Bucket)
+	f := s.store.Files(vol.Prefix)
 	for _, dir := range []string{"projects", SharedDir} {
 		if err := f.Mkdir(ctx, dir); err != nil {
 			return fmt.Errorf("创建目录 %s：%w", dir, err)
 		}
 	}
-	if err := s.volumes.Quota(ctx, v.metaURL, v.secrets.MetaPassword, "/"+vol.Bucket, vol.CapacityGB); err != nil {
-		return fmt.Errorf("目录配额：%w", err)
-	}
-	sec, err := userSecrets(ctx, s.db, s.vault, vol)
-	if err != nil {
-		return err
-	}
-	if err := v.gw.EnsureUser(ctx, vol.Names(), sec.SecretKey); err != nil {
-		return fmt.Errorf("网关账号：%w", err)
+	if _, err := s.rotate(ctx, vol, false); err != nil {
+		return fmt.Errorf("对象存储密钥：%w", err)
 	}
 	return nil
+}
+
+// rotate issues the volume a new key (one that cannot write when readOnly), records it under a
+// new generation and revokes the previous one; it returns the volume as stored. The caller pushes
+// the new fs.mount (OnChange).
+func (s *Service) rotate(ctx context.Context, vol Volume, readOnly bool) (Volume, error) {
+	n := vol.Names()
+	key, err := s.store.IssueKey(ctx, n, !readOnly)
+	if err != nil {
+		return vol, err
+	}
+	stored, err := storeKey(ctx, s.db, s.vault, vol, key, readOnly)
+	if err != nil {
+		_ = s.store.RevokeKey(ctx, n, key.ID)
+		return vol, err
+	}
+	if vol.AccessKey != "" && vol.AccessKey != key.ID {
+		if err := s.store.RevokeKey(ctx, n, vol.AccessKey); err != nil {
+			s.log.Warn("shared folder: previous key not revoked", "user_id", vol.UserID, "err", err)
+		}
+	}
+	return stored, nil
 }
 
 // Disable deletes the user's folder (the account is being deleted) with every file in it. It
@@ -252,19 +223,9 @@ func (s *Service) notClaimed(ctx context.Context, userID string) error {
 // Wait blocks until the deletions in progress have ended.
 func (s *Service) Wait() { s.bg.Wait() }
 
-// Close stops what the volume backends keep running (the console's juicefs gateways), at shutdown.
-func (s *Service) Close() {
-	if s == nil {
-		return
-	}
-	if c, ok := s.volumes.(interface{ Shutdown() }); ok {
-		c.Shutdown()
-	}
-}
-
 func (s *Service) finishDisable(ctx context.Context, vol Volume) {
 	if err := s.teardown(ctx, vol); err != nil {
-		s.log.Warn("shared folder deletion failed", "user_id", vol.UserID, "bucket", vol.Bucket, "err", err)
+		s.log.Warn("shared folder deletion failed", "user_id", vol.UserID, "prefix", vol.Prefix, "err", err)
 		_ = setState(ctx, s.db, vol.UserID, StateError, "删除失败："+err.Error())
 		return
 	}
@@ -273,28 +234,15 @@ func (s *Service) finishDisable(ctx context.Context, vol Volume) {
 	}
 }
 
-// teardown revokes the user's key (every node loses the bucket at once), then deletes the bucket
+// teardown revokes the user's key (every node loses the folder at once), then deletes the folder
 // once its nodes unmounted.
 func (s *Service) teardown(ctx context.Context, vol Volume) error {
-	v, err := s.volume(ctx)
-	if err != nil {
-		return err
-	}
-	if err := v.gw.RemoveUser(ctx, vol.Names()); err != nil {
-		return fmt.Errorf("删除网关账号：%w", err)
+	if err := s.store.RevokeKey(ctx, vol.Names(), vol.AccessKey); err != nil {
+		return fmt.Errorf("删除对象存储密钥：%w", err)
 	}
 	s.waitUnmounted(ctx, vol)
-	return s.removeBucket(ctx, vol.Bucket)
-}
-
-// removeBucket deletes a user's bucket with everything in it (nothing there is fine).
-func (s *Service) removeBucket(ctx context.Context, bucket string) error {
-	v, err := s.volume(ctx)
-	if err != nil {
-		return err
-	}
-	if err := v.gw.RemoveBucket(ctx, bucket); err != nil {
-		return fmt.Errorf("删除 bucket：%w", err)
+	if err := s.store.RemovePrefix(ctx, vol.Prefix); err != nil {
+		return fmt.Errorf("删除文件夹：%w", err)
 	}
 	return nil
 }
@@ -305,7 +253,7 @@ func (s *Service) removeBucket(ctx context.Context, bucket string) error {
 func (s *Service) waitUnmounted(ctx context.Context, vol Volume) {
 	deadline := time.Now().Add(orDefault(s.UnmountWait, time.Minute))
 	for time.Now().Before(deadline) {
-		ids, err := mountedNodes(ctx, s.db, vol.UserID, vol.Bucket, true)
+		ids, err := mountedNodes(ctx, s.db, vol.UserID, vol.Names().Name, true)
 		if err != nil || len(ids) == 0 {
 			break
 		}
@@ -315,8 +263,8 @@ func (s *Service) waitUnmounted(ctx context.Context, vol Volume) {
 		case <-time.After(orDefault(s.UnmountPoll, time.Second)):
 		}
 	}
-	if ids, _ := mountedNodes(ctx, s.db, vol.UserID, vol.Bucket, false); len(ids) > 0 {
-		s.log.Warn("shared folder removed while nodes still report it mounted", "user_id", vol.UserID, "bucket", vol.Bucket, "nodes", ids)
+	if ids, _ := mountedNodes(ctx, s.db, vol.UserID, vol.Names().Name, false); len(ids) > 0 {
+		s.log.Warn("shared folder removed while nodes still report it mounted", "user_id", vol.UserID, "prefix", vol.Prefix, "nodes", ids)
 	}
 }
 
@@ -333,8 +281,8 @@ func (s *Service) changed(ctx context.Context, userID string) {
 	}
 }
 
-// MountSpec is the fs.mount for the user's nodes: the user's bucket of the gateway and its key;
-// ErrNotFound unless the folder is ready.
+// MountSpec is the fs.mount for the user's nodes: the user's folder and its key; ErrNotFound
+// unless the folder is ready.
 func (s *Service) MountSpec(ctx context.Context, userID string) (protocol.FsMount, error) {
 	if !s.Enabled() {
 		return protocol.FsMount{}, ErrDisabled
@@ -347,11 +295,12 @@ func (s *Service) MountSpec(ctx context.Context, userID string) (protocol.FsMoun
 	if err != nil {
 		return protocol.FsMount{}, err
 	}
+	region := s.cfg.region()
 	assets := []protocol.FsMountClientAssetsElem{}
 	for _, a := range s.cfg.ClientAssets() {
 		assets = append(assets, protocol.FsMountClientAssetsElem{Platform: a.Platform, URL: a.URL, SHA256: a.SHA256})
 	}
-	return protocol.FsMount{Bucket: vol.Bucket, Generation: vol.Generation, Endpoint: strings.TrimSuffix(s.cfg.GatewayURL, "/"),
+	return protocol.FsMount{Name: vol.Names().Name, Bucket: vol.Bucket, Prefix: vol.Prefix, Generation: vol.Generation, Endpoint: s.cfg.nodeEndpoint(), Region: &region,
 		AccessKey: vol.AccessKey, SecretKey: sec.SecretKey,
 		Client: protocol.FsMountClient{Tool: protocol.FsMountClientTool(s.cfg.clientTool()), Version: s.cfg.ClientVersion, Assets: assets}}, nil
 }
@@ -362,13 +311,13 @@ func (s *Service) ready(ctx context.Context, userID string) (Volume, error) {
 	if err != nil {
 		return vol, err
 	}
-	if vol.State != StateReady || vol.Bucket == "" {
+	if vol.State != StateReady || vol.AccessKey == "" {
 		return vol, ErrNotFound
 	}
 	return vol, nil
 }
 
-// Files is the tree of the user's ready bucket (ErrNotFound unless ready), for the console's own
+// Files is the tree of the user's ready folder (ErrNotFound unless ready), for the console's own
 // reads and writes.
 func (s *Service) Files(ctx context.Context, userID string) (Files, error) {
 	if !s.Enabled() {
@@ -378,11 +327,7 @@ func (s *Service) Files(ctx context.Context, userID string) (Files, error) {
 	if err != nil {
 		return nil, err
 	}
-	v, err := s.volume(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return v.gw.Files(vol.Bucket), nil
+	return s.store.Files(vol.Prefix), nil
 }
 
 // Ready tells whether the user has a ready folder (session.open sends a shared folder only then).

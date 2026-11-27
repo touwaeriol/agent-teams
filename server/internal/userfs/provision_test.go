@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,10 +29,10 @@ func setNodeFs(t *testing.T, st *store.Store, nodeID, status string) {
 	}
 }
 
-// TestGenerationGrowsAcrossReenable: a folder switched off and on again keeps its deterministic
-// path but never its generation (nodes remount).
+// TestGenerationGrowsAcrossReenable: a folder deleted and made again keeps its deterministic
+// folder but never its generation (nodes remount), and its new secret opens under the new one.
 func TestGenerationGrowsAcrossReenable(t *testing.T) {
-	s, _, _, _, _ := newTest(t)
+	s, _, _ := newTest(t)
 	ctx := context.Background()
 	first, err := s.Enable(ctx, "u1")
 	if err != nil {
@@ -48,7 +46,7 @@ func TestGenerationGrowsAcrossReenable(t *testing.T) {
 	if err != nil || second.State != StateReady {
 		t.Fatalf("re-enable: %+v %v", second, err)
 	}
-	if second.Subdir != first.Subdir || second.Generation <= first.Generation {
+	if second.Prefix != first.Prefix || second.Generation <= first.Generation {
 		t.Fatalf("generation %d after %d", second.Generation, first.Generation)
 	}
 	if spec, err := s.MountSpec(ctx, "u1"); err != nil || spec.Generation != second.Generation {
@@ -56,9 +54,9 @@ func TestGenerationGrowsAcrossReenable(t *testing.T) {
 	}
 }
 
-// TestConcurrentEnableFormatsOnce: only the call that created (or claimed) the row provisions.
-func TestConcurrentEnableFormatsOnce(t *testing.T) {
-	s, _, _, vols, _ := newTest(t)
+// TestConcurrentEnableProvisionsOnce: only the call that created (or claimed) the row provisions.
+func TestConcurrentEnableProvisionsOnce(t *testing.T) {
+	s, fs, _ := newTest(t)
 	var wg sync.WaitGroup
 	for range 6 {
 		wg.Add(1)
@@ -70,14 +68,14 @@ func TestConcurrentEnableFormatsOnce(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if vols.formats != 1 {
-		t.Fatalf("formatted %d times", vols.formats)
+	if fs.prepares != 1 || fs.keyCount() != 1 {
+		t.Fatalf("provisioned %d times, %d keys", fs.prepares, fs.keyCount())
 	}
 }
 
 // TestEnableSurvivesClientCancel: a cancelled request still finishes provisioning.
 func TestEnableSurvivesClientCancel(t *testing.T) {
-	s, _, _, _, _ := newTest(t)
+	s, _, _ := newTest(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if vol, err := s.Enable(ctx, "u1"); err != nil || vol.State != StateReady {
@@ -88,16 +86,16 @@ func TestEnableSurvivesClientCancel(t *testing.T) {
 // TestDisableWhileProvisioningIsBusy: a deletion does not race a provisioning; one already
 // running is not started twice.
 func TestDisableWhileProvisioningIsBusy(t *testing.T) {
-	s, _, _, vols, st := newTest(t)
+	s, fs, st := newTest(t)
 	ctx := context.Background()
-	if _, _, err := insert(ctx, st.Pool, DefaultVolume, "u1", 20); err != nil {
+	if _, _, err := insert(ctx, st.Pool, "fs", NamesOf("u1"), "u1", 20); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Disable(ctx, "u1"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("disable while provisioning: %v", err)
 	}
-	if vol, err := s.Enable(ctx, "u1"); err != nil || vol.State != StateProvisioning || vols.formats != 0 {
-		t.Fatalf("enable while another provisions: %+v %v formats %d", vol, err, vols.formats)
+	if vol, err := s.Enable(ctx, "u1"); err != nil || vol.State != StateProvisioning || fs.prepares != 0 {
+		t.Fatalf("enable while another provisions: %+v %v prepares %d", vol, err, fs.prepares)
 	}
 	// An abandoned provisioning is taken over.
 	if _, err := store.Exec(ctx, st.Pool, `UPDATE at_user_fs SET updated_at = now() - interval '1 hour'`); err != nil {
@@ -109,25 +107,25 @@ func TestDisableWhileProvisioningIsBusy(t *testing.T) {
 	if err := setState(ctx, st.Pool, "u1", StateDeleting, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Disable(ctx, "u1"); err != nil || !exists(vols.userPath("u1")) {
+	if err := s.Disable(ctx, "u1"); err != nil || !exists(fs.userPath("u1")) {
 		t.Fatalf("disable while deleting: %v", err)
 	}
 }
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
-// TestDisableWaitsForUnmount: the folder is removed only once the daemon that mounted it reports
-// it unmounted (another user's folder of the same volume does not count); a Docker-mounted node
-// cannot unmount, so the deletion goes on after the bounded wait.
+// TestDisableWaitsForUnmount: the key is revoked at once, the folder removed only once the daemon
+// that mounted it reports it unmounted (another folder does not count); a node mounting it outside
+// the daemon cannot unmount, so the deletion goes on after the bounded wait.
 func TestDisableWaitsForUnmount(t *testing.T) {
-	s, _, _, vols, st := newTest(t)
+	s, fs, st := newTest(t)
 	ctx := context.Background()
 	vol, err := s.Enable(ctx, "u1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	setNodeFs(t, st, "n1", `{"state":"mounted","mode":"daemon","volume":"`+vol.Volume+`","subdir":"`+vol.Subdir+`","generation":1}`)
-	setNodeFs(t, st, "n2", `{"state":"mounted","mode":"daemon","volume":"`+vol.Volume+`","subdir":"users/other"}`)
+	setNodeFs(t, st, "n1", `{"state":"mounted","mode":"daemon","name":"`+vol.Names().Name+`","generation":1}`)
+	setNodeFs(t, st, "n2", `{"state":"mounted","mode":"daemon","name":"atu-other"}`)
 	if err := s.Disable(ctx, "u1"); err != nil {
 		t.Fatal(err)
 	}
@@ -135,12 +133,15 @@ func TestDisableWaitsForUnmount(t *testing.T) {
 		t.Fatalf("state %q", got.State)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if !exists(vols.userPath("u1")) {
+	if !exists(fs.userPath("u1")) {
 		t.Fatal("removed while a node still mounts it")
+	}
+	if fs.keyCount() != 0 {
+		t.Fatal("key not revoked at once")
 	}
 	setNodeFs(t, st, "n1", `{"state":"unmounted","mode":"daemon"}`)
 	s.Wait()
-	if _, err := s.Get(ctx, "u1"); !IsNotFound(err) || exists(vols.userPath("u1")) {
+	if _, err := s.Get(ctx, "u1"); !IsNotFound(err) || exists(fs.userPath("u1")) {
 		t.Fatalf("after unmount: %v", err)
 	}
 
@@ -153,21 +154,21 @@ func TestDisableWaitsForUnmount(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Wait()
-	if exists(vols.userPath("u1")) {
+	if exists(fs.userPath("u1")) {
 		t.Fatal("external mount held the deletion")
 	}
 }
 
-// TestDisableWithoutVolume: a folder whose provisioning failed before the volume existed is
+// TestDisableWithoutKey: a folder whose provisioning failed before it had a key is
 // deleted all the same.
-func TestDisableWithoutVolume(t *testing.T) {
-	s, m, _, _, _ := newTest(t)
+func TestDisableWithoutKey(t *testing.T) {
+	s, fs, _ := newTest(t)
 	ctx := context.Background()
-	m.fail = errors.New("connection refused")
+	fs.fail = errors.New("connection refused")
 	if vol, _ := s.Enable(ctx, "u1"); vol.State != StateError {
 		t.Fatalf("state %q", vol.State)
 	}
-	m.fail = nil
+	fs.fail = nil
 	if err := s.Disable(ctx, "u1"); err != nil {
 		t.Fatal(err)
 	}
@@ -180,17 +181,17 @@ func TestDisableWithoutVolume(t *testing.T) {
 // TestProvisionAll: the folder is on by default: every active user without one gets it; a failed
 // attempt waits retryAfter before the next sweep tries again; a deactivated account gets none.
 func TestProvisionAll(t *testing.T) {
-	s, m, _, _, st := newTest(t)
+	s, fs, st := newTest(t)
 	ctx := context.Background()
 	if _, err := store.Exec(ctx, st.Pool, `INSERT INTO at_users (id, email, password_hash) VALUES ('u2', 'b@example.com', 'x');
 		INSERT INTO at_users (id, email, password_hash, active) VALUES ('u3', 'c@example.com', 'x', false)`); err != nil {
 		t.Fatal(err)
 	}
-	m.fail = errors.New("connection refused")
+	fs.fail = errors.New("connection refused")
 	if n, err := s.ProvisionAll(ctx); err != nil || n != 0 {
 		t.Fatalf("failing sweep: %d %v", n, err)
 	}
-	m.fail = nil
+	fs.fail = nil
 	if n, err := s.ProvisionAll(ctx); err != nil || n != 0 {
 		t.Fatalf("a failed volume is retried at once: %d %v", n, err)
 	}
@@ -210,82 +211,5 @@ func TestProvisionAll(t *testing.T) {
 	}
 	if _, err := s.Get(ctx, "u3"); !IsNotFound(err) {
 		t.Fatalf("a deactivated account got a folder: %v", err)
-	}
-}
-
-// TestConsoleMetaTLS: the console's metadata URLs connect like AGENT_TEAMS_FS_META_ADMIN_URL.
-func TestConsoleMetaTLS(t *testing.T) {
-	s, _, _, vols, _ := newTest(t)
-	s.cfg.AdminURL = "postgres://admin:pw@db.internal:5432/agent_teams?sslmode=verify-full&sslrootcert=/etc/ca.pem"
-	ctx := context.Background()
-	if _, err := s.Enable(ctx, "u1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Files(ctx, "u1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Disable(ctx, "u1"); err != nil {
-		t.Fatal(err)
-	}
-	s.Wait()
-	urls := append([]string{vols.formatted[DefaultVolume].MetaURL}, vols.opened...)
-	for _, u := range urls {
-		if !strings.Contains(u, "sslmode=verify-full") || !strings.Contains(u, "sslrootcert=%2Fetc%2Fca.pem") || strings.Contains(u, "pw") {
-			t.Fatalf("meta url %q", u)
-		}
-	}
-	if len(urls) < 3 {
-		t.Fatalf("urls %v", urls)
-	}
-}
-
-// TestGatewaysStartOutsideTheLock: a slow start of one volume's gateway does not hold up another
-// volume; Close stops them and refuses new ones.
-func TestGatewaysStartOutsideTheLock(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "juicefs")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	g := &Gateways{Bin: bin, StartTimeout: 10 * time.Second}
-	go func() { _, _ = g.Files(context.Background(), "at-a", "sqlite3://a", "") }()
-	time.Sleep(100 * time.Millisecond)
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	start := time.Now()
-	if _, err := g.Files(ctx, "at-b", "sqlite3://b", ""); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("second volume: %v", err)
-	}
-	if time.Since(start) > 2*time.Second {
-		t.Fatal("second volume waited for the first one's start")
-	}
-	done := make(chan struct{})
-	go func() { g.Close(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(20 * time.Second):
-		t.Fatal("Close hung")
-	}
-	if _, err := g.Files(context.Background(), "at-c", "sqlite3://c", ""); !errors.Is(err, errGatewaysClosed) {
-		t.Fatalf("after close: %v", err)
-	}
-}
-
-// TestGatewayReaperSkipsInUse: an idle gateway is stopped unless a call or an open file holds it.
-func TestGatewayReaperSkipsInUse(t *testing.T) {
-	ready := make(chan struct{})
-	close(ready)
-	gw := &gateway{ready: ready, done: make(chan struct{}), last: time.Now().Add(-time.Hour)}
-	g := &Gateways{running: map[string]*gateway{"at-a": gw}}
-	g.acquire(gw)
-	gw.last = time.Now().Add(-time.Hour)
-	g.reapIdle(time.Minute)
-	if g.running["at-a"] == nil {
-		t.Fatal("reaped while in use")
-	}
-	g.release(gw)
-	gw.last = time.Now().Add(-time.Hour)
-	g.reapIdle(time.Minute)
-	if g.running["at-a"] != nil {
-		t.Fatal("idle gateway kept")
 	}
 }

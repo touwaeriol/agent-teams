@@ -27,8 +27,8 @@
         "external"
       ]
     },
-    "bucket": {
-      "description": "The bucket mounted (fs.mount bucket); absent for an external mount that does not know it.",
+    "name": {
+      "description": "The folder mounted (fs.mount name); absent for an external mount that does not know it.",
       "type": "string",
       "maxLength": 63
     },
