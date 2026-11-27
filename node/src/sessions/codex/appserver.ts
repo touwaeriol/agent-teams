@@ -1,3 +1,4 @@
+import { type Confine, unconfined } from "../confine.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
@@ -28,6 +29,8 @@ export type ServerRequestHandler = (method: string, params: Record<string, unkno
 
 export interface AppServerOptions {
   command?: string[];
+  /** Wraps the command (session confinement). */
+  confine?: Confine;
   env: Record<string, string>;
   cwd?: string;
   log: Logger;
@@ -68,8 +71,9 @@ export class AppServer extends EventEmitter<AppServerEvents> {
 
   async start(): Promise<void> {
     if (this.child) return;
-    const [cmd, ...args] = this.opts.command ?? codexCommand();
-    const child = spawn(cmd!, [...args, "app-server"], { env: this.opts.env, cwd: this.opts.cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const [bin, ...pre] = this.opts.command ?? codexCommand();
+    const { cmd, args } = (this.opts.confine ?? unconfined)(bin!, [...pre, "app-server"]);
+    const child = spawn(cmd, args, { env: this.opts.env, cwd: this.opts.cwd, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
     createInterface({ input: child.stdout! }).on("line", (line) => this.onLine(line));
     createInterface({ input: child.stderr! }).on("line", (line) => this.opts.log.debug({ codex: line.slice(0, 2000) }, "codex stderr"));

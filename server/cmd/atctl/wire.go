@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
@@ -40,7 +41,7 @@ func wire(d httpapi.Deps) (httpapi.Deps, func(context.Context), error) {
 	if err != nil {
 		return d, nil, err
 	}
-	fs := sharedFolders(d.Config.FS, d.Store, vault, d.Log)
+	fs := sharedFolders(d.Config.FS, d.Config.PublicURL, d.Store, vault, d.Log)
 	e, err := engine.New(engine.Deps{Store: d.Store, KV: d.KV, GitHub: d.GitHub, Tokens: d.Tokens,
 		Box: auth.NewSecretBox(d.Config.SecretKeys...), Office: d.Office, Log: d.Log, Gateway: nodegw.Config{Validate: true},
 		Vault: vault, Relay: d.Relay, Blobs: blobs, AttachmentTTL: d.Config.AttachmentTTL, FS: fs})
@@ -63,7 +64,7 @@ func openAPIDocument() ([]byte, error) {
 }
 
 // sharedFolders builds the user shared-folder service from AGENT_TEAMS_FS_* (nil when not set).
-func sharedFolders(c config.FS, st *store.Store, vault *credvault.Vault, log *slog.Logger) *userfs.Service {
+func sharedFolders(c config.FS, publicURL string, st *store.Store, vault *credvault.Vault, log *slog.Logger) *userfs.Service {
 	if !c.Configured() {
 		return nil
 	}
@@ -78,15 +79,23 @@ func sharedFolders(c config.FS, st *store.Store, vault *credvault.Vault, log *sl
 		base = c.ClientBase
 	}
 	cfg := userfs.Config{Provider: c.Provider, S3Endpoint: c.S3Endpoint, NodeEndpoint: c.NodeEndpoint, Region: c.Region, AccessKey: c.AccessKey,
-		SecretKey: c.SecretKey, Bucket: c.Bucket, CapacityGB: c.CapacityGB, ClientVersion: version, ClientBase: base, Assets: assets}
+		SecretKey: c.SecretKey, CapacityGB: c.CapacityGB, ClientVersion: version, ClientBase: base, Assets: assets}
 	if !vault.Ready() {
 		log.Warn("shared folder needs AGENT_TEAMS_SECRET_KEYS to seal the users' keys: switched off")
 	}
-	var store userfs.Store = userfs.NewB2(c.S3Endpoint, c.Region, c.AccessKey, c.SecretKey, c.Bucket)
-	if c.Provider == userfs.ProviderRustFS {
-		store = userfs.NewRustFS(c.S3Endpoint, c.Region, c.AccessKey, c.SecretKey, c.Bucket)
+	var store userfs.Store = userfs.NewRustFS(c.S3Endpoint, c.Region, c.AccessKey, c.SecretKey, corsOrigins(publicURL))
+	if c.Provider == userfs.ProviderB2 {
+		store = userfs.NewB2(c.S3Endpoint, c.Region, c.AccessKey, c.SecretKey, c.Bucket)
 	}
 	return userfs.New(cfg, st.Pool, vault, store, log)
+}
+
+// corsOrigins are the browser origins allowed on the users' buckets: the console's public URL.
+func corsOrigins(publicURL string) []string {
+	if publicURL == "" {
+		return nil
+	}
+	return []string{strings.TrimRight(publicURL, "/")}
 }
 
 // objectStore builds the attachments and shared-files store from AGENT_TEAMS_S3_* (#58): None when

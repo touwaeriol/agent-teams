@@ -54,6 +54,7 @@ func (n nodeContainer) volume(key string) string { return n.slug + "-" + key }
 func (n nodeContainer) dockerRun() string {
 	lines := []string{
 		fmt.Sprintf("docker run -d --name %s --hostname %s --restart unless-stopped --stop-timeout 60", n.slug, n.host),
+		"--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined",
 		"-e AGENT_TEAMS_CONSOLE=" + shellQuote(n.console),
 		"-e AGENT_TEAMS_NODE_TOKEN=" + shellQuote(n.token),
 	}
@@ -75,6 +76,10 @@ func (n nodeContainer) compose() string {
 	w("    hostname: %q", n.host) // quoted: a name like 123 or true must stay a string
 	w("    restart: unless-stopped")
 	w("    stop_grace_period: 60s   # 留时间让守护进程暂停会话")
+	w("    # 共享文件夹：守护进程在容器里用 geesefs 挂到 /home/agent/.fs，需要 FUSE")
+	w("    devices: [\"/dev/fuse\"]")
+	w("    cap_add: [\"SYS_ADMIN\"]")
+	w("    security_opt: [\"apparmor:unconfined\"]")
 	w("    environment:")
 	w("      AGENT_TEAMS_CONSOLE: %q", n.console)
 	w("      AGENT_TEAMS_NODE_TOKEN: %q", n.token)

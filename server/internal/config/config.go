@@ -85,8 +85,11 @@ func (f FS) check() error {
 	if f.Provider != "b2" && f.Provider != "rustfs" {
 		return errors.New("AGENT_TEAMS_FS_PROVIDER must be b2 or rustfs")
 	}
-	if f.S3Endpoint == "" || f.Bucket == "" || f.AccessKey == "" || f.SecretKey == "" {
-		return errors.New("shared folder: set AGENT_TEAMS_FS_ACCESS_KEY, AGENT_TEAMS_FS_SECRET_KEY, AGENT_TEAMS_FS_BUCKET and AGENT_TEAMS_FS_S3_ENDPOINT, or none")
+	if f.S3Endpoint == "" || f.AccessKey == "" || f.SecretKey == "" {
+		return errors.New("shared folder: set AGENT_TEAMS_FS_ACCESS_KEY, AGENT_TEAMS_FS_SECRET_KEY and an S3 endpoint (AGENT_TEAMS_FS_S3_ENDPOINT, or AGENT_TEAMS_S3_ENDPOINT for rustfs), or none")
+	}
+	if f.Provider == "b2" && f.Bucket == "" {
+		return errors.New("shared folder: b2 needs AGENT_TEAMS_FS_BUCKET")
 	}
 	for _, e := range []string{f.S3Endpoint, f.NodeEndpoint} {
 		if e != "" && !IsOrigin(e) {
@@ -101,7 +104,7 @@ func (f FS) check() error {
 
 func fsConfig(getenv Getenv, s3Endpoint, s3Region string) (FS, error) {
 	f := FS{
-		Provider:      first(strings.ToLower(strings.TrimSpace(getenv("AGENT_TEAMS_FS_PROVIDER"))), "b2"),
+		Provider:      first(strings.ToLower(strings.TrimSpace(getenv("AGENT_TEAMS_FS_PROVIDER"))), "rustfs"),
 		S3Endpoint:    strings.TrimRight(strings.TrimSpace(getenv("AGENT_TEAMS_FS_S3_ENDPOINT")), "/"),
 		NodeEndpoint:  strings.TrimRight(strings.TrimSpace(getenv("AGENT_TEAMS_FS_NODE_ENDPOINT")), "/"),
 		Region:        strings.TrimSpace(getenv("AGENT_TEAMS_FS_REGION")),

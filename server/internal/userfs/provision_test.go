@@ -88,7 +88,7 @@ func TestEnableSurvivesClientCancel(t *testing.T) {
 func TestDisableWhileProvisioningIsBusy(t *testing.T) {
 	s, fs, st := newTest(t)
 	ctx := context.Background()
-	if _, _, err := insert(ctx, st.Pool, "fs", NamesOf("u1"), "u1", 20); err != nil {
+	if _, _, err := insert(ctx, st.Pool, Folder{Bucket: "fs", Prefix: NamesOf("u1").Prefix}, "u1", 20); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Disable(ctx, "u1"); !errors.Is(err, ErrBusy) {

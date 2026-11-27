@@ -41,13 +41,13 @@ function rig(over: Partial<SharedFsOptions> = {}, data = tmp()): Rig {
   const { data: bin, sha } = binary();
   const r: Rig = { sent: [], calls: [], data, fetches: 0, sha, procs: new Map() } as unknown as Rig;
   r.fs = new SharedFs({
-    dataDir: r.data, log: silentLogger, send: (_t, b) => r.sent.push(b), fuse: () => true, platform: "linux-amd64", mountWaitMs: 1000, exitWaitMs: 1000,
+    dataDir: r.data, preinstalledDir: join(r.data, "no-image"), log: silentLogger, send: (_t, b) => r.sent.push(b), fuse: () => true, platform: "linux-amd64", mountWaitMs: 1000, exitWaitMs: 1000,
     mounted: marker, procs: (d) => (r.procs.has(d) ? [r.procs.get(d)!] : []),
     fetchFn: (async () => (r.fetches++, new Response(bin))) as unknown as typeof fetch,
     run: async (cmd, args, opts) => {
       r.calls.push({ cmd, args, ...(opts?.env ? { env: opts.env } : {}) });
       const dir = args.at(-1)!;
-      if (cmd.endsWith("/geesefs")) {
+      if (/\/geesefs[^/]*$/.test(cmd)) {
         writeFileSync(join(dir, ".mounted"), "");
         r.procs.set(dir, 4242);
       }
@@ -63,7 +63,7 @@ function rig(over: Partial<SharedFsOptions> = {}, data = tmp()): Rig {
   return r;
 }
 
-const mounts = (r: Rig) => r.calls.filter((c) => c.cmd.endsWith("/geesefs"));
+const mounts = (r: Rig) => r.calls.filter((c) => /\/geesefs[^/]*$/.test(c.cmd));
 
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -92,6 +92,21 @@ describe("SharedFs", () => {
     expect(mounts(r)).toHaveLength(2);
     expect(r.calls.some((c) => c.cmd === "fusermount3")).toBe(true);
     expect(r.sent.at(-1)).toEqual({ state: "mounted", mode: "daemon", name: NAME, generation: 2 });
+  });
+
+  it("uses the image's geesefs when its sha256 matches, and downloads otherwise", async () => {
+    const pre = tmp();
+    writeFileSync(join(pre, "geesefs-0.43.9"), binary().data);
+    const r = rig({ preinstalledDir: pre });
+    await r.fs.mount(spec(r.sha));
+    expect(mounts(r)[0]!.cmd).toBe(join(pre, "geesefs-0.43.9"));
+    expect(r.fetches).toBe(0);
+
+    writeFileSync(join(pre, "geesefs-0.43.9"), "tampered");
+    const other = rig({ preinstalledDir: pre });
+    await other.fs.mount(spec(other.sha));
+    expect(mounts(other)[0]!.cmd).toBe(join(other.data, "tools", "geesefs-0.43.9", "geesefs"));
+    expect(other.fetches).toBe(1);
   });
 
   it("mounts at AGENT_TEAMS_FS_MOUNT_DIR when set", async () => {
@@ -277,6 +292,10 @@ describe("SharedFs", () => {
   it("names platforms like the console", () => {
     expect(platformKey("linux", "x64")).toBe("linux-amd64");
     expect(platformKey("darwin", "arm64")).toBe("darwin-arm64");
+  });
+
+  it("mounts a whole bucket when the folder has no prefix", () => {
+    expect(geesefsArgs({ ...spec("x"), bucket: NAME, prefix: "" }, "/m", "/log").slice(-2)).toEqual([NAME, "/m"]);
   });
 
   it("geesefs arguments never carry the key", () => {

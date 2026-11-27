@@ -77,6 +77,14 @@ describe("SharedFolder page", () => {
     expect(w.text()).toContain("1,234 个对象，占上限 25%");
   });
 
+  it("shows a bucket of its own without a prefix", async () => {
+    api({ ...READY, volume: { ...READY.volume, bucket: "atu-0123456789abcdef", prefix: "" } });
+    const w = mountPage();
+    await flushPromises();
+    expect(w.text()).toContain("atu-0123456789abcdef");
+    expect(w.text()).not.toContain("atu-0123456789abcdef/");
+  });
+
   it("says a folder over its capacity is read-only", async () => {
     api({ ...READY, volume: { ...READY.volume, capacity_gb: 1, read_only: true }, usage: { used_bytes: 2 ** 31, objects: 3 } });
     const w = mountPage();

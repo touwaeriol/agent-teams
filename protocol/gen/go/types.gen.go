@@ -3255,21 +3255,21 @@ func (j *ForwardToThreadResult) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-// Mount the owner's shared folder: a prefix of the platform's object-store bucket
-// (Backblaze B2, or a RustFS / MinIO), reached with the owner's key, which is
-// limited to that prefix (shared-folder design). Sent on the live link only to a
-// daemon whose hello has fs_s3_mount: after the welcome when the owner has a ready
-// folder, and again when the folder or its key change (generation grows: a new
-// key, e.g. one that cannot write while the folder is over its capacity).
-// Unreliable and never logged or stored: it carries the owner's secret key. The
-// daemon mounts bucket:prefix with the client named in client.tool at <data
-// dir>/mnt/<name> and answers with fs.status; a generation older than the one
-// mounted is ignored.
+// Mount the owner's shared folder: a bucket of its own on the platform's RustFS /
+// MinIO (with a hard quota), or a prefix of the platform's Backblaze B2 bucket,
+// reached with the owner's key, which is limited to it (shared-folder design).
+// Sent on the live link only to a daemon whose hello has fs_s3_mount: after the
+// welcome when the owner has a ready folder, and again when the folder or its key
+// change (generation grows: a new key, e.g. one that cannot write while the folder
+// is over its capacity). Unreliable and never logged or stored: it carries the
+// owner's secret key. The daemon mounts bucket (or bucket:prefix) with the client
+// named in client.tool at <data dir>/mnt/<name> and answers with fs.status; a
+// generation older than the one mounted is ignored.
 type FsMount struct {
 	// The owner's key id.
 	AccessKey string `json:"access_key"`
 
-	// The platform's bucket.
+	// The bucket: the owner's own (RustFS), or the platform's shared one (B2).
 	Bucket string `json:"bucket"`
 
 	// Local cache size; default 10240.
@@ -3291,8 +3291,9 @@ type FsMount struct {
 	// and fs.unmount name.
 	Name string `json:"name"`
 
-	// The owner's folder in the bucket (users/<16 hex>/); the key reaches nothing
-	// outside it.
+	// The owner's folder in the bucket: empty when the bucket is the owner's own
+	// (RustFS: a bucket per user, atu-<16 hex>), users/<16 hex>/ in a shared bucket
+	// (B2). The key reaches nothing outside it.
 	Prefix string `json:"prefix"`
 
 	// Region to sign requests for; default us-east-1.
@@ -3473,8 +3474,8 @@ func (j *FsMount) UnmarshalJSON(value []byte) error {
 	if matched, _ := regexp.MatchString(`^[a-z0-9][a-z0-9-]{2,62}$`, string(plain.Name)); !matched {
 		return fmt.Errorf("field %s pattern match: must match %s", "Name", `^[a-z0-9][a-z0-9-]{2,62}$`)
 	}
-	if matched, _ := regexp.MatchString(`^[a-z0-9]+(/[a-z0-9]+)*/$`, string(plain.Prefix)); !matched {
-		return fmt.Errorf("field %s pattern match: must match %s", "Prefix", `^[a-z0-9]+(/[a-z0-9]+)*/$`)
+	if matched, _ := regexp.MatchString(`^([a-z0-9]+(/[a-z0-9]+)*/)?$`, string(plain.Prefix)); !matched {
+		return fmt.Errorf("field %s pattern match: must match %s", "Prefix", `^([a-z0-9]+(/[a-z0-9]+)*/)?$`)
 	}
 	if utf8.RuneCountInString(string(plain.SecretKey)) < 1 {
 		return fmt.Errorf("field %s length: must be >= %d", "secret_key", 1)

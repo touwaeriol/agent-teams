@@ -749,7 +749,7 @@ export interface FileDownload {
   data: string;
 }
 /**
- * Mount the owner's shared folder: a prefix of the platform's object-store bucket (Backblaze B2, or a RustFS / MinIO), reached with the owner's key, which is limited to that prefix (shared-folder design). Sent on the live link only to a daemon whose hello has fs_s3_mount: after the welcome when the owner has a ready folder, and again when the folder or its key change (generation grows: a new key, e.g. one that cannot write while the folder is over its capacity). Unreliable and never logged or stored: it carries the owner's secret key. The daemon mounts bucket:prefix with the client named in client.tool at <data dir>/mnt/<name> and answers with fs.status; a generation older than the one mounted is ignored.
+ * Mount the owner's shared folder: a bucket of its own on the platform's RustFS / MinIO (with a hard quota), or a prefix of the platform's Backblaze B2 bucket, reached with the owner's key, which is limited to it (shared-folder design). Sent on the live link only to a daemon whose hello has fs_s3_mount: after the welcome when the owner has a ready folder, and again when the folder or its key change (generation grows: a new key, e.g. one that cannot write while the folder is over its capacity). Unreliable and never logged or stored: it carries the owner's secret key. The daemon mounts bucket (or bucket:prefix) with the client named in client.tool at <data dir>/mnt/<name> and answers with fs.status; a generation older than the one mounted is ignored.
  *
  * This interface was referenced by `Envelope`'s JSON-Schema
  * via the `definition` "FsMount".
@@ -760,11 +760,11 @@ export interface FsMount {
    */
   name: string;
   /**
-   * The platform's bucket.
+   * The bucket: the owner's own (RustFS), or the platform's shared one (B2).
    */
   bucket: string;
   /**
-   * The owner's folder in the bucket (users/<16 hex>/); the key reaches nothing outside it.
+   * The owner's folder in the bucket: empty when the bucket is the owner's own (RustFS: a bucket per user, atu-<16 hex>), users/<16 hex>/ in a shared bucket (B2). The key reaches nothing outside it.
    */
   prefix: string;
   /**

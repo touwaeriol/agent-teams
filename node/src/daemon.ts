@@ -1,3 +1,4 @@
+import { type Confine, probeConfine } from "./sessions/confine.js";
 import { cpus, hostname, loadavg, totalmem } from "node:os";
 import { mkdirSync, statfsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -70,6 +71,8 @@ export interface DaemonOptions {
   probeRuntimes?: boolean;
   isolation?: Isolation;
   queryFn?: QueryFn;
+  /** Session confinement (tests); default probeConfine(). */
+  confine?: Confine;
   codexCommand?: string[];
   /** The agy command (tests: a fake ACP agent); default: found on PATH / ~/.local/bin. */
   agyCommand?: string[];
@@ -206,11 +209,12 @@ export class Daemon {
     });
     this.credServer = new CredServer(credSocketPath(o.runtimeDir), this.creds, o.log, { gh: () => this.gh.resolve(), ghConfigRoot: join(dataDir, "gh-config") });
     this.toolhost = new LoopbackToolHost(o.log);
-    this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
+    const confine = o.confine ?? probeConfine();
+    this.hub = new CodexHub({ env: this.codexServerEnv(), log: o.log, clientVersion: DAEMON_VERSION, confine, ...(o.codexCommand ? { command: o.codexCommand } : {}) });
     this.runtimes = RuntimeRegistry.builtin({
       root: o.root, employeeHome: this.employeeHome, claudeConfigDir: o.claudeConfigDir, codexHome: o.codexHome,
       sandboxOk: () => this.isolation !== "none", claudeEnv: () => this.claudeEnv({}), claudeFixed: () => this.claudeFixed(),
-      secretPaths: () => this.secretPaths(), hub: this.hub, toolhost: this.toolhost, ...(o.queryFn ? { queryFn: o.queryFn } : {}),
+      secretPaths: () => this.secretPaths(), hub: this.hub, toolhost: this.toolhost, confine, ...(o.queryFn ? { queryFn: o.queryFn } : {}),
       ...(o.codexCommand ? { codexCommand: o.codexCommand } : {}),
       agyHome: this.agyHome, ...(o.agyCommand ? { agyCommand: o.agyCommand } : {}), log: o.log,
       agyEnv: () => buildEnv({ base: process.env, home: this.agyHome, passList: [...this.o.passEnv, ...AGY_PASS_ENV] }),

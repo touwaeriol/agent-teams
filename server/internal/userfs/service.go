@@ -19,21 +19,26 @@ type Usage struct {
 	Objects   int64 `json:"objects"`
 }
 
-// Store is the object store provider: the platform bucket with the users' folders as prefixes,
-// and per-user keys limited to a prefix (B2 application keys, RustFS / MinIO IAM users).
+// Store is the object store provider: where each user's folder lives (RustFS: a bucket per user
+// with a hard quota; B2: a prefix of the platform bucket) and per-user keys limited to it (IAM
+// users, B2 application keys).
 type Store interface {
+	// Folder is where the user's folder lives.
+	Folder(n UserNames) Folder
+	// HardQuota tells whether the store enforces the capacity itself (otherwise EnforceQuotas does).
+	HardQuota() bool
 	// Files is a folder's tree, read and written with the platform key.
-	Files(prefix string) Files
-	// Prepare makes sure the bucket is there.
-	Prepare(ctx context.Context) error
-	// RemovePrefix deletes everything under a folder (a missing one is fine).
-	RemovePrefix(ctx context.Context, prefix string) error
-	// Prefixes lists the folders under users/.
-	Prefixes(ctx context.Context) ([]string, error)
+	Files(f Folder) Files
+	// Prepare makes the folder's bucket ready (created, with its quota where the store has one).
+	Prepare(ctx context.Context, f Folder, capacityGB int) error
+	// Remove deletes the folder with everything in it (a missing one is fine).
+	Remove(ctx context.Context, f Folder) error
+	// Folders lists the users' folders the store holds.
+	Folders(ctx context.Context) ([]Folder, error)
 	// Usage counts what a folder holds.
-	Usage(ctx context.Context, prefix string) (Usage, error)
+	Usage(ctx context.Context, f Folder) (Usage, error)
 	// IssueKey makes a key for the user's folder: list, read and delete, and write when write is set.
-	IssueKey(ctx context.Context, n UserNames, write bool) (Key, error)
+	IssueKey(ctx context.Context, n UserNames, f Folder, write bool) (Key, error)
 	// RevokeKey deletes a key (a missing one is fine).
 	RevokeKey(ctx context.Context, n UserNames, keyID string) error
 	// Keys lists the store's keys.
@@ -87,7 +92,7 @@ func (s *Service) Usage(ctx context.Context, userID string) (Usage, error) {
 	if vol.State != StateReady {
 		return Usage{}, nil
 	}
-	return s.store.Usage(ctx, vol.Prefix)
+	return s.store.Usage(ctx, vol.Folder())
 }
 
 // Enable provisions the user's folder (or finishes a provisioning that failed). It returns the
@@ -99,7 +104,7 @@ func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
 		return Volume{}, ErrDisabled
 	}
 	ctx = context.WithoutCancel(ctx)
-	vol, owned, err := insert(ctx, s.db, s.cfg.Bucket, NamesOf(userID), userID, s.cfg.CapacityGB)
+	vol, owned, err := insert(ctx, s.db, s.store.Folder(NamesOf(userID)), userID, s.cfg.CapacityGB)
 	if err == nil && !owned {
 		var claimed Volume
 		if claimed, owned, err = claimProvisioning(ctx, s.db, userID); owned {
@@ -148,10 +153,10 @@ func (s *Service) ProvisionAll(ctx context.Context) (int, error) {
 // provision makes the user's folder with its projects/ and shared/ folders, then a key for it
 // (replacing the key of an earlier attempt).
 func (s *Service) provision(ctx context.Context, vol Volume) error {
-	if err := s.store.Prepare(ctx); err != nil {
+	if err := s.store.Prepare(ctx, vol.Folder(), vol.CapacityGB); err != nil {
 		return fmt.Errorf("对象存储 bucket：%w", err)
 	}
-	f := s.store.Files(vol.Prefix)
+	f := s.store.Files(vol.Folder())
 	for _, dir := range []string{"projects", SharedDir} {
 		if err := f.Mkdir(ctx, dir); err != nil {
 			return fmt.Errorf("创建目录 %s：%w", dir, err)
@@ -168,7 +173,7 @@ func (s *Service) provision(ctx context.Context, vol Volume) error {
 // the new fs.mount (OnChange).
 func (s *Service) rotate(ctx context.Context, vol Volume, readOnly bool) (Volume, error) {
 	n := vol.Names()
-	key, err := s.store.IssueKey(ctx, n, !readOnly)
+	key, err := s.store.IssueKey(ctx, n, vol.Folder(), !readOnly)
 	if err != nil {
 		return vol, err
 	}
@@ -241,14 +246,14 @@ func (s *Service) teardown(ctx context.Context, vol Volume) error {
 		return fmt.Errorf("删除对象存储密钥：%w", err)
 	}
 	s.waitUnmounted(ctx, vol)
-	if err := s.store.RemovePrefix(ctx, vol.Prefix); err != nil {
+	if err := s.store.Remove(ctx, vol.Folder()); err != nil {
 		return fmt.Errorf("删除文件夹：%w", err)
 	}
 	return nil
 }
 
 // waitUnmounted waits (UnmountWait at most) until no node whose daemon mounts the folder still
-// reports it mounted. Nodes mounting it outside the daemon (Docker volume plugin) cannot unmount
+// reports it mounted. Nodes mounting it outside the daemon (AGENT_TEAMS_FS_DIR) cannot unmount
 // on request: the folder is removed under them, which is logged.
 func (s *Service) waitUnmounted(ctx context.Context, vol Volume) {
 	deadline := time.Now().Add(orDefault(s.UnmountWait, time.Minute))
@@ -327,7 +332,7 @@ func (s *Service) Files(ctx context.Context, userID string) (Files, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.store.Files(vol.Prefix), nil
+	return s.store.Files(vol.Folder()), nil
 }
 
 // Ready tells whether the user has a ready folder (session.open sends a shared folder only then).
@@ -338,6 +343,9 @@ func (s *Service) Ready(ctx context.Context, userID string) bool {
 	vol, err := Get(ctx, s.db, userID)
 	return err == nil && vol.State == StateReady
 }
+
+// SoftQuota tells whether the capacity is enforced by EnforceQuotas (the store has no quota).
+func (s *Service) SoftQuota() bool { return s.Enabled() && !s.store.HardQuota() }
 
 // IsNotFound reports ErrNotFound.
 func IsNotFound(err error) bool { return errors.Is(err, ErrNotFound) }

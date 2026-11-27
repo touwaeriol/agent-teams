@@ -142,7 +142,7 @@ func TestFS(t *testing.T) {
 	if err != nil || cfg.FS.Configured() {
 		t.Fatalf("off by default: %+v %v", cfg.FS, err)
 	}
-	full := map[string]string{"AGENT_TEAMS_FS_ACCESS_KEY": "kid", "AGENT_TEAMS_FS_SECRET_KEY": "ksecret", "AGENT_TEAMS_FS_BUCKET": "fs",
+	full := map[string]string{"AGENT_TEAMS_FS_PROVIDER": "b2", "AGENT_TEAMS_FS_ACCESS_KEY": "kid", "AGENT_TEAMS_FS_SECRET_KEY": "ksecret", "AGENT_TEAMS_FS_BUCKET": "fs",
 		"AGENT_TEAMS_FS_S3_ENDPOINT": "https://s3.us-west-004.backblazeb2.com"}
 	cfg, err = Load(get(full))
 	if err != nil || !cfg.FS.Configured() || cfg.FS.Provider != "b2" || cfg.FS.NodeEndpoint != "" ||
@@ -152,9 +152,13 @@ func TestFS(t *testing.T) {
 	if _, err := Load(get(map[string]string{"AGENT_TEAMS_FS_ACCESS_KEY": "kid"})); err == nil {
 		t.Fatal("partial FS accepted")
 	}
-	rustfs := map[string]string{"AGENT_TEAMS_FS_PROVIDER": "rustfs", "AGENT_TEAMS_FS_ACCESS_KEY": "root", "AGENT_TEAMS_FS_SECRET_KEY": "rootpw", "AGENT_TEAMS_FS_BUCKET": "fs"}
-	if cfg, err := Load(get(rustfs)); err != nil || cfg.FS.S3Endpoint != "https://s3.example" || cfg.FS.Region != "us-east-1" {
-		t.Fatalf("rustfs defaults to the attachment store: %+v %v", cfg.FS, err)
+	if _, err := Load(get(map[string]string{"AGENT_TEAMS_FS_PROVIDER": "b2", "AGENT_TEAMS_FS_ACCESS_KEY": "kid", "AGENT_TEAMS_FS_SECRET_KEY": "k",
+		"AGENT_TEAMS_FS_S3_ENDPOINT": "https://s3.us-west-004.backblazeb2.com"})); err == nil {
+		t.Fatal("b2 without a bucket accepted")
+	}
+	rustfs := map[string]string{"AGENT_TEAMS_FS_ACCESS_KEY": "root", "AGENT_TEAMS_FS_SECRET_KEY": "rootpw"}
+	if cfg, err := Load(get(rustfs)); err != nil || cfg.FS.Provider != "rustfs" || cfg.FS.S3Endpoint != "https://s3.example" || cfg.FS.Region != "us-east-1" {
+		t.Fatalf("rustfs is the default and uses the attachment store: %+v %v", cfg.FS, err)
 	}
 	rustfs["AGENT_TEAMS_FS_PROVIDER"] = "juicefs"
 	if _, err := Load(get(rustfs)); err == nil {

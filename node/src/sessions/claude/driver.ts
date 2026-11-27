@@ -1,3 +1,4 @@
+import { type Confine, confinedClaudeSpawn, unconfined } from "../confine.js";
 import { randomUUID } from "node:crypto";
 import { query as sdkQuery, type HookCallbackMatcher, type HookEvent, type HookInput, type HookJSONOutput, type ModelInfo, type Options, type PermissionUpdate, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ClaudeSessionOptions, ContextDetail, ContextUsage } from "../../protocol.js";
@@ -39,6 +40,8 @@ export interface ClaudeDriverDeps {
   plugins?: MaterializedPlugin[];
   /** Wait this long after a result for folded-in messages before declaring the turn idle. */
   foldGraceMs?: number;
+  /** Wraps the Claude Code process (session confinement); none = the SDK's own spawn. */
+  confine?: Confine;
 }
 
 /**
@@ -90,14 +93,17 @@ export class ClaudeDriver implements Driver {
     const server = platformSdkServer(this.ctx.spec.platform_tools, (tool, args) =>
       this.ctx.sink.callTool(tool, args, this.correlator.take(tool, args)),
     );
-    return buildClaudeOptions({
+    const stderr = (d: string) => this.ctx.log.debug({ stderr: d.slice(0, 2000) }, "claude stderr");
+    const opts = buildClaudeOptions({
       claude: this.claude, root: this.deps.root, cwd: this.ctx.absCwd, env: this.ctx.env, sessionId: this.sdkSessionId, resume, server,
       canUseTool: (tool, input, opts) => this.canUseTool(tool, input, opts),
       hooks: this.hooks(), secretPaths: this.deps.secretPaths, skills: this.deps.skills ?? null, plugins: this.deps.plugins ?? [],
       context: this.ctx.spec.context, ...(this.ctx.systemExtra ? { systemExtra: this.ctx.systemExtra } : {}),
       ...(this.ctx.extraDirs ? { additionalDirectories: this.ctx.extraDirs } : {}),
-      stderr: (d) => this.ctx.log.debug({ stderr: d.slice(0, 2000) }, "claude stderr"),
+      stderr,
     });
+    if (this.deps.confine && this.deps.confine !== unconfined) opts.spawnClaudeCodeProcess = confinedClaudeSpawn(this.deps.confine, stderr);
+    return opts;
   }
 
   private async initialize(q: Query, resume: boolean): Promise<StartResult> {

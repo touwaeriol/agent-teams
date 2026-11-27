@@ -26,8 +26,11 @@ type Volume struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-// Names are the volume's names in the object store.
-func (v Volume) Names() UserNames { return namesOf(prefixID(v.Prefix)) }
+// Folder is where the volume lives.
+func (v Volume) Folder() Folder { return Folder{Bucket: v.Bucket, Prefix: v.Prefix} }
+
+// Names are the volume's names in the object store (from its bucket atu-<id> or prefix users/<id>/).
+func (v Volume) Names() UserNames { return namesOf(folderID(v.Folder())) }
 
 const volumeCols = `user_id, bucket, prefix, s3_access_key, read_only, generation, state, error, capacity_gb, created_at, updated_at`
 
@@ -51,9 +54,9 @@ const staleAfter = "15 minutes"
 
 // insert creates the user's row (provisioning, no key yet) unless one exists; created tells
 // whether this call made it (and so owns its provisioning).
-func insert(ctx context.Context, q store.DB, bucket string, n UserNames, userID string, capacityGB int) (vol Volume, created bool, err error) {
+func insert(ctx context.Context, q store.DB, f Folder, userID string, capacityGB int) (vol Volume, created bool, err error) {
 	vol, err = scanVolume(store.QueryRow(ctx, q, `INSERT INTO at_user_fs (user_id, bucket, prefix, s3_access_key, secrets, capacity_gb)
-		VALUES ($1, $2, $3, '', '{}', $4) ON CONFLICT (user_id) DO NOTHING RETURNING `+volumeCols, userID, bucket, n.Prefix, capacityGB))
+		VALUES ($1, $2, $3, '', '{}', $4) ON CONFLICT (user_id) DO NOTHING RETURNING `+volumeCols, userID, f.Bucket, f.Prefix, capacityGB))
 	if IsNotFound(err) {
 		vol, err = Get(ctx, q, userID)
 		return vol, false, err

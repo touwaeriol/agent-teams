@@ -7,13 +7,13 @@ type QuotaResult struct {
 	Checked, Locked, Unlocked, Failed int
 }
 
-// EnforceQuotas is the soft capacity limit (the object store has no quota of its own): it counts
+// EnforceQuotas is the soft capacity limit, for stores without a quota of their own (B2): it counts
 // every ready folder with a capacity, switches one over it to a key that cannot write (reading
 // and deleting still work, so the user can make room) and one locked that is back under it to a
 // full key again; the nodes get the new key in fs.mount. It stops between folders when ctx ends.
 func (s *Service) EnforceQuotas(ctx context.Context) (QuotaResult, error) {
 	var r QuotaResult
-	if !s.Enabled() {
+	if !s.SoftQuota() {
 		return r, nil
 	}
 	vols, err := readyVolumes(ctx, s.db)
@@ -31,7 +31,7 @@ func (s *Service) EnforceQuotas(ctx context.Context) (QuotaResult, error) {
 }
 
 func (s *Service) enforce(ctx context.Context, vol Volume, r *QuotaResult) {
-	u, err := s.store.Usage(ctx, vol.Prefix)
+	u, err := s.store.Usage(ctx, vol.Folder())
 	if err != nil {
 		r.Failed++
 		s.log.Warn("shared folder: usage not counted", "user_id", vol.UserID, "err", err)

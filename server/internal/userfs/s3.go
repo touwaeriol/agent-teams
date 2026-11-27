@@ -17,28 +17,28 @@ import (
 	"github.com/minio/madmin-go/v3"
 )
 
-// Objects is the platform bucket over S3 with the platform key: the users' folders as prefixes.
-type Objects struct {
-	c      *s3.Client
-	bucket string
+// Folder is where a user's folder lives: a bucket and a prefix in it ("" = the whole bucket).
+type Folder struct {
+	Bucket string
+	Prefix string
 }
 
-// NewObjects talks to bucket at endpoint with the given keys (region "" = us-east-1).
-func NewObjects(endpoint, region, accessKey, secretKey, bucket string) Objects {
-	return Objects{c: NewS3Files(endpoint, region, accessKey, secretKey, bucket, "").c, bucket: bucket}
+// Objects is the object store over S3 with the platform key.
+type Objects struct {
+	c *s3.Client
+}
+
+// NewObjects talks to endpoint with the given keys (region "" = us-east-1).
+func NewObjects(endpoint, region, accessKey, secretKey string) Objects {
+	return Objects{c: NewS3Files(endpoint, region, accessKey, secretKey, "", "").c}
 }
 
 // Files implements Store.
-func (o Objects) Files(prefix string) Files {
-	return &S3Files{c: o.c, bucket: o.bucket, prefix: prefix}
-}
+func (o Objects) Files(f Folder) Files { return &S3Files{c: o.c, bucket: f.Bucket, prefix: f.Prefix} }
 
-// RemovePrefix implements Store: every object version and unfinished upload under prefix.
-func (o Objects) RemovePrefix(ctx context.Context, prefix string) error {
-	if prefix == "" {
-		return errors.New("refusing to empty the whole bucket")
-	}
-	p := s3.NewListObjectVersionsPaginator(o.c, &s3.ListObjectVersionsInput{Bucket: &o.bucket, Prefix: &prefix})
+// empty deletes every object version and unfinished upload under the folder.
+func (o Objects) empty(ctx context.Context, f Folder) error {
+	p := s3.NewListObjectVersionsPaginator(o.c, &s3.ListObjectVersionsInput{Bucket: &f.Bucket, Prefix: &f.Prefix})
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
 		if err != nil {
@@ -51,25 +51,25 @@ func (o Objects) RemovePrefix(ctx context.Context, prefix string) error {
 		for _, m := range page.DeleteMarkers {
 			ids = append(ids, types.ObjectIdentifier{Key: m.Key, VersionId: m.VersionId})
 		}
-		if err := o.deleteAll(ctx, ids); err != nil {
+		if err := o.deleteAll(ctx, f.Bucket, ids); err != nil {
 			return err
 		}
 	}
-	ups, err := o.c.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{Bucket: &o.bucket, Prefix: &prefix})
+	ups, err := o.c.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{Bucket: &f.Bucket, Prefix: &f.Prefix})
 	if err != nil {
 		return err
 	}
 	for _, u := range ups.Uploads {
-		_, _ = o.c.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{Bucket: &o.bucket, Key: u.Key, UploadId: u.UploadId})
+		_, _ = o.c.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{Bucket: &f.Bucket, Key: u.Key, UploadId: u.UploadId})
 	}
 	return nil
 }
 
-func (o Objects) deleteAll(ctx context.Context, ids []types.ObjectIdentifier) error {
+func (o Objects) deleteAll(ctx context.Context, bucket string, ids []types.ObjectIdentifier) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	out, err := o.c.DeleteObjects(ctx, &s3.DeleteObjectsInput{Bucket: &o.bucket, Delete: &types.Delete{Objects: ids, Quiet: aws.Bool(true)}})
+	out, err := o.c.DeleteObjects(ctx, &s3.DeleteObjectsInput{Bucket: &bucket, Delete: &types.Delete{Objects: ids, Quiet: aws.Bool(true)}})
 	if err != nil {
 		return err
 	}
@@ -80,26 +80,10 @@ func (o Objects) deleteAll(ctx context.Context, ids []types.ObjectIdentifier) er
 	return nil
 }
 
-// Prefixes implements Store: the folders under users/.
-func (o Objects) Prefixes(ctx context.Context) ([]string, error) {
-	var out []string
-	p := s3.NewListObjectsV2Paginator(o.c, &s3.ListObjectsV2Input{Bucket: &o.bucket, Prefix: aws.String(UsersDir), Delimiter: aws.String("/")})
-	for p.HasMorePages() {
-		page, err := p.NextPage(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, cp := range page.CommonPrefixes {
-			out = append(out, aws.ToString(cp.Prefix))
-		}
-	}
-	return out, nil
-}
-
-// Usage implements Store: the objects under prefix counted (folder markers included).
-func (o Objects) Usage(ctx context.Context, prefix string) (Usage, error) {
+// Usage implements Store: the objects in the folder counted (folder markers included).
+func (o Objects) Usage(ctx context.Context, f Folder) (Usage, error) {
 	var u Usage
-	p := s3.NewListObjectsV2Paginator(o.c, &s3.ListObjectsV2Input{Bucket: &o.bucket, Prefix: &prefix})
+	p := s3.NewListObjectsV2Paginator(o.c, &s3.ListObjectsV2Input{Bucket: &f.Bucket, Prefix: &f.Prefix})
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
 		if err != nil {
@@ -113,34 +97,49 @@ func (o Objects) Usage(ctx context.Context, prefix string) (Usage, error) {
 	return u, nil
 }
 
-// RustFS is Store on a RustFS (or MinIO): objects over S3, each user an IAM user whose policy
-// allows its prefix, all with the admin key.
+func noBucket(err error) bool {
+	var nb *types.NoSuchBucket
+	var api smithy.APIError
+	return err != nil && (errors.As(err, &nb) || (errors.As(err, &api) && api.ErrorCode() == "NoSuchBucket"))
+}
+
+// RustFS is Store on a RustFS (or MinIO): each user has a bucket of its own (atu-<id>) with a hard
+// quota, and an IAM user whose policy allows that bucket only; all over S3 and the admin API with
+// the admin key.
 type RustFS struct {
 	Objects
 	Endpoint  string // https://host[:port]
 	AccessKey string
 	SecretKey string
+	// CORSOrigins may read and write the buckets from a browser (the console's public URL).
+	CORSOrigins []string
 }
 
-// NewRustFS is the store of bucket on endpoint with the admin key.
-func NewRustFS(endpoint, region, accessKey, secretKey, bucket string) RustFS {
-	return RustFS{Objects: NewObjects(endpoint, region, accessKey, secretKey, bucket), Endpoint: endpoint, AccessKey: accessKey, SecretKey: secretKey}
+// NewRustFS is the store on endpoint with the admin key.
+func NewRustFS(endpoint, region, accessKey, secretKey string, corsOrigins []string) RustFS {
+	return RustFS{Objects: NewObjects(endpoint, region, accessKey, secretKey), Endpoint: endpoint, AccessKey: accessKey, SecretKey: secretKey, CORSOrigins: corsOrigins}
 }
 
 func (r RustFS) iam() MinioIAM {
 	return MinioIAM{Endpoint: r.Endpoint, AccessKey: r.AccessKey, SecretKey: r.SecretKey}
 }
 
-// Prepare implements Store: the bucket, with a rule dropping uploads left unfinished for a day
-// (a node that died mid-upload leaves parts behind).
-func (r RustFS) Prepare(ctx context.Context) error {
-	_, err := r.c.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &r.bucket})
+// Folder implements Store: the user's own bucket.
+func (r RustFS) Folder(n UserNames) Folder { return Folder{Bucket: n.Name} }
+
+// HardQuota implements Store: the bucket quota stops writes itself.
+func (r RustFS) HardQuota() bool { return true }
+
+// Prepare implements Store: the bucket, with a rule dropping uploads left unfinished for a day (a
+// node that died mid-upload leaves parts behind), CORS for the console, and its hard quota.
+func (r RustFS) Prepare(ctx context.Context, f Folder, capacityGB int) error {
+	_, err := r.c.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &f.Bucket})
 	var owned *types.BucketAlreadyOwnedByYou
 	var exists *types.BucketAlreadyExists
 	if err != nil && !errors.As(err, &owned) && !errors.As(err, &exists) {
 		return err
 	}
-	_, err = r.c.PutBucketLifecycleConfiguration(ctx, &s3.PutBucketLifecycleConfigurationInput{Bucket: &r.bucket,
+	_, err = r.c.PutBucketLifecycleConfiguration(ctx, &s3.PutBucketLifecycleConfigurationInput{Bucket: &f.Bucket,
 		LifecycleConfiguration: &types.BucketLifecycleConfiguration{Rules: []types.LifecycleRule{{
 			ID: aws.String("abort-unfinished-uploads"), Status: types.ExpirationStatusEnabled, Filter: &types.LifecycleRuleFilter{Prefix: aws.String("")},
 			AbortIncompleteMultipartUpload: &types.AbortIncompleteMultipartUpload{DaysAfterInitiation: aws.Int32(1)},
@@ -148,14 +147,88 @@ func (r RustFS) Prepare(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("lifecycle: %w", err)
 	}
+	if err := r.cors(ctx, f.Bucket); err != nil {
+		return fmt.Errorf("cors: %w", err)
+	}
+	return r.setQuota(ctx, f.Bucket, capacityGB)
+}
+
+func (r RustFS) cors(ctx context.Context, bucket string) error {
+	if len(r.CORSOrigins) == 0 {
+		return nil
+	}
+	_, err := r.c.PutBucketCors(ctx, &s3.PutBucketCorsInput{Bucket: &bucket, CORSConfiguration: &types.CORSConfiguration{CORSRules: []types.CORSRule{{
+		AllowedOrigins: r.CORSOrigins, AllowedMethods: []string{"GET", "PUT", "HEAD"}, AllowedHeaders: []string{"*"},
+		ExposeHeaders: []string{"ETag", "Content-Length", "Content-Type"}, MaxAgeSeconds: aws.Int32(3600),
+	}}}})
+	return err
+}
+
+// setQuota sets a hard quota of capacityGB GiB (0 = none).
+func (r RustFS) setQuota(ctx context.Context, bucket string, capacityGB int) error {
+	c, err := r.iam().client()
+	if err != nil {
+		return err
+	}
+	q := &madmin.BucketQuota{}
+	if capacityGB > 0 {
+		size := uint64(capacityGB) << 30
+		q = &madmin.BucketQuota{Quota: size, Size: size, Type: madmin.HardQuota}
+	}
+	if err := c.SetBucketQuota(ctx, bucket, q); err != nil {
+		return fmt.Errorf("quota: %w", err)
+	}
 	return nil
 }
 
-// IssueKey implements Store: the user's IAM user with a new secret and its policy (the same id
-// each time, so the previous secret stops working).
-func (r RustFS) IssueKey(ctx context.Context, n UserNames, write bool) (Key, error) {
+// quota is the bucket's hard quota in bytes (0 = none).
+func (r RustFS) quota(ctx context.Context, bucket string) (uint64, error) {
+	c, err := r.iam().client()
+	if err != nil {
+		return 0, err
+	}
+	q, err := c.GetBucketQuota(ctx, bucket)
+	if err != nil {
+		return 0, err
+	}
+	return max(q.Quota, q.Size), nil
+}
+
+// Remove implements Store: every object and unfinished upload, then the bucket (a missing one is fine).
+func (r RustFS) Remove(ctx context.Context, f Folder) error {
+	if err := r.empty(ctx, Folder{Bucket: f.Bucket}); err != nil {
+		if noBucket(err) {
+			return nil
+		}
+		return err
+	}
+	_, err := r.c.DeleteBucket(ctx, &s3.DeleteBucketInput{Bucket: &f.Bucket})
+	if noBucket(err) {
+		return nil
+	}
+	return err
+}
+
+// Folders implements Store: the buckets named like a user's.
+func (r RustFS) Folders(ctx context.Context) ([]Folder, error) {
+	out, err := r.c.ListBuckets(ctx, &s3.ListBucketsInput{})
+	if err != nil {
+		return nil, err
+	}
+	var folders []Folder
+	for _, b := range out.Buckets {
+		if name := aws.ToString(b.Name); keyID(name) != "" && strings.HasPrefix(name, "atu-") {
+			folders = append(folders, Folder{Bucket: name})
+		}
+	}
+	return folders, nil
+}
+
+// IssueKey implements Store: the user's IAM user with a new secret and the policy of its bucket
+// (the same id each time, so the previous secret stops working).
+func (r RustFS) IssueKey(ctx context.Context, n UserNames, f Folder, write bool) (Key, error) {
 	secret := randomSecret(30)
-	if err := r.iam().ensure(ctx, n.Name, n.User, secret, PrefixPolicy(r.bucket, n.Prefix, write)); err != nil {
+	if err := r.iam().ensure(ctx, n.Name, n.User, secret, FolderPolicy(f, write)); err != nil {
 		return Key{}, err
 	}
 	return Key{ID: n.User, Secret: secret}, nil

@@ -84,82 +84,94 @@ func TestDirFiles(t *testing.T) {
 }
 
 // TestRustFS runs Store against a real RustFS or MinIO when TEST_S3_ENDPOINT, TEST_S3_ACCESS_KEY and
-// TEST_S3_SECRET_KEY name one (an admin key): the bucket, files under a prefix, usage, and user keys
-// that reach their own prefix only, cannot write when read-only, and stop working once revoked.
+// TEST_S3_SECRET_KEY name one (an admin key): a bucket per user with lifecycle, CORS and quota, files,
+// usage, and user keys that reach their own bucket only, cannot write when read-only, and stop
+// working once revoked.
 func TestRustFS(t *testing.T) {
 	endpoint := os.Getenv("TEST_S3_ENDPOINT")
 	if endpoint == "" {
 		t.Skip("TEST_S3_ENDPOINT not set")
 	}
 	ctx := context.Background()
-	run := strconv.FormatInt(time.Now().UnixNano()%1e9, 36)
-	bucket := "test-fs-" + run
-	r := NewRustFS(endpoint, "", os.Getenv("TEST_S3_ACCESS_KEY"), os.Getenv("TEST_S3_SECRET_KEY"), bucket)
+	run := strconv.FormatInt(time.Now().UnixNano(), 36)
+	r := NewRustFS(endpoint, "", os.Getenv("TEST_S3_ACCESS_KEY"), os.Getenv("TEST_S3_SECRET_KEY"), []string{"https://console.example"})
 	a, b := NamesOf("ua"+run), NamesOf("ub"+run)
+	fa, fb := r.Folder(a), r.Folder(b)
+	if fa != (Folder{Bucket: a.Name}) {
+		t.Fatalf("folder %+v", fa)
+	}
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, n := range []UserNames{a, b} {
 			_ = r.RevokeKey(ctx, n, n.User)
-			_ = r.RemovePrefix(ctx, n.Prefix)
+			_ = r.Remove(ctx, r.Folder(n))
 		}
-		_, _ = r.c.DeleteBucket(ctx, &s3.DeleteBucketInput{Bucket: &bucket})
 	})
-	for range 2 {
-		if err := r.Prepare(ctx); err != nil {
-			t.Fatalf("prepare: %v", err)
+	for _, f := range []Folder{fa, fa, fb} {
+		if err := r.Prepare(ctx, f, 1); err != nil {
+			t.Fatalf("prepare %s: %v", f.Bucket, err)
 		}
 	}
-	lc, err := r.c.GetBucketLifecycleConfiguration(ctx, &s3.GetBucketLifecycleConfigurationInput{Bucket: &bucket})
+	lc, err := r.c.GetBucketLifecycleConfiguration(ctx, &s3.GetBucketLifecycleConfigurationInput{Bucket: &fa.Bucket})
 	if err != nil || len(lc.Rules) != 1 || lc.Rules[0].AbortIncompleteMultipartUpload == nil {
 		t.Fatalf("lifecycle %+v %v", lc, err)
 	}
-	exerciseFiles(t, r.Files(a.Prefix))
+	cors, err := r.c.GetBucketCors(ctx, &s3.GetBucketCorsInput{Bucket: &fa.Bucket})
+	if err != nil || len(cors.CORSRules) != 1 || !slices.Contains(cors.CORSRules[0].AllowedOrigins, "https://console.example") {
+		t.Fatalf("cors %+v %v", cors, err)
+	}
+	if q, err := r.quota(ctx, fa.Bucket); err != nil || q != 1<<30 {
+		t.Fatalf("quota %d %v", q, err)
+	}
+	exerciseFiles(t, r.Files(fa))
 	// A body that cannot be rewound (an attachment's reader, an object-store download) goes as an
 	// unsigned payload.
-	if err := r.Files(a.Prefix).Put(ctx, "projects/p1/stream.txt", io.NopCloser(strings.NewReader("streamed")), 8); err != nil {
+	if err := r.Files(fa).Put(ctx, "projects/p1/stream.txt", io.NopCloser(strings.NewReader("streamed")), 8); err != nil {
 		t.Fatalf("non-seekable put: %v", err)
 	}
-	if err := r.Files(b.Prefix).Put(ctx, "shared/b.txt", strings.NewReader("b"), 1); err != nil {
+	if err := r.Files(fb).Put(ctx, "shared/b.txt", strings.NewReader("b"), 1); err != nil {
 		t.Fatal(err)
 	}
-	if u, err := r.Usage(ctx, a.Prefix); err != nil || u.UsedBytes < 8 || u.Objects < 2 {
+	if u, err := r.Usage(ctx, fa); err != nil || u.UsedBytes < 8 || u.Objects < 2 {
 		t.Fatalf("usage %+v %v", u, err)
 	}
-	if ps, err := r.Prefixes(ctx); err != nil || !slices.Contains(ps, a.Prefix) || !slices.Contains(ps, b.Prefix) {
-		t.Fatalf("prefixes %v %v", ps, err)
+	if fs, err := r.Folders(ctx); err != nil || !slices.Contains(fs, fa) || !slices.Contains(fs, fb) {
+		t.Fatalf("folders %v %v", fs, err)
 	}
-	if _, err := r.IssueKey(ctx, a, true); err != nil {
+	if _, err := r.IssueKey(ctx, a, fa, true); err != nil {
 		t.Fatal(err)
 	}
-	key, err := r.IssueKey(ctx, a, true)
+	key, err := r.IssueKey(ctx, a, fa, true)
 	if err != nil || key.ID != a.User {
 		t.Fatalf("issue again: %+v %v", key, err)
 	}
-	own := NewS3Files(endpoint, "", key.ID, key.Secret, bucket, a.Prefix)
+	own := NewS3Files(endpoint, "", key.ID, key.Secret, fa.Bucket, "")
 	if err := own.Put(ctx, "shared/x.txt", strings.NewReader("x"), 1); err != nil {
-		t.Fatalf("user writes its folder: %v", err)
+		t.Fatalf("user writes its bucket: %v", err)
 	}
 	if _, err := own.List(ctx, "shared"); err != nil {
-		t.Fatalf("user lists its folder: %v", err)
+		t.Fatalf("user lists its bucket: %v", err)
 	}
-	other := NewS3Files(endpoint, "", key.ID, key.Secret, bucket, b.Prefix)
+	// Over the quota, a write is refused.
+	big := strings.Repeat("x", 1<<30+1)
+	if err := own.Put(ctx, "shared/big.bin", strings.NewReader(big), int64(len(big))); err == nil {
+		t.Fatal("write over the quota accepted")
+	}
+	other := NewS3Files(endpoint, "", key.ID, key.Secret, fb.Bucket, "")
 	if err := other.Put(ctx, "x.txt", strings.NewReader("x"), 1); err == nil {
-		t.Fatal("user wrote another user's folder")
+		t.Fatal("user wrote another user's bucket")
 	}
 	if _, err := other.List(ctx, "shared"); err == nil {
-		t.Fatal("user listed another user's folder")
+		t.Fatal("user listed another user's bucket")
 	}
 	if _, _, err := other.Open(ctx, "shared/b.txt"); err == nil {
 		t.Fatal("user read another user's file")
 	}
-	if _, err := NewS3Files(endpoint, "", key.ID, key.Secret, bucket, "").List(ctx, ""); err == nil {
-		t.Fatal("user listed the bucket root")
-	}
-	ro, err := r.IssueKey(ctx, a, false)
+	ro, err := r.IssueKey(ctx, a, fa, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	locked := NewS3Files(endpoint, "", ro.ID, ro.Secret, bucket, a.Prefix)
+	locked := NewS3Files(endpoint, "", ro.ID, ro.Secret, fa.Bucket, "")
 	if err := locked.Put(ctx, "shared/y.txt", strings.NewReader("y"), 1); err == nil {
 		t.Fatal("read-only key wrote")
 	}
@@ -180,17 +192,13 @@ func TestRustFS(t *testing.T) {
 	if _, err := locked.List(ctx, ""); err == nil {
 		t.Fatal("revoked key still works")
 	}
-	if err := r.RemovePrefix(ctx, a.Prefix); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if err := r.Remove(ctx, fa); err != nil {
+			t.Fatalf("remove: %v", err)
+		}
 	}
-	if u, err := r.Usage(ctx, a.Prefix); err != nil || u.Objects != 0 {
-		t.Fatalf("after remove %+v %v", u, err)
-	}
-	if u, err := r.Usage(ctx, b.Prefix); err != nil || u.Objects != 1 {
-		t.Fatalf("other folder touched %+v %v", u, err)
-	}
-	if err := r.RemovePrefix(ctx, ""); err == nil {
-		t.Fatal("emptied the whole bucket")
+	if u, err := r.Usage(ctx, fb); err != nil || u.Objects != 1 {
+		t.Fatalf("other bucket touched %+v %v", u, err)
 	}
 }
 

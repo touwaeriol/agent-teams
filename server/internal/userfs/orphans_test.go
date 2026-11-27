@@ -30,7 +30,7 @@ func TestSweepOrphans(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Prefixes and keys not named like a user's are no one's business here.
-	for _, d := range []string{"attachments", "users/someone"} {
+	for _, d := range []string{"fs/attachments", "fs/users/someone", "attachments"} {
 		if err := os.MkdirAll(filepath.Join(fs.root, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -53,8 +53,8 @@ func TestSweepOrphans(t *testing.T) {
 		t.Fatalf("ownerless folder or its key left (%d keys)", fs.keyCount())
 	}
 	u1, _ := s.Get(ctx, "u1")
-	if _, ok := fs.key(u1.AccessKey); !ok || !exists(fs.userPath("u1", "projects")) || !exists(filepath.Join(fs.root, "attachments")) ||
-		!exists(filepath.Join(fs.root, "users/someone")) {
+	if _, ok := fs.key(u1.AccessKey); !ok || !exists(fs.userPath("u1", "projects")) || !exists(filepath.Join(fs.root, "fs/attachments")) ||
+		!exists(filepath.Join(fs.root, "fs/users/someone")) || !exists(filepath.Join(fs.root, "attachments")) {
 		t.Fatal("owned or foreign folder or key touched")
 	}
 	if n, err := s.SweepOrphans(ctx); err != nil || n != 0 {

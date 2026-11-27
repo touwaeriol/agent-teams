@@ -11,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 // B2Capabilities are a user's key capabilities in its prefix: everything a mount needs, and
@@ -49,7 +52,7 @@ type b2Auth struct {
 // NewB2 is the store of bucket with the platform key keyID / key; endpoint is the bucket's S3
 // address (https://s3.<region>.backblazeb2.com).
 func NewB2(endpoint, region, keyID, key, bucket string) *B2 {
-	return &B2{Objects: NewObjects(endpoint, region, keyID, key, bucket), KeyID: keyID, Key: key, Bucket: bucket}
+	return &B2{Objects: NewObjects(endpoint, region, keyID, key), KeyID: keyID, Key: key, Bucket: bucket}
 }
 
 // b2AuthTTL is how long a sign-in is used (B2 tokens last 24 h).
@@ -172,15 +175,47 @@ func (b *B2) do(req *http.Request, out any) error {
 	return json.Unmarshal(raw, out)
 }
 
+// Folder implements Store: the user's prefix of the platform bucket.
+func (b *B2) Folder(n UserNames) Folder { return Folder{Bucket: b.Bucket, Prefix: n.Prefix} }
+
+// HardQuota implements Store: B2 has no quota, the console enforces a soft one.
+func (b *B2) HardQuota() bool { return false }
+
 // Prepare implements Store: the bucket must exist (the platform key sees it); its lifecycle
 // (keep only the last version, cancel unfinished large files) is set on B2 itself.
-func (b *B2) Prepare(ctx context.Context) error {
+func (b *B2) Prepare(ctx context.Context, _ Folder, _ int) error {
 	_, err := b.signIn(ctx, false)
 	return err
 }
 
+// Remove implements Store: every object version under the user's prefix.
+func (b *B2) Remove(ctx context.Context, f Folder) error {
+	if f.Prefix == "" {
+		return errors.New("refusing to empty the whole bucket")
+	}
+	return b.empty(ctx, f)
+}
+
+// Folders implements Store: the prefixes under users/.
+func (b *B2) Folders(ctx context.Context) ([]Folder, error) {
+	var out []Folder
+	p := s3.NewListObjectsV2Paginator(b.c, &s3.ListObjectsV2Input{Bucket: &b.Bucket, Prefix: aws.String(UsersDir), Delimiter: aws.String("/")})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, cp := range page.CommonPrefixes {
+			if prefix := aws.ToString(cp.Prefix); prefixID(prefix) != "" {
+				out = append(out, Folder{Bucket: b.Bucket, Prefix: prefix})
+			}
+		}
+	}
+	return out, nil
+}
+
 // IssueKey implements Store: a new application key limited to the bucket and the user's prefix.
-func (b *B2) IssueKey(ctx context.Context, n UserNames, write bool) (Key, error) {
+func (b *B2) IssueKey(ctx context.Context, n UserNames, f Folder, write bool) (Key, error) {
 	a, err := b.signIn(ctx, false)
 	if err != nil {
 		return Key{}, err
@@ -194,7 +229,7 @@ func (b *B2) IssueKey(ctx context.Context, n UserNames, write bool) (Key, error)
 		Key string `json:"applicationKey"`
 	}
 	err = b.call(ctx, "b2_create_key", map[string]any{"accountId": a.accountID, "capabilities": caps, "keyName": n.Name,
-		"bucketId": a.bucketID, "namePrefix": n.Prefix}, &out)
+		"bucketId": a.bucketID, "namePrefix": f.Prefix}, &out)
 	if err != nil {
 		return Key{}, fmt.Errorf("b2 create key: %w", err)
 	}

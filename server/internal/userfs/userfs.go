@@ -55,13 +55,13 @@ const DefaultClientTool = "geesefs"
 // DefaultClientVersion is the geesefs release nodes run unless AGENT_TEAMS_FS_CLIENT_* overrides it.
 const DefaultClientVersion = "0.43.9"
 
-// DefaultAssets are the sha256 of the geesefs v0.43.9 release binaries. PENDING: the zeros stand
-// for checksums not yet taken from the release; nodes refuse a download that does not match.
+// DefaultAssets are the sha256 of the geesefs v0.43.9 release binaries (2026-09-03); nodes refuse a
+// download that does not match.
 var DefaultAssets = []Asset{
-	{Platform: "linux-amd64", SHA256: "0000000000000000000000000000000000000000000000000000000000000000"},
-	{Platform: "linux-arm64", SHA256: "0000000000000000000000000000000000000000000000000000000000000000"},
-	{Platform: "darwin-amd64", SHA256: "0000000000000000000000000000000000000000000000000000000000000000"},
-	{Platform: "darwin-arm64", SHA256: "0000000000000000000000000000000000000000000000000000000000000000"},
+	{Platform: "linux-amd64", SHA256: "8253f0bad8070f504b3ca94a76919d9617252e7ffae04efca9ca54d5cfbaaca8"},
+	{Platform: "linux-arm64", SHA256: "d2a47ea0833c2369e1f7ba92cada1c8caadd0e91144f4219fd0ce6a483e52461"},
+	{Platform: "darwin-amd64", SHA256: "be628ec055c422f32e66f150d77ba5229af06cda2dab61866e236d794bab3318"},
+	{Platform: "darwin-arm64", SHA256: "ed2cbcbb5d2f7be6e5d9c4fd212772f2af195cfb2a442440191f6b11ca36fb53"},
 }
 
 // DefaultClientBase is where the default assets are downloaded from: <base>/v<version>/geesefs-<os>-<arch>
@@ -83,12 +83,10 @@ type Config struct {
 	S3Endpoint   string
 	NodeEndpoint string
 	Region       string
-	// AccessKey / SecretKey are the platform's key: B2 an application key with writeKeys (and the
-	// file capabilities) on Bucket, RustFS the admin key.
+	// AccessKey / SecretKey are the platform's key: RustFS the admin key, B2 an application key
+	// with writeKeys and the file capabilities on its bucket.
 	AccessKey string
 	SecretKey string
-	// Bucket holds every user's folder.
-	Bucket string
 	// CapacityGB is the soft limit of a user's folder (0 = none).
 	CapacityGB int
 	// ClientTool is the S3 mount client nodes run (DefaultClientTool); ClientVersion and ClientBase
@@ -114,7 +112,7 @@ func orString(s, def string) string {
 
 // Enabled tells whether the feature is configured.
 func (c Config) Enabled() bool {
-	return c.S3Endpoint != "" && c.Bucket != "" && c.AccessKey != "" && c.SecretKey != ""
+	return c.S3Endpoint != "" && c.AccessKey != "" && c.SecretKey != ""
 }
 
 // ClientAssets are the client downloads with URLs filled in.
@@ -175,6 +173,17 @@ func prefixID(prefix string) string {
 	return hexID(id)
 }
 
+// folderID is the id of a user's folder: its prefix users/<id>/, or its bucket atu-<id> ("" otherwise).
+func folderID(f Folder) string {
+	if f.Prefix != "" {
+		return prefixID(f.Prefix)
+	}
+	if !strings.HasPrefix(f.Bucket, "atu-") {
+		return ""
+	}
+	return keyID(f.Bucket)
+}
+
 // keyID is the id in a key or IAM user name (atu-<id> or atu<id>; "" for anything else).
 func keyID(name string) string {
 	id, ok := strings.CutPrefix(name, "atu")
@@ -196,18 +205,22 @@ type KeyInfo struct {
 	Name string
 }
 
-// PrefixPolicy is a user's IAM policy (RustFS / MinIO): list, read and delete in its own prefix,
-// write too unless write is false; nothing outside it, no bucket or policy change.
-func PrefixPolicy(bucket, prefix string, write bool) []byte {
+// FolderPolicy is a user's IAM policy (RustFS / MinIO): list, read and delete in its own folder (a
+// whole bucket, or a prefix of one), write too unless write is false; nothing outside it, no bucket,
+// quota or policy change.
+func FolderPolicy(f Folder, write bool) []byte {
 	actions := `"s3:GetObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"`
 	if write {
 		actions = `"s3:PutObject",` + actions
 	}
+	list := fmt.Sprintf(`{"Effect":"Allow","Action":["s3:ListBucket","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::%s"]}`, f.Bucket)
+	if f.Prefix != "" {
+		list = fmt.Sprintf(`{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::%[1]s"],"Condition":{"StringLike":{"s3:prefix":["%[2]s","%[2]s*"]}}}`, f.Bucket, f.Prefix)
+	}
 	return fmt.Appendf(nil, `{"Version":"2012-10-17","Statement":[`+
-		`{"Effect":"Allow","Action":["s3:GetBucketLocation"],"Resource":["arn:aws:s3:::%[1]s"]},`+
-		`{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::%[1]s"],"Condition":{"StringLike":{"s3:prefix":["%[2]s","%[2]s*"]}}},`+
-		`{"Effect":"Allow","Action":[%[3]s],"Resource":["arn:aws:s3:::%[1]s/%[2]s*"]}]}`,
-		bucket, prefix, actions)
+		`{"Effect":"Allow","Action":["s3:GetBucketLocation"],"Resource":["arn:aws:s3:::%[1]s"]},%[2]s,`+
+		`{"Effect":"Allow","Action":[%[3]s],"Resource":["arn:aws:s3:::%[1]s/%[4]s*"]}]}`,
+		f.Bucket, list, actions, f.Prefix)
 }
 
 // UserSecrets are what a user's row seals: its key's secret.

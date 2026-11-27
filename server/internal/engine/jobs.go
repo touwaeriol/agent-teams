@@ -15,7 +15,7 @@ import (
 const (
 	fsSweepEvery     = time.Minute      // provisioning, removals, deliverable moves
 	orphanSweepEvery = time.Hour        // an ownerless volume goes at the second sweep that finds it
-	fsQuotaEvery     = 15 * time.Minute // shared folders over their capacity become read-only
+	fsQuotaEvery     = 15 * time.Minute // shared folders over their capacity become read-only (stores without quotas)
 )
 
 // registerJobs adds the engine's background jobs to e.Jobs (Start, before the registry starts).
@@ -60,6 +60,9 @@ func (e *Engine) registerJobs(ctx context.Context) {
 	add(jobs.Job{Name: "orphan-volumes", Title: "无主共享文件夹清理", Every: orphanSweepEvery,
 		Description: "删除用户已删除但没删掉的共享文件夹和对象存储密钥（连续两次检查都没有用户才删）",
 		Run:         func(ctx context.Context, _ jobs.Trigger) (string, error) { return e.sweepOrphanFolders(ctx) }})
+	if !e.FS.SoftQuota() {
+		return // the store enforces the capacity itself (RustFS bucket quotas)
+	}
 	add(jobs.Job{Name: "shared-folder-quota", Title: "共享文件夹容量", Every: fsQuotaEvery,
 		Description: "统计每个共享文件夹的用量：超出容量的换成不能写的密钥（还能读和删），降回容量以内再恢复",
 		Run:         func(ctx context.Context, _ jobs.Trigger) (string, error) { return e.enforceFolderQuotas(ctx) }})

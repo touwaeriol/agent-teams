@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 共享文件夹: the user's folder (a prefix of the platform's object-store bucket), mounted
-// (geesefs) on every node of theirs.
+// 共享文件夹: the user's folder (its own bucket on RustFS, or a prefix of the platform's B2 bucket),
+// mounted (geesefs) on every node of theirs.
 // Each project gets projects/<id>, and shared/ is open to all their projects. It is on by default:
 // the console provisions it by itself (a failed attempt can be retried here); nodes mount it
 // themselves (fs_s3_mount, Docker nodes too: the container needs /dev/fuse).
@@ -63,13 +63,13 @@ const retry = useAction(() => sharedFolder.enable(), { invalidate: [keys.sharedF
             </template>
             <dl class="grid grid-cols-[110px_1fr] gap-y-2 text-[13px]">
               <dt class="text-muted-foreground">存储位置</dt>
-              <dd class="font-mono break-all">{{ vol.bucket }}/{{ vol.prefix }}</dd>
+              <dd class="font-mono break-all">{{ vol.prefix ? `${vol.bucket}/${vol.prefix}` : vol.bucket }}</dd>
               <template v-if="used">
                 <dt class="text-muted-foreground">已用空间</dt>
                 <dd>{{ used }}</dd>
               </template>
               <dt class="text-muted-foreground">容量上限</dt>
-              <dd>{{ vol.capacity_gb > 0 ? `${vol.capacity_gb} GB` : "不限" }}</dd>
+              <dd>{{ vol.capacity_gb > 0 ? `${vol.capacity_gb} GB（写满后新的写入会失败，通常在保存或关闭文件时报 I/O 错误）` : "不限" }}</dd>
               <dt class="text-muted-foreground">项目目录</dt>
               <dd class="font-mono">{{ view.project_dir }}</dd>
               <dt class="text-muted-foreground">公共目录</dt>
@@ -90,8 +90,8 @@ const retry = useAction(() => sharedFolder.enable(), { invalidate: [keys.sharedF
           <Panel title="Docker 节点">
             <p class="text-[13px] leading-[22px] text-muted-foreground">
               节点自己挂载共享文件夹，Docker 里的节点也一样，但容器要能用 FUSE：在 compose.yml 的节点服务里加上
-              <code>devices: ["/dev/fuse"]</code> 和 <code>cap_add: ["SYS_ADMIN"]</code>（宿主机开了 AppArmor 时再加
-              <code>security_opt: ["apparmor:unconfined"]</code>）。挂载用的密钥只发给你的节点，不会出现在配置文件里。
+              <code>devices: ["/dev/fuse"]</code>、<code>cap_add: ["SYS_ADMIN"]</code> 和
+              <code>security_opt: ["apparmor:unconfined"]</code>，挂载点是容器里的 <code>/home/agent/.fs</code>。挂载用的密钥只发给你的节点，不会出现在配置文件里。
             </p>
           </Panel>
 

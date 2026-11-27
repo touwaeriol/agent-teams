@@ -1,3 +1,4 @@
+import type { Confine } from "../confine.js";
 import type { Logger } from "../../util/log.js";
 import type { RateLimitSnapshot } from "../../codex-protocol/v2/RateLimitSnapshot.js";
 import { AppServer } from "./appserver.js";
@@ -13,6 +14,7 @@ export interface CodexHubOptions {
   log: Logger;
   clientVersion: string;
   command?: string[];
+  confine?: Confine;
 }
 
 /** One `codex app-server` per node (same CODEX_HOME); routes traffic to threads by threadId. */
@@ -50,7 +52,7 @@ export class CodexHub {
   }
 
   private async spawn(): Promise<AppServer> {
-    const server = new AppServer({ env: this.opts.env, log: this.opts.log, clientVersion: this.opts.clientVersion, ...(this.opts.command ? { command: this.opts.command } : {}) });
+    const server = new AppServer({ env: this.opts.env, log: this.opts.log, clientVersion: this.opts.clientVersion, ...(this.opts.command ? { command: this.opts.command } : {}), ...(this.opts.confine ? { confine: this.opts.confine } : {}) });
     server.on("notification", (method, params) => {
       if (method === "account/rateLimits/updated" && params.rateLimits) this.noteRateLimits(params.rateLimits as RateLimitSnapshot);
       this.route(params)?.onNotification(method, params);

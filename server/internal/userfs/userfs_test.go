@@ -19,11 +19,14 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/testdb"
 )
 
-// fakeStore keeps each folder as a directory under root, keys in a map.
+// fakeStore keeps each folder as a directory under root (bucket/prefix), keys in a map. hard
+// picks the layout: a bucket per user with a quota (RustFS) or a prefix of one bucket (B2).
 type fakeStore struct {
 	mu       sync.Mutex
 	root     string
+	hard     bool
 	keys     map[string]fakeKey // key id → key
+	quotas   map[string]int     // bucket → GB
 	n        int
 	prepares int
 	usage    int64 // when set, Usage reports it instead of counting
@@ -32,24 +35,37 @@ type fakeStore struct {
 }
 
 type fakeKey struct {
-	name, prefix, secret string
-	write                bool
+	name   string
+	folder Folder
+	secret string
+	write  bool
 }
 
 func newFakeStore(root string) *fakeStore {
-	return &fakeStore{root: root, keys: map[string]fakeKey{}}
+	return &fakeStore{root: root, keys: map[string]fakeKey{}, quotas: map[string]int{}}
 }
 
-func (f *fakeStore) Files(prefix string) Files {
+func (f *fakeStore) dir(fo Folder) string { return filepath.Join(f.root, fo.Bucket, fo.Prefix) }
+
+func (f *fakeStore) Folder(n UserNames) Folder {
+	if f.hard {
+		return Folder{Bucket: n.Name}
+	}
+	return Folder{Bucket: "fs", Prefix: n.Prefix}
+}
+
+func (f *fakeStore) HardQuota() bool { return f.hard }
+
+func (f *fakeStore) Files(fo Folder) Files {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.filesErr != nil {
 		return failingFiles{f.filesErr}
 	}
-	return DirFiles{Root: filepath.Join(f.root, prefix)}
+	return DirFiles{Root: f.dir(fo)}
 }
 
-func (f *fakeStore) Prepare(context.Context) error {
+func (f *fakeStore) Prepare(_ context.Context, fo Folder, capacityGB int) error {
 	time.Sleep(20 * time.Millisecond) // long enough for concurrent Enables to overlap
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -57,28 +73,36 @@ func (f *fakeStore) Prepare(context.Context) error {
 		return f.fail
 	}
 	f.prepares++
+	if f.hard {
+		f.quotas[fo.Bucket] = capacityGB
+	}
 	return nil
 }
 
-func (f *fakeStore) RemovePrefix(_ context.Context, prefix string) error {
-	return os.RemoveAll(filepath.Join(f.root, prefix))
+func (f *fakeStore) Remove(_ context.Context, fo Folder) error {
+	return os.RemoveAll(f.dir(fo))
 }
 
-func (f *fakeStore) Prefixes(context.Context) ([]string, error) {
-	es, err := os.ReadDir(filepath.Join(f.root, "users"))
+func (f *fakeStore) Folders(context.Context) ([]Folder, error) {
+	var out []Folder
+	if f.hard {
+		es, err := os.ReadDir(f.root)
+		for _, e := range es {
+			out = append(out, Folder{Bucket: e.Name()})
+		}
+		return out, err
+	}
+	es, err := os.ReadDir(filepath.Join(f.root, "fs", "users"))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
-	var out []string
 	for _, e := range es {
-		if e.IsDir() {
-			out = append(out, "users/"+e.Name()+"/")
-		}
+		out = append(out, Folder{Bucket: "fs", Prefix: "users/" + e.Name() + "/"})
 	}
 	return out, err
 }
 
-func (f *fakeStore) Usage(_ context.Context, prefix string) (Usage, error) {
+func (f *fakeStore) Usage(_ context.Context, fo Folder) (Usage, error) {
 	f.mu.Lock()
 	fixed := f.usage
 	f.mu.Unlock()
@@ -86,7 +110,7 @@ func (f *fakeStore) Usage(_ context.Context, prefix string) (Usage, error) {
 		return Usage{UsedBytes: fixed, Objects: 1}, nil
 	}
 	var u Usage
-	err := filepath.Walk(filepath.Join(f.root, prefix), func(_ string, fi os.FileInfo, err error) error {
+	err := filepath.Walk(f.dir(fo), func(_ string, fi os.FileInfo, err error) error {
 		if err == nil && !fi.IsDir() {
 			u.UsedBytes += fi.Size()
 			u.Objects++
@@ -96,7 +120,7 @@ func (f *fakeStore) Usage(_ context.Context, prefix string) (Usage, error) {
 	return u, err
 }
 
-func (f *fakeStore) IssueKey(_ context.Context, n UserNames, write bool) (Key, error) {
+func (f *fakeStore) IssueKey(_ context.Context, n UserNames, fo Folder, write bool) (Key, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.fail != nil {
@@ -104,7 +128,7 @@ func (f *fakeStore) IssueKey(_ context.Context, n UserNames, write bool) (Key, e
 	}
 	f.n++
 	k := Key{ID: fmt.Sprintf("kid%d", f.n), Secret: fmt.Sprintf("secret%d", f.n)}
-	f.keys[k.ID] = fakeKey{name: n.Name, prefix: n.Prefix, secret: k.Secret, write: write}
+	f.keys[k.ID] = fakeKey{name: n.Name, folder: fo, secret: k.Secret, write: write}
 	return k, nil
 }
 
@@ -142,7 +166,7 @@ func (f *fakeStore) key(id string) (fakeKey, bool) {
 
 // userPath is a path in the user's folder as the fake stores it.
 func (f *fakeStore) userPath(userID string, rel ...string) string {
-	return filepath.Join(append([]string{f.root, NamesOf(userID).Prefix}, rel...)...)
+	return filepath.Join(append([]string{f.dir(f.Folder(NamesOf(userID)))}, rel...)...)
 }
 
 type failingFiles struct{ err error }
@@ -156,7 +180,7 @@ func (f failingFiles) Mkdir(context.Context, string) error                 { ret
 func (f failingFiles) Remove(context.Context, string) error                { return f.err }
 
 func testConfig() Config {
-	return Config{S3Endpoint: "http://s3.internal:9000", NodeEndpoint: "https://s3.example.net", Bucket: "fs", AccessKey: "kid", SecretKey: "ksecret",
+	return Config{S3Endpoint: "http://s3.internal:9000", NodeEndpoint: "https://s3.example.net", AccessKey: "kid", SecretKey: "ksecret",
 		CapacityGB: 20, ClientVersion: DefaultClientVersion, ClientBase: DefaultClientBase, Assets: DefaultAssets}
 }
 
@@ -187,13 +211,20 @@ func TestNames(t *testing.T) {
 		prefixID("other/0123456789abcdef/") != "" || keyID("agent-teams") != "" || keyID("atu-0123456789ABCDEF") != "" {
 		t.Fatal("names")
 	}
-	rw, ro := string(PrefixPolicy("fs", n.Prefix, true)), string(PrefixPolicy("fs", n.Prefix, false))
+	rw, ro := string(FolderPolicy(Folder{"fs", n.Prefix}, true)), string(FolderPolicy(Folder{"fs", n.Prefix}, false))
 	if !strings.Contains(rw, "arn:aws:s3:::fs/"+n.Prefix+"*") || !strings.Contains(rw, `"s3:prefix":["`+n.Prefix+`","`+n.Prefix+`*"]`) ||
 		!strings.Contains(rw, "s3:PutObject") || strings.Contains(rw, "s3:*") || strings.Contains(rw, "DeleteBucket") {
 		t.Fatalf("policy %s", rw)
 	}
 	if strings.Contains(ro, "s3:PutObject") || !strings.Contains(ro, "s3:DeleteObject") {
 		t.Fatalf("read-only policy %s", ro)
+	}
+	whole := string(FolderPolicy(Folder{Bucket: n.Name}, true))
+	if !strings.Contains(whole, "arn:aws:s3:::"+n.Name+"/*") || strings.Contains(whole, "s3:prefix") || strings.Contains(whole, "DeleteBucket") {
+		t.Fatalf("bucket policy %s", whole)
+	}
+	if folderID(Folder{Bucket: n.Name}) != n.ID || folderID(Folder{Bucket: "fs", Prefix: n.Prefix}) != n.ID || folderID(Folder{Bucket: "attachments"}) != "" {
+		t.Fatal("folder ids")
 	}
 	assets := testConfig().ClientAssets()
 	if len(assets) != 4 || !strings.HasSuffix(assets[0].URL, "/v"+DefaultClientVersion+"/geesefs-linux-amd64") || !strings.HasSuffix(assets[3].URL, "/geesefs-mac-arm64") {
@@ -221,7 +252,7 @@ func TestEnableMountDisable(t *testing.T) {
 		}
 	}
 	key, ok := fs.key(vol.AccessKey)
-	if !ok || key.prefix != n.Prefix || key.name != n.Name || !key.write || fs.keyCount() != 1 {
+	if !ok || key.folder != (Folder{"fs", n.Prefix}) || key.name != n.Name || !key.write || fs.keyCount() != 1 {
 		t.Fatalf("key %+v %v (%d keys)", key, ok, fs.keyCount())
 	}
 	spec, err := s.MountSpec(ctx, "u1")
@@ -373,5 +404,36 @@ func TestEnforceQuotas(t *testing.T) {
 	}
 	if k, ok := fs.key(back.AccessKey); !ok || !k.write || fs.keyCount() != 1 {
 		t.Fatalf("unlocked key %+v %v", k, ok)
+	}
+}
+
+// TestHardQuotaStore: on a store with quotas (RustFS) each user gets a bucket of its own with the
+// capacity as its quota, the mount names the bucket without a prefix, and no soft-quota round runs.
+func TestHardQuotaStore(t *testing.T) {
+	s, fs, _ := newTest(t)
+	fs.hard = true
+	ctx := context.Background()
+	vol := mustVolume(t, s, "u1")
+	n := NamesOf("u1")
+	if vol.Bucket != n.Name || vol.Prefix != "" || fs.quotas[n.Name] != 20 || !s.Enabled() || s.SoftQuota() {
+		t.Fatalf("%+v quotas %v", vol, fs.quotas)
+	}
+	spec, err := s.MountSpec(ctx, "u1")
+	if err != nil || spec.Bucket != n.Name || spec.Prefix != "" || spec.Name != n.Name {
+		t.Fatalf("spec %+v %v", spec, err)
+	}
+	if k, _ := fs.key(vol.AccessKey); k.folder != (Folder{Bucket: n.Name}) {
+		t.Fatalf("key %+v", k)
+	}
+	fs.usage = 100 << 30
+	if r, err := s.EnforceQuotas(ctx); err != nil || r != (QuotaResult{}) {
+		t.Fatalf("soft quota ran: %+v %v", r, err)
+	}
+	if err := s.Disable(ctx, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	s.Wait()
+	if exists(fs.userPath("u1")) || fs.keyCount() != 0 {
+		t.Fatal("bucket or key left")
 	}
 }

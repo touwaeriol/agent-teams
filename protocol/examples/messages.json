@@ -1750,12 +1750,11 @@
     "ts": "2026-11-26T12:00:00.000Z",
     "body": {
       "name": "atu-0123456789abcdef",
-      "bucket": "agent-teams-fs",
-      "prefix": "users/0123456789abcdef/",
+      "bucket": "atu-0123456789abcdef",
+      "prefix": "",
       "generation": 1,
-      "endpoint": "https://s3.us-west-004.backblazeb2.com",
-      "region": "us-west-004",
-      "access_key": "004a0123456789a0000000042",
+      "endpoint": "https://rustfs.example.net",
+      "access_key": "atu0123456789abcdef",
       "secret_key": "secret",
       "client": {
         "tool": "geesefs",

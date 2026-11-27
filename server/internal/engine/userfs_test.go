@@ -20,37 +20,39 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
 
-// fsFakes is userfs.Store with each folder a local directory.
+// fsFakes is userfs.Store with each folder a local directory (a bucket per user, like RustFS).
 type fsFakes struct {
 	root string
 	made atomic.Int32
 	keys atomic.Int32
 }
 
-func (f *fsFakes) Files(prefix string) userfs.Files {
-	return userfs.DirFiles{Root: filepath.Join(f.root, prefix)}
+func (f *fsFakes) Folder(n userfs.UserNames) userfs.Folder { return userfs.Folder{Bucket: n.Name} }
+func (f *fsFakes) HardQuota() bool                         { return true }
+func (f *fsFakes) Files(fo userfs.Folder) userfs.Files {
+	return userfs.DirFiles{Root: filepath.Join(f.root, fo.Bucket)}
 }
-func (f *fsFakes) Prepare(context.Context) error { f.made.Add(1); return nil }
-func (f *fsFakes) RemovePrefix(_ context.Context, prefix string) error {
-	return os.RemoveAll(filepath.Join(f.root, prefix))
+func (f *fsFakes) Prepare(context.Context, userfs.Folder, int) error { f.made.Add(1); return nil }
+func (f *fsFakes) Remove(_ context.Context, fo userfs.Folder) error {
+	return os.RemoveAll(filepath.Join(f.root, fo.Bucket))
 }
-func (f *fsFakes) Prefixes(context.Context) ([]string, error) { return nil, nil }
-func (f *fsFakes) IssueKey(_ context.Context, n userfs.UserNames, _ bool) (userfs.Key, error) {
+func (f *fsFakes) Folders(context.Context) ([]userfs.Folder, error) { return nil, nil }
+func (f *fsFakes) IssueKey(_ context.Context, n userfs.UserNames, _ userfs.Folder, _ bool) (userfs.Key, error) {
 	return userfs.Key{ID: fmt.Sprintf("%s-%d", n.Name, f.keys.Add(1)), Secret: "sk"}, nil
 }
 func (f *fsFakes) RevokeKey(context.Context, userfs.UserNames, string) error { return nil }
 func (f *fsFakes) Keys(context.Context) ([]userfs.KeyInfo, error)            { return nil, nil }
-func (f *fsFakes) Usage(context.Context, string) (userfs.Usage, error) {
+func (f *fsFakes) Usage(context.Context, userfs.Folder) (userfs.Usage, error) {
 	return userfs.Usage{UsedBytes: 12288, Objects: 4}, nil
 }
 
 // dir is the user's folder as the fake stores it.
 func (f *fsFakes) dir(userID string) string {
-	return filepath.Join(f.root, userfs.NamesOf(userID).Prefix)
+	return filepath.Join(f.root, userfs.NamesOf(userID).Name)
 }
 
 func fsConfig() userfs.Config {
-	return userfs.Config{S3Endpoint: "https://s3.example", Bucket: "fs", AccessKey: "ak", SecretKey: "sk", CapacityGB: 20,
+	return userfs.Config{S3Endpoint: "https://s3.example", AccessKey: "ak", SecretKey: "sk", CapacityGB: 20,
 		ClientVersion: userfs.DefaultClientVersion, ClientBase: userfs.DefaultClientBase, Assets: userfs.DefaultAssets}
 }
 
@@ -101,7 +103,7 @@ func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
 	var mount protocol.FsMount
 	_ = json.Unmarshal(f.Body, &mount)
 	names := userfs.NamesOf(tm.ownerID(t))
-	if mount.Bucket != "fs" || mount.Prefix != view.Volume.Prefix || mount.Prefix != names.Prefix || mount.Name != names.Name ||
+	if mount.Bucket != view.Volume.Bucket || mount.Bucket != names.Name || mount.Prefix != "" || mount.Name != names.Name ||
 		mount.AccessKey == "" || mount.SecretKey != "sk" || mount.Endpoint != "https://s3.example" {
 		t.Fatalf("fs.mount %+v", mount)
 	}

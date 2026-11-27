@@ -67,17 +67,13 @@ docker compose up -d                # 拉取 ghcr.io/touwaeriol/agent-teams-node
 想用宿主目录代替命名 volume 时，先 `chown -R 1000:1000` 这些目录，否则入口脚本会提示不可写并退出。
 git 走 ssh 的话，在 `compose.yml` 里打开 `~/.ssh:/home/agent/.ssh:ro` 那一行。
 
-## 共享文件夹（可选）
+## 共享文件夹
 
-每个用户默认有一个 JuiceFS 网络文件夹（控制面板自动开通，状态见“设置 → 共享文件夹”；项目文件、附件、交付物都在里面）。
-Docker 节点由宿主机挂载，容器不需要特权、也拿不到存储密码：
-
-1. 宿主机装一次 JuiceFS 卷插件：`docker plugin install juicedata/juicefs --alias juicedata/juicefs --grant-all-permissions`
-2. 在“共享文件夹”页点“生成 Docker 卷配置”，把给出的 `volumes:` 片段、`AGENT_TEAMS_FS_DIR=/home/agent/.fs`
-   和卷挂载 `/home/agent/.fs` 合进 `compose.yml`，再 `docker compose up -d`（这段配置含存储密码，只放在这台宿主机上）。
-3. “节点”页显示“共享文件夹（Docker 卷）：已挂载”即可。挂载丢了节点会自己退出，靠 `restart: unless-stopped` 重启恢复。
-
-一个节点只挂一次（整个用户卷），项目随时增减都不用改配置或重启。详见公开文档 `/node-docker.md` 第 8 节。
+每个用户默认有一个网络文件夹（控制面板自动开通，状态见“设置 → 共享文件夹”；项目文件、附件、交付物都在里面）。
+守护进程在容器里用 geesefs（镜像自带，版本和校验和与控制面板一致）挂到 `/home/agent/.fs`（`AGENT_TEAMS_FS_MOUNT_DIR`），
+所以 `compose.yml` 给容器加了 `/dev/fuse`、`SYS_ADMIN` 和 `apparmor:unconfined`。挂载密钥只经节点连接下发。
+旧容器没有这三项时重建一次即可（卷不用动）。员工会话默认能 sudo；在 `node.env` 写 `AGENT_TEAMS_CONFINE=on`
+让会话以 no_new_privs 运行，拿不到这些权限。详见公开文档 `/node-docker.md` 第 8 节。
 
 ## 不用 compose
 

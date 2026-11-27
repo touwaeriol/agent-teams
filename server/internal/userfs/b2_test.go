@@ -106,11 +106,17 @@ func TestB2Keys(t *testing.T) {
 	ctx := context.Background()
 	b := NewB2("https://s3.us-west-004.backblazeb2.com", "us-west-004", "kid", "ksecret", "fs")
 	b.API = srv.URL
-	if err := b.Prepare(ctx); err != nil {
+	if b.Folder(NamesOf("u1")) != (Folder{Bucket: "fs", Prefix: NamesOf("u1").Prefix}) || b.HardQuota() {
+		t.Fatal("b2 layout")
+	}
+	if err := b.Remove(context.Background(), Folder{Bucket: "fs"}); err == nil {
+		t.Fatal("emptied the whole bucket")
+	}
+	if err := b.Prepare(ctx, Folder{}, 0); err != nil {
 		t.Fatal(err)
 	}
 	n := NamesOf("u1")
-	rw, err := b.IssueKey(ctx, n, true)
+	rw, err := b.IssueKey(ctx, n, b.Folder(n), true)
 	if err != nil || rw.ID == "" || rw.Secret != "K"+rw.ID {
 		t.Fatalf("issue: %+v %v", rw, err)
 	}
@@ -120,7 +126,7 @@ func TestB2Keys(t *testing.T) {
 		t.Fatalf("create_key body %+v", got)
 	}
 	f.expired = true
-	ro, err := b.IssueKey(ctx, n, false)
+	ro, err := b.IssueKey(ctx, n, b.Folder(n), false)
 	if err != nil {
 		t.Fatalf("issue after expiry: %v", err)
 	}
@@ -148,12 +154,12 @@ func TestB2Keys(t *testing.T) {
 
 	wrong := NewB2("https://s3.example", "", "kid", "ksecret", "nope")
 	wrong.API = srv.URL
-	if err := wrong.Prepare(ctx); err == nil {
+	if err := wrong.Prepare(ctx, Folder{}, 0); err == nil {
 		t.Fatal("missing bucket accepted")
 	}
 	bad := NewB2("https://s3.example", "", "kid", "wrong", "fs")
 	bad.API = srv.URL
-	if _, err := bad.IssueKey(ctx, n, true); err == nil {
+	if _, err := bad.IssueKey(ctx, n, bad.Folder(n), true); err == nil {
 		t.Fatal("bad platform key accepted")
 	}
 }

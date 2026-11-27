@@ -19,14 +19,19 @@ type createdNode struct {
 
 // TestNodeComposeSnippet: the compose hostname is quoted (a node named 123, true or 1e3 stays a
 // string in YAML) and the volumes carry the docker run names (not <project>_<key>), so switching
-// between docker run and compose keeps the logins and the workspace.
+// between docker run and compose keeps the logins and the workspace. Both give the container FUSE
+// for the shared folder.
 func TestNodeComposeSnippet(t *testing.T) {
 	n := nodeContainer{name: "123", host: "123", slug: "agent-teams-node-123", console: "http://console.test", token: "tok", image: "img"}
 	run, compose := n.dockerRun(), n.compose()
-	for _, want := range []string{"    hostname: \"123\"", "  claude: { name: agent-teams-node-123-claude }", "  data: { name: agent-teams-node-123-data }"} {
+	for _, want := range []string{"    hostname: \"123\"", "  claude: { name: agent-teams-node-123-claude }", "  data: { name: agent-teams-node-123-data }",
+		`    devices: ["/dev/fuse"]`, `    cap_add: ["SYS_ADMIN"]`, `    security_opt: ["apparmor:unconfined"]`} {
 		if !strings.Contains(compose, want) {
 			t.Fatalf("compose lacks %q:\n%s", want, compose)
 		}
+	}
+	if !strings.Contains(run, "--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined") {
+		t.Fatalf("docker run lacks FUSE:\n%s", run)
 	}
 	for _, v := range nodeVolumes {
 		if !strings.Contains(run, "-v "+n.volume(v.key)+":"+v.path) || !strings.Contains(compose, "name: "+n.volume(v.key)+" }") {

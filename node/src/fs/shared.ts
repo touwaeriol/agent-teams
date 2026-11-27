@@ -24,6 +24,8 @@ export interface SharedFsOptions {
   dataDir: string;
   /** AGENT_TEAMS_FS_MOUNT_DIR: mount here instead of <data>/mnt/<name> (Docker: /home/agent/.fs). */
   mountDir?: string;
+  /** Where the node image keeps geesefs-<version> (default /opt/geesefs): used when its sha256 matches, instead of a download. */
+  preinstalledDir?: string;
   /** AGENT_TEAMS_FS_DIR: an externally mounted folder. */
   externalDir?: string;
   /** Where the mounted {name, generation} (never secrets) is kept across daemon restarts (default dataDir). */
@@ -279,6 +281,8 @@ export class SharedFs {
     const key = this.o.platform ?? platformKey();
     const asset = c.assets.find((a) => a.platform === key);
     if (!asset) throw new Error(`no geesefs for ${key}`);
+    const pre = join(this.o.preinstalledDir ?? "/opt/geesefs", `geesefs-${c.version}`);
+    if (existsSync(pre) && sha256File(pre) === asset.sha256) return pre;
     const r = await (this.o.fetchFn ?? fetch)(asset.url, { redirect: "follow", signal: AbortSignal.timeout(10 * 60_000) });
     if (!r.ok) throw new Error(`GET ${asset.url}: ${r.status}`);
     const data = Buffer.from(await r.arrayBuffer());
@@ -288,13 +292,14 @@ export class SharedFs {
 }
 
 /**
- * geesefs's command line: the owner's prefix of the bucket (bucket:prefix) at dir. Files
+ * geesefs's command line: the owner's bucket (RustFS) or its prefix of the shared bucket
+ * (bucket:prefix, B2) at dir. Files
  * changed elsewhere show within 5 s (stat cache); close waits for the upload (fsync-on-close), so a
  * closed file is in the store; at most 1000 MB of memory.
  */
 export function geesefsArgs(m: FsMount, dir: string, log: string): string[] {
   return ["--endpoint", m.endpoint, "--region", m.region ?? "us-east-1", "--stat-cache-ttl", "5s", "--memory-limit", "1000",
-    "--fsync-on-close", "--log-file", log, `${m.bucket}:${m.prefix}`, dir];
+    "--fsync-on-close", "--log-file", log, m.prefix ? `${m.bucket}:${m.prefix}` : m.bucket, dir];
 }
 
 function mountedStatus(m: FsMount): FsStatus {
@@ -322,7 +327,7 @@ function geesefsProcs(dir: string): number[] {
   for (const pid of pids) {
     try {
       const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
-      if (argv[0]?.endsWith("geesefs") && argv.includes(dir)) out.push(Number(pid));
+      if (/(^|\/)geesefs[^/]*$/.test(argv[0] ?? "") && argv.includes(dir)) out.push(Number(pid));
     } catch {
       // gone meanwhile
     }
@@ -366,6 +371,14 @@ function install(dest: string, data: Buffer): string {
     return dest;
   } finally {
     rmSync(stage, { recursive: true, force: true });
+  }
+}
+
+function sha256File(p: string): string {
+  try {
+    return createHash("sha256").update(readFileSync(p)).digest("hex");
+  } catch {
+    return "";
   }
 }
 
