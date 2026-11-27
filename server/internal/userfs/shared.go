@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -15,11 +14,13 @@ import (
 // SettingKey is the at_settings key of the shared volume's credentials.
 const SettingKey = "user_fs_volume"
 
-// shared is the provisioned volume: its names, credentials and metadata URL as the console reaches it.
+// shared is the provisioned volume: its names, credentials, metadata URL as the console reaches it
+// and its running gateway.
 type shared struct {
 	names   Names
 	secrets Secrets
 	metaURL string
+	gw      Gateway
 }
 
 // sharedSetting is at_settings[SettingKey].
@@ -80,7 +81,7 @@ func (s *Service) readSecrets(ctx context.Context, volume string) (Secrets, bool
 }
 
 // volume provisions the shared volume once per process (again after a failure): the metadata role
-// and schema, the object-store account limited to the volume's prefix, juicefs format.
+// and schema, the object-store account limited to the volume's prefix, juicefs format, the gateway.
 func (s *Service) volume(ctx context.Context) (shared, error) {
 	s.volMu.Lock()
 	defer s.volMu.Unlock()
@@ -108,68 +109,14 @@ func (s *Service) volume(ctx context.Context) (shared, error) {
 	if err := s.volumes.Format(ctx, f); err != nil {
 		return shared{}, fmt.Errorf("juicefs format：%w", err)
 	}
+	if sec.GatewayPassword == "" {
+		return shared{}, fmt.Errorf("%s has no gateway password", SettingKey)
+	}
+	gw, err := s.volumes.Serve(ctx, GatewaySpec{MetaURL: v.metaURL, MetaPassword: sec.MetaPassword, Listen: s.cfg.gatewayListen(), RootPassword: sec.GatewayPassword})
+	if err != nil {
+		return shared{}, fmt.Errorf("juicefs gateway：%w", err)
+	}
+	v.gw = gw
 	s.shared = &v
 	return v, nil
-}
-
-// sharedFiles is the whole volume's tree (the console's own use: folders of every user).
-func (s *Service) sharedFiles(ctx context.Context) (Files, error) {
-	v, err := s.volume(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return s.volumes.Files(ctx, v.names.Volume, v.metaURL, v.secrets.MetaPassword)
-}
-
-// subFiles is a folder of the volume as a tree of its own: paths are cleaned and joined under dir,
-// so none leaves it.
-type subFiles struct {
-	f   Files
-	dir string
-}
-
-func (s subFiles) path(p string) (string, error) { return Join(s.dir, p) }
-
-func (s subFiles) List(ctx context.Context, dir string) ([]Entry, error) {
-	p, err := s.path(dir)
-	if err != nil {
-		return nil, err
-	}
-	return s.f.List(ctx, p)
-}
-
-func (s subFiles) Open(ctx context.Context, name string) (io.ReadCloser, Entry, error) {
-	p, err := s.path(name)
-	if err != nil {
-		return nil, Entry{}, err
-	}
-	return s.f.Open(ctx, p)
-}
-
-func (s subFiles) Put(ctx context.Context, name string, r io.Reader, size int64) error {
-	p, err := s.path(name)
-	if err != nil {
-		return err
-	}
-	return s.f.Put(ctx, p, r, size)
-}
-
-func (s subFiles) Mkdir(ctx context.Context, dir string) error {
-	p, err := s.path(dir)
-	if err != nil {
-		return err
-	}
-	return s.f.Mkdir(ctx, p)
-}
-
-// Remove refuses the folder's root: deleting a user's whole folder is Disable's.
-func (s subFiles) Remove(ctx context.Context, name string) error {
-	p, err := s.path(name)
-	if err != nil {
-		return err
-	}
-	if p == s.dir {
-		return ErrBadPath
-	}
-	return s.f.Remove(ctx, p)
 }

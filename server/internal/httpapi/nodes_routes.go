@@ -56,13 +56,13 @@ type NodeView struct {
 	// CLIs are the runtime CLIs as the daemon last reported them (empty for an older daemon).
 	CLIs    []store.NodeRuntime        `json:"clis" doc:"Install and login state of each runtime CLI as last reported (node.runtimes), ordered by runtime; empty when the daemon never reported"`
 	Upgrade *platform.NodeUpgradeState `json:"upgrade,omitempty" doc:"Last update asked of the node since the console started"`
-	// SharedFolder: the daemon can use the user's shared folder (fs_mount / fs_external) and how it last reported it.
+	// SharedFolder: the daemon can use the user's shared folder (fs_s3_mount / fs_external) and how it last reported it.
 	SharedFolder *NodeFsView `json:"shared_folder,omitempty" doc:"Shared-folder support and mount state; absent when the daemon cannot use it"`
 }
 
 // NodeFsView is a node's shared-folder state (fs.status).
 type NodeFsView struct {
-	Mode  string `json:"mode" enum:"daemon,external" doc:"daemon: the node mounts it itself; external: mounted for it (Docker volume plugin)"`
+	Mode  string `json:"mode" enum:"daemon,external" doc:"daemon: the node mounts it itself; external: mounted for it (Docker volume)"`
 	State string `json:"state" doc:"mounting, mounted, unmounted, error; empty before the first report"`
 	Error string `json:"error"`
 }
@@ -72,7 +72,7 @@ func nodeFs(features []string, raw json.RawMessage) *NodeFsView {
 	switch {
 	case slices.Contains(features, "fs_external"):
 		v.Mode = "external"
-	case !slices.Contains(features, "fs_mount"):
+	case !slices.Contains(features, "fs_s3_mount"):
 		return nil
 	}
 	var st struct{ State, Error string }

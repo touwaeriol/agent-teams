@@ -142,11 +142,11 @@ func TestFS(t *testing.T) {
 	if err != nil || cfg.FS.Configured() {
 		t.Fatalf("off by default: %+v %v", cfg.FS, err)
 	}
-	full := map[string]string{"AGENT_TEAMS_FS_META_HOST": "db.example:15432", "AGENT_TEAMS_FS_BUCKET": "fs",
+	full := map[string]string{"AGENT_TEAMS_FS_GATEWAY_URL": "https://fs.example/", "AGENT_TEAMS_FS_BUCKET": "fs",
 		"AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY": "root", "AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY": "rootpw"}
 	cfg, err = Load(get(full))
 	if err != nil || !cfg.FS.Configured() || cfg.FS.AdminURL != base["DATABASE_URL"] || cfg.FS.S3Endpoint != "https://s3.example" ||
-		cfg.FS.MetaSSLMode != "verify-full" || cfg.FS.CapacityGB != 20 || cfg.FS.JuiceFS != "juicefs" {
+		cfg.FS.GatewayURL != "https://fs.example" || cfg.FS.GatewayListen != "" || cfg.FS.CapacityGB != 20 || cfg.FS.JuiceFS != "juicefs" {
 		t.Fatalf("defaults: %+v %v", cfg.FS, err)
 	}
 	if _, err := Load(get(map[string]string{"AGENT_TEAMS_FS_BUCKET": "fs"})); err == nil {
@@ -156,11 +156,19 @@ func TestFS(t *testing.T) {
 	for k, v := range full {
 		bad[k] = v
 	}
-	bad["AGENT_TEAMS_FS_META_HOST"] = "db.example"
+	bad["AGENT_TEAMS_FS_GATEWAY_URL"] = "fs.example"
 	if _, err := Load(get(bad)); err == nil {
-		t.Fatal("meta host without port accepted")
+		t.Fatal("gateway url without scheme accepted")
 	}
-	bad["AGENT_TEAMS_FS_META_HOST"], bad["AGENT_TEAMS_FS_CLIENT_VERSION"] = "db.example:15432", "1.5.0"
+	bad["AGENT_TEAMS_FS_GATEWAY_URL"], bad["AGENT_TEAMS_FS_GATEWAY_LISTEN"] = "https://fs.example", "9310"
+	if _, err := Load(get(bad)); err == nil {
+		t.Fatal("gateway listen without host accepted")
+	}
+	bad["AGENT_TEAMS_FS_GATEWAY_LISTEN"], bad["AGENT_TEAMS_FS_CLIENT_TOOL"] = "0.0.0.0:9310", "s3fs"
+	if _, err := Load(get(bad)); err == nil {
+		t.Fatal("unknown client tool accepted")
+	}
+	bad["AGENT_TEAMS_FS_CLIENT_TOOL"], bad["AGENT_TEAMS_FS_CLIENT_VERSION"] = "rclone", "1.5.0"
 	if _, err := Load(get(bad)); err == nil {
 		t.Fatal("client version without checksums accepted")
 	}

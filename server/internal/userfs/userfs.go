@@ -1,19 +1,22 @@
 // Package userfs is the user's shared folder (juicefs-shared-storage design): one JuiceFS volume
-// for the whole platform, in which each user has a folder (users/<id>/) that only the user's nodes
-// mount (juicefs mount --subdir). The console provisions the volume once:
+// for the whole platform, served to nodes through the console's own `juicefs gateway
+// --multi-buckets` (an S3 API over the volume, in which each top-level folder is a bucket). The
+// console provisions the volume once:
 //
 //   - metadata: a schema (Config.MetaRole, default juicefs) in the console's PostgreSQL, owned by a
-//     login role of the same name that has no privilege outside it; nodes reach it with that role,
-//     through the address in Config.MetaHost;
+//     login role of the same name that has no privilege outside it; only the console reaches it;
 //   - data: the prefix <volume>/ of one bucket, written with an object-storage account whose policy
 //     allows that prefix only;
-//   - the volume itself, formatted with `juicefs format` (trash).
+//   - the volume itself, formatted with `juicefs format` (trash), and the gateway over it
+//     (Config.GatewayListen, published as Config.GatewayURL).
 //
-// The role's password and the account's secret key are sealed in at_settings (SettingKey) and only
-// ever leave the console in fs.mount, on a node's live link. All nodes share them: the boundary
-// between users is the folder the console tells each node to mount, not the credentials. A user's
-// folder gets a JuiceFS directory quota (Config.CapacityGB); inside it, projects/<pid>/ is a
-// project's folder and shared/ the folder all the user's projects share.
+// Each user gets a bucket of the gateway (u-<16 hex>: a top-level folder of the volume) with a
+// JuiceFS directory quota (Config.CapacityGB), and a gateway IAM user whose policy allows that
+// bucket only. Nodes mount the bucket over S3 with the user's key; they never see the metadata or
+// the object store. Deleting the IAM user revokes every node of the user at once. The volume's
+// secrets are sealed in at_settings (SettingKey), each user's secret key in its at_user_fs row.
+// Inside a bucket, projects/<pid>/ is a project's folder and shared/ the folder all the user's
+// projects share.
 package userfs
 
 import (
@@ -66,6 +69,9 @@ var DefaultAssets = []Asset{
 	{Platform: "darwin-arm64", SHA256: "36167e3bb12657bd886f9ab5509b2b0800897da5cf84069b0970031ce53456cc"},
 }
 
+// DefaultClientTool is the S3 mount client nodes run unless AGENT_TEAMS_FS_CLIENT_TOOL says otherwise.
+const DefaultClientTool = "geesefs"
+
 // DefaultClientBase is where the default assets are downloaded from: <base>/v<version>/juicefs-<version>-<platform>.tar.gz.
 const DefaultClientBase = "https://github.com/juicedata/juicefs/releases/download"
 
@@ -73,10 +79,10 @@ const DefaultClientBase = "https://github.com/juicedata/juicefs/releases/downloa
 type Config struct {
 	// AdminURL is a PostgreSQL URL allowed to create roles and schemas (default: DATABASE_URL).
 	AdminURL string
-	// MetaHost is host:port of that PostgreSQL as nodes reach it (TLS entry point), e.g. db.example.net:15432.
-	MetaHost string
-	// MetaSSLMode is what nodes connect with (default verify-full).
-	MetaSSLMode string
+	// GatewayListen is where the console's gateway listens (host:port); GatewayURL is that gateway
+	// as nodes reach it (https://..., through the reverse proxy).
+	GatewayListen string
+	GatewayURL    string
 	// S3Endpoint is the object store (default AGENT_TEAMS_S3_ENDPOINT), Bucket the bucket all volumes share.
 	S3Endpoint string
 	Bucket     string
@@ -95,21 +101,29 @@ type Config struct {
 	MetaUser string
 	// JuiceFS is the juicefs binary the console runs (format, quota, file access).
 	JuiceFS string
-	// ClientVersion and ClientBase pick the client nodes download; Assets are their checksums.
+	// ClientTool is the S3 mount client nodes run (DefaultClientTool); ClientVersion and ClientBase
+	// pick its download, Assets are their checksums.
+	ClientTool    string
 	ClientVersion string
 	ClientBase    string
 	Assets        []Asset
 }
 
-// DefaultVolume and DefaultMetaRole name the shared volume and its metadata schema.
+// DefaultVolume and DefaultMetaRole name the shared volume and its metadata schema;
+// DefaultGatewayListen is where the gateway listens.
 const (
-	DefaultVolume   = "agent-teams"
-	DefaultMetaRole = "juicefs"
+	DefaultVolume        = "agent-teams"
+	DefaultMetaRole      = "juicefs"
+	DefaultGatewayListen = "0.0.0.0:9310"
 )
 
 func (c Config) volume() string   { return orString(c.Volume, DefaultVolume) }
 func (c Config) metaRole() string { return orString(c.MetaRole, DefaultMetaRole) }
 func (c Config) metaUser() string { return orString(c.MetaUser, c.metaRole()) }
+func (c Config) gatewayListen() string {
+	return orString(c.GatewayListen, DefaultGatewayListen)
+}
+func (c Config) clientTool() string { return orString(c.ClientTool, DefaultClientTool) }
 
 func orString(s, def string) string {
 	if s != "" {
@@ -120,7 +134,7 @@ func orString(s, def string) string {
 
 // Enabled tells whether the feature is configured.
 func (c Config) Enabled() bool {
-	return c.MetaHost != "" && c.Bucket != "" && c.S3Endpoint != "" && c.AdminAccessKey != "" && c.AdminSecretKey != "" && c.AdminURL != ""
+	return c.GatewayURL != "" && c.Bucket != "" && c.S3Endpoint != "" && c.AdminAccessKey != "" && c.AdminSecretKey != "" && c.AdminURL != ""
 }
 
 // database is the database name of AdminURL (the volume's schema lives there).
@@ -190,20 +204,64 @@ func (c Config) SharedNames() Names {
 	return Names{Volume: c.volume(), Role: c.metaRole(), AccessKey: "jfs" + id, Policy: "jfs-" + id}
 }
 
-// UsersDir holds the users' folders in the volume.
-const UsersDir = "users"
-
-// UserDir is a user's folder in the volume: users/<16 hex> (a hash of the user id, so no user id
-// reaches the object store or the metadata).
-func UserDir(userID string) string {
-	sum := sha256.Sum256([]byte("agent-teams-user-fs|" + userID))
-	return UsersDir + "/" + hex.EncodeToString(sum[:8])
+// UserNames are a user's identifiers in the gateway, all from one id (16 hex of a hash of the
+// user id, so no user id reaches the gateway, the metadata or the object store): the bucket (a
+// top-level folder of the volume), the IAM user and its policy.
+type UserNames struct {
+	ID        string
+	Bucket    string // u-<id>
+	AccessKey string // fs<id>
+	Policy    string // fs-<id>
 }
 
-// Secrets are what the volume's setting seals.
+// UserNamesFor are userID's names.
+func UserNamesFor(userID string) UserNames {
+	sum := sha256.Sum256([]byte("agent-teams-user-fs|" + userID))
+	return namesOf(hex.EncodeToString(sum[:8]))
+}
+
+func namesOf(id string) UserNames {
+	return UserNames{ID: id, Bucket: BucketPrefix + id, AccessKey: "fs" + id, Policy: "fs-" + id}
+}
+
+// BucketPrefix starts every user's bucket.
+const BucketPrefix = "u-"
+
+// userBucketID is the id of a user's bucket name ("" for any other name).
+func userBucketID(bucket string) string {
+	id, ok := strings.CutPrefix(bucket, BucketPrefix)
+	if !ok || len(id) != 16 {
+		return ""
+	}
+	if _, err := hex.DecodeString(id); err != nil {
+		return ""
+	}
+	return id
+}
+
+// BucketPolicy is a gateway user's policy: its own bucket, nothing else (no bucket creation or
+// deletion either).
+func BucketPolicy(bucket string) []byte {
+	return fmt.Appendf(nil, `{"Version":"2012-10-17","Statement":[`+
+		`{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::%[1]s"]},`+
+		`{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::%[1]s/*"]}]}`,
+		bucket)
+}
+
+// Secrets are what the volume's setting seals: the metadata role's password, the object-store
+// account's secret key and the gateway's root password (GatewayRoot is its user).
 type Secrets struct {
-	MetaPassword string `json:"meta_password"`
-	SecretKey    string `json:"secret_key"`
+	MetaPassword    string `json:"meta_password"`
+	SecretKey       string `json:"secret_key"`
+	GatewayPassword string `json:"gateway_password"`
+}
+
+// GatewayRoot is the gateway's root user (the console's own access: buckets, IAM, files).
+const GatewayRoot = "agent-teams"
+
+// UserSecrets are what a user's row seals: the gateway IAM user's secret key.
+type UserSecrets struct {
+	SecretKey string `json:"secret_key"`
 }
 
 func randomSecret(n int) string {
@@ -214,18 +272,14 @@ func randomSecret(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// NewSecrets makes a fresh password and secret key.
+// NewSecrets makes fresh volume secrets.
 func NewSecrets() Secrets {
-	return Secrets{MetaPassword: randomSecret(24), SecretKey: randomSecret(30)}
+	return Secrets{MetaPassword: randomSecret(24), SecretKey: randomSecret(30), GatewayPassword: randomSecret(30)}
 }
 
-// MetaURL is the metadata URL without password for host (META_PASSWORD carries it): user connects,
-// schema is the search path (the role's own setting says the same, for poolers that drop it).
-func MetaURL(user, schema, host, database, sslmode string) string {
-	return metaURL(user, schema, host, database, url.Values{"sslmode": {sslmode}})
-}
-
-// metaURL is MetaURL with the connection settings in tls (sslmode and certificate files).
+// metaURL is the metadata URL without password (META_PASSWORD carries it): user connects, schema
+// is the search path (the role's own setting says the same, for poolers that drop it), tls holds
+// the connection settings (sslmode and certificate files).
 func metaURL(user, schema, host, database string, tls url.Values) string {
 	q := url.Values{}
 	for k, v := range tls {

@@ -1749,22 +1749,22 @@
     "id": "c_01JD3V0000000000000000F01",
     "ts": "2026-11-26T12:00:00.000Z",
     "body": {
-      "volume": "agent-teams",
-      "subdir": "users/0123456789abcdef",
+      "bucket": "u-0123456789abcdef",
       "generation": 1,
-      "meta_url": "postgres://juicefs@db.example.net:15432/agent_teams?sslmode=verify-full&search_path=juicefs",
-      "meta_password": "secret",
+      "endpoint": "https://fs.example.net",
+      "access_key": "fs0123456789abcdef",
+      "secret_key": "secret",
       "client": {
-        "version": "1.4.2",
+        "tool": "geesefs",
+        "version": "0.43.2",
         "assets": [
           {
             "platform": "linux-amd64",
-            "url": "https://github.com/juicedata/juicefs/releases/download/v1.4.2/juicefs-1.4.2-linux-amd64.tar.gz",
+            "url": "https://example.net/geesefs-linux-amd64",
             "sha256": "79648a0a67145bf42ca4e8336578c13a5bbc9a0bd34df340b3b93dac1e975247"
           }
         ]
-      },
-      "cache_size_mb": 10240
+      }
     }
   },
   {
@@ -1773,7 +1773,7 @@
     "id": "c_01JD3V0000000000000000F02",
     "ts": "2026-11-26T12:00:00.000Z",
     "body": {
-      "volume": "agent-teams"
+      "bucket": "u-0123456789abcdef"
     }
   },
   {
@@ -1784,8 +1784,7 @@
     "body": {
       "state": "mounted",
       "mode": "daemon",
-      "volume": "agent-teams",
-      "subdir": "users/0123456789abcdef",
+      "bucket": "u-0123456789abcdef",
       "generation": 1
     }
   }

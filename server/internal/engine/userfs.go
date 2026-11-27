@@ -15,10 +15,11 @@ import (
 
 // Node features of the shared folder (juicefs-shared-storage design).
 const (
-	// FeatureFsMount: the daemon can run juicefs itself (fs.mount / fs.unmount).
-	FeatureFsMount = "fs_mount"
-	// FeatureFsExternal: the volume is mounted outside the daemon (Docker volume plugin, host
-	// service) at AGENT_TEAMS_FS_DIR; the daemon only reports it.
+	// FeatureFsMount: the daemon mounts the user's bucket of the gateway itself (fs.mount /
+	// fs.unmount over S3). Daemons of the earlier juicefs mount said fs_mount and get nothing.
+	FeatureFsMount = "fs_s3_mount"
+	// FeatureFsExternal: the folder is mounted outside the daemon (Docker volume, host service) at
+	// AGENT_TEAMS_FS_DIR; the daemon only reports it.
 	FeatureFsExternal = "fs_external"
 )
 
@@ -26,8 +27,7 @@ const (
 type nodeFsStatus struct {
 	State      string `json:"state"`
 	Mode       string `json:"mode"`
-	Volume     string `json:"volume,omitempty"`
-	Subdir     string `json:"subdir,omitempty"`
+	Bucket     string `json:"bucket,omitempty"`
 	Generation int    `json:"generation,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
@@ -78,19 +78,19 @@ func (e *Engine) sweepSharedFolders(ctx context.Context) (string, error) {
 	return strings.Join(done, "，"), errors.Join(perr, rerr, merr)
 }
 
-// sweepOrphanFolders is the ownerless-volumes job.
+// sweepOrphanFolders is the ownerless-buckets job.
 func (e *Engine) sweepOrphanFolders(ctx context.Context) (string, error) {
 	n, err := e.FS.SweepOrphans(ctx)
 	if n == 0 {
 		return "", err
 	}
-	return fmt.Sprintf("销毁 %d 个无主卷", n), err
+	return fmt.Sprintf("删除 %d 个无主 bucket", n), err
 }
 
 // sharedFolder is session.open fs: the project's folder and the user's shared folder, when the
-// user has a ready folder and the node reports that very folder of the volume mounted, at its
-// generation (a status left from another user's folder, another volume, or from before a re-enable,
-// does not count; at_nodes.fs_status is reset whenever the node connects or drops).
+// user has a ready folder and the node reports that very bucket mounted, at its generation (a
+// status left from another bucket, or from before a re-enable, does not count; at_nodes.fs_status
+// is reset whenever the node connects or drops).
 func (e *Engine) sharedFolder(ctx context.Context, q core.DB, userID, nodeID, projectID string) (*protocol.SessionOpenFs, error) {
 	vol, err := e.FS.Get(ctx, userID)
 	if err != nil || vol.State != userfs.StateReady {
@@ -103,28 +103,25 @@ func (e *Engine) sharedFolder(ctx context.Context, q core.DB, userID, nodeID, pr
 	return &protocol.SessionOpenFs{Project: protocol.RelPath(userfs.ProjectDir(projectID)), Shared: protocol.RelPath(userfs.SharedDir)}, nil
 }
 
-// mounts tells whether the status is the user's folder of the volume mounted, at its current
-// generation. A folder mounted outside the daemon (Docker volume plugin) may be reported without
-// them; it counts unless it names another volume or folder.
+// mounts tells whether the status is the user's bucket mounted, at its current generation. A
+// folder mounted outside the daemon (Docker volume) may be reported without them; it counts
+// unless it names another bucket.
 func (st nodeFsStatus) mounts(vol userfs.Volume) bool {
 	switch {
 	case st.State != string(protocol.FsStatusStateMounted):
 		return false
 	case st.Mode == string(protocol.FsStatusModeExternal):
-		return (st.Volume == "" || st.Volume == vol.Volume) && (st.Subdir == "" || st.Subdir == vol.Subdir)
+		return st.Bucket == "" || st.Bucket == vol.Bucket
 	default:
-		return st.Volume == vol.Volume && st.Subdir == vol.Subdir && st.Generation == vol.Generation
+		return st.Bucket == vol.Bucket && st.Generation == vol.Generation
 	}
 }
 
 // fsStatus stores a node's fs.status and refreshes its node page.
 func (e *Engine) fsStatus(ctx context.Context, node store.Node, m *protocol.FsStatus) error {
 	st := nodeFsStatus{State: string(m.State), Mode: string(m.Mode)}
-	if m.Volume != nil {
-		st.Volume = *m.Volume
-	}
-	if m.Subdir != nil {
-		st.Subdir = *m.Subdir
+	if m.Bucket != nil {
+		st.Bucket = *m.Bucket
 	}
 	if m.Generation != nil {
 		st.Generation = *m.Generation
@@ -184,8 +181,8 @@ func (e *Engine) pushFSNode(ctx context.Context, nodeID, userID string) {
 		return
 	}
 	st, err := readFsStatus(ctx, e.Core.Pool, nodeID)
-	if err != nil || st.Volume == "" || st.Mode != string(protocol.FsStatusModeDaemon) {
+	if err != nil || st.Bucket == "" || st.Mode != string(protocol.FsStatusModeDaemon) {
 		return
 	}
-	_ = e.Gateway.SendNow(ctx, nodeID, protocol.TypeFsUnmount, protocol.FsUnmount{Volume: st.Volume})
+	_ = e.Gateway.SendNow(ctx, nodeID, protocol.TypeFsUnmount, protocol.FsUnmount{Bucket: st.Bucket})
 }

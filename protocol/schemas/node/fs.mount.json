@@ -2,58 +2,69 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/fs.mount.json",
   "title": "FsMount",
-  "description": "Mount the shared JuiceFS volume at the owner's folder only (juicefs mount --subdir; juicefs-shared-storage design: one volume, a folder per user). Sent on the live link only to a daemon whose hello has fs_mount: after the welcome when the owner has a ready folder, and again when the folder or the credentials change (generation grows). Unreliable and never logged or stored: it carries the volume's credentials, which every node shares; the daemon must mount subdir and nothing else. The daemon mounts at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.",
+  "description": "Mount the owner's bucket of the console's shared-folder gateway (juicefs-shared-storage design: one JuiceFS volume behind a `juicefs gateway --multi-buckets`, a bucket per user). Sent on the live link only to a daemon whose hello has fs_s3_mount: after the welcome when the owner has a ready folder, and again when the folder or its key change (generation grows). Unreliable and never logged or stored: it carries the owner's S3 key, which allows that bucket only. The daemon mounts it over S3 with the client named in client.tool at its own data directory and answers with fs.status; a generation older than the one mounted is ignored.",
   "x-direction": "console_to_node",
   "x-key": [
-    "volume",
+    "bucket",
     "generation"
   ],
   "x-reliable": false,
   "type": "object",
   "required": [
-    "volume",
-    "subdir",
+    "bucket",
     "generation",
-    "meta_url",
-    "meta_password",
+    "endpoint",
+    "access_key",
+    "secret_key",
     "client"
   ],
   "properties": {
-    "volume": {
-      "description": "Volume name (the platform's one shared volume), also the mount directory name.",
+    "bucket": {
+      "description": "The owner's bucket (u-<16 hex>), also the mount directory name.",
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"
     },
-    "subdir": {
-      "description": "The owner's folder in the volume (users/<16 hex>): the only part of the volume the daemon mounts (juicefs mount --subdir).",
-      "type": "string",
-      "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",
-      "maxLength": 200
-    },
     "generation": {
-      "description": "Grows when the owner's folder is provisioned again; a remount is due when it, the folder or the volume differs from the mounted one.",
+      "description": "Grows when the owner's folder is provisioned again; a remount is due when it or the bucket differs from the mounted one.",
       "type": "integer",
       "minimum": 1
     },
-    "meta_url": {
-      "description": "Metadata engine URL without the password: postgres://juicefs@host:port/db?sslmode=...&search_path=juicefs. The volume's object storage keys live in its metadata (juicefs format).",
+    "endpoint": {
+      "description": "The gateway's S3 address (https://..., path-style requests).",
+      "type": "string",
+      "pattern": "^https?://"
+    },
+    "region": {
+      "description": "Region to sign requests for; default us-east-1.",
+      "type": "string"
+    },
+    "access_key": {
+      "description": "The owner's gateway key.",
       "type": "string",
       "minLength": 1
     },
-    "meta_password": {
-      "description": "Goes in META_PASSWORD.",
+    "secret_key": {
+      "description": "Its secret.",
       "type": "string",
       "minLength": 1
     },
     "client": {
-      "description": "The juicefs client to run: the daemon picks the asset of its platform (linux-amd64, linux-arm64, darwin-arm64…), downloads it and checks sha256, unless that exact version is already present. A tar.gz holding the juicefs binary.",
+      "description": "The S3 mount client to run (tool): the daemon picks the asset of its platform (linux-amd64, linux-arm64, darwin-arm64…), downloads it and checks sha256, unless that exact version is already present.",
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "tool",
         "version",
         "assets"
       ],
       "properties": {
+        "tool": {
+          "type": "string",
+          "enum": [
+            "geesefs",
+            "rclone"
+          ]
+        },
         "version": {
           "type": "string",
           "minLength": 1

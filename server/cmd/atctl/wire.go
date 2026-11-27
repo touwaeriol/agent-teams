@@ -81,7 +81,7 @@ func sharedFolders(c config.FS, st *store.Store, vault *credvault.Vault, log *sl
 	if c.ClientBase != "" {
 		base = c.ClientBase
 	}
-	cfg := userfs.Config{AdminURL: c.AdminURL, MetaHost: c.MetaHost, MetaSSLMode: c.MetaSSLMode, S3Endpoint: c.S3Endpoint, Bucket: c.Bucket,
+	cfg := userfs.Config{AdminURL: c.AdminURL, GatewayURL: c.GatewayURL, GatewayListen: c.GatewayListen, ClientTool: c.ClientTool, S3Endpoint: c.S3Endpoint, Bucket: c.Bucket,
 		AdminAccessKey: c.AdminAccessKey, AdminSecretKey: c.AdminSecretKey, CapacityGB: c.CapacityGB, JuiceFS: c.JuiceFS,
 		Volume: c.Volume, MetaRole: c.MetaRole, MetaUser: c.MetaUser, ClientVersion: version, ClientBase: base, Assets: assets}
 	if !vault.Ready() {
@@ -89,7 +89,7 @@ func sharedFolders(c config.FS, st *store.Store, vault *credvault.Vault, log *sl
 	}
 	return userfs.New(cfg, st.Pool, vault, &userfs.PGMeta{URL: c.AdminURL, ConnLimit: c.MetaConnLimit},
 		userfs.MinioIAM{Endpoint: c.S3Endpoint, AccessKey: c.AdminAccessKey, SecretKey: c.AdminSecretKey},
-		userfs.CLI{Bin: c.JuiceFS, Gateways: &userfs.Gateways{Bin: c.JuiceFS, Log: log}}, log)
+		userfs.CLI{Bin: c.JuiceFS, Gateway: &userfs.GatewayProcess{Bin: c.JuiceFS, Log: log}}, log)
 }
 
 // objectStore builds the attachments and shared-files store from AGENT_TEAMS_S3_* (#58): None when

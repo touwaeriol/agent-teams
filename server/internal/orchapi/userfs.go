@@ -5,23 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
+	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
 
 // The user's shared folder (juicefs-shared-storage design). It is on by default: the console
-// provisions every user's volume by itself (engine.runSharedFolders) and destroys it only with the
+// provisions every user's bucket by itself (the shared-folders job) and deletes it only with the
 // account. GET shows it, POST retries a failed provisioning at once, and docker-volume hands out the
 // Compose volume a Docker node mounts it with (the only response carrying a credential).
 
-// FsVolumeView is the user's volume without any secret.
+// FsVolumeView is the user's folder without any secret.
 type FsVolumeView struct {
-	Volume     string    `json:"volume"`
+	Volume     string    `json:"volume" doc:"The platform's shared volume"`
+	Bucket     string    `json:"bucket" doc:"The user's bucket of the volume's gateway (its top-level folder)"`
 	State      string    `json:"state" enum:"provisioning,ready,error,deleting"`
 	Error      string    `json:"error"`
 	CapacityGB int       `json:"capacity_gb"`
@@ -48,7 +49,7 @@ type fsOutput struct{ Body FsView }
 
 // FsDockerVolume is POST /api/storage/fs/docker-volume.
 type FsDockerVolume struct {
-	Compose string `json:"compose" doc:"Compose fragment: the juicedata/juicefs volume and how the node service mounts it"`
+	Compose string `json:"compose" doc:"Compose fragment: the rclone volume over the user's bucket and how the node service mounts it"`
 	Plugin  string `json:"plugin" doc:"Host command installing the volume plugin (once per host)"`
 	Mount   string `json:"mount" doc:"Where the node container sees the folder (AGENT_TEAMS_FS_DIR)"`
 }
@@ -64,7 +65,7 @@ func (a *API) registerUserFs(api huma.API) {
 	huma.Register(api, op("enable-shared-folder", "POST", "/api/storage/fs", t,
 		summary("Provision the shared folder now (it is on by default; this retries a failed attempt at once)")), a.enableUserFs)
 	huma.Register(api, op("shared-folder-docker-volume", "POST", "/api/storage/fs/docker-volume", t,
-		summary("Compose volume for a Docker node (carries the metadata password)")), a.userFsDockerVolume)
+		summary("Compose volume for a Docker node (carries the user's gateway key)")), a.userFsDockerVolume)
 }
 
 func (a *API) fsView(ctx context.Context, userID string) (FsView, error) {
@@ -79,7 +80,7 @@ func (a *API) fsView(ctx context.Context, userID string) (FsView, error) {
 	if err != nil {
 		return v, err
 	}
-	v.Volume = &FsVolumeView{Volume: vol.Volume, State: vol.State, Error: vol.Error, CapacityGB: vol.CapacityGB, CreatedAt: vol.CreatedAt, UpdatedAt: vol.UpdatedAt}
+	v.Volume = &FsVolumeView{Volume: vol.Volume, Bucket: vol.Bucket, State: vol.State, Error: vol.Error, CapacityGB: vol.CapacityGB, CreatedAt: vol.CreatedAt, UpdatedAt: vol.UpdatedAt}
 	if vol.State == userfs.StateReady {
 		v.Usage = a.fsUsage(ctx, userID)
 	}
@@ -142,35 +143,32 @@ func (a *API) userFsDockerVolume(ctx context.Context, _ *struct{}) (*fsDockerOut
 	if err != nil {
 		return nil, fsErr(err)
 	}
-	metaURL, err := withPassword(spec.MetaURL, spec.MetaPassword)
-	if err != nil {
-		return nil, err
-	}
-	compose := fmt.Sprintf(`# 共享文件夹（JuiceFS 卷 %[1]s）。卷参数里有元数据库密码，只放在这台宿主机上。
+	return &fsDockerOutput{Body: dockerVolume(spec)}, nil
+}
+
+// dockerVolume is the Compose volume of the rclone volume plugin over the user's bucket.
+func dockerVolume(spec protocol.FsMount) FsDockerVolume {
+	compose := fmt.Sprintf(`# 共享文件夹（网关 bucket %[1]s）。卷参数里有这个账号的密钥，只放在这台宿主机上。
 services:
   node:
     environment:
-      AGENT_TEAMS_FS_DIR: %[3]s
+      AGENT_TEAMS_FS_DIR: %[5]s
     volumes:
-      - agent-teams-fs:%[3]s
+      - agent-teams-fs:%[5]s
 
 volumes:
   agent-teams-fs:
-    driver: juicedata/juicefs
+    driver: rclone
     driver_opts:
-      name: %[1]s
-      metaurl: "%[2]s"
-`, spec.Volume, metaURL, FsDockerMount)
-	return &fsDockerOutput{Body: FsDockerVolume{Compose: compose, Mount: FsDockerMount,
-		Plugin: "docker plugin install juicedata/juicefs --alias juicedata/juicefs --grant-all-permissions"}}, nil
-}
-
-// withPassword puts the metadata password back into the URL (the plugin takes one URL).
-func withPassword(raw, password string) (string, error) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", err
-	}
-	u.User = url.UserPassword(u.User.Username(), password)
-	return u.String(), nil
+      remote: ":s3:%[1]s"
+      s3-provider: Other
+      s3-endpoint: "%[2]s"
+      s3-access-key-id: "%[3]s"
+      s3-secret-access-key: "%[4]s"
+      s3-force-path-style: "true"
+      vfs-cache-mode: writes
+      allow-other: "true"
+`, spec.Bucket, spec.Endpoint, spec.AccessKey, spec.SecretKey, FsDockerMount)
+	return FsDockerVolume{Compose: compose, Mount: FsDockerMount,
+		Plugin: "docker plugin install rclone/docker-volume-rclone:amd64 args=\"-v\" --alias rclone --grant-all-permissions"}
 }

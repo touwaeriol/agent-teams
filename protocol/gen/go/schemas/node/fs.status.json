@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-teams.dev/schemas/node/fs.status.json",
   "title": "FsStatus",
-  "description": "State of the shared folder on this node: after the welcome (external mounts), after each fs.mount or fs.unmount, and whenever a health check finds the mount gone or back. mode daemon = the daemon runs juicefs itself; external = mounted outside the daemon (Docker volume plugin, host service) at AGENT_TEAMS_FS_DIR. Unreliable (the latest state is what matters).",
+  "description": "State of the shared folder on this node: after the welcome (external mounts), after each fs.mount or fs.unmount, and whenever a health check finds the mount gone or back. mode daemon = the daemon runs the S3 mount client itself; external = mounted outside the daemon (Docker volume plugin, host service) at AGENT_TEAMS_FS_DIR. Unreliable (the latest state is what matters).",
   "x-direction": "node_to_console",
   "x-reliable": false,
   "type": "object",
@@ -27,13 +27,10 @@
         "external"
       ]
     },
-    "volume": {
-      "type": "string"
-    },
-    "subdir": {
-      "description": "The folder mounted (fs.mount subdir); absent for an external mount that does not know it.",
+    "bucket": {
+      "description": "The bucket mounted (fs.mount bucket); absent for an external mount that does not know it.",
       "type": "string",
-      "maxLength": 200
+      "maxLength": 63
     },
     "generation": {
       "type": "integer",

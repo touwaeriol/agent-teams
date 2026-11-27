@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,14 +36,31 @@ type IAM interface {
 	Ensure(ctx context.Context, n Names, secretKey string, policy []byte) error
 }
 
-// Volumes formats the JuiceFS volume, sets folder quotas and opens its tree (the juicefs CLI).
+// Volumes formats the JuiceFS volume, sets folder quotas and runs the gateway over it (the juicefs CLI).
 type Volumes interface {
 	// Format creates the volume, or updates the settings of an existing one with that name.
 	Format(ctx context.Context, f FormatSpec) error
-	// Quota sets the capacity of a folder of the volume (path from the root, "/users/<id>").
+	// Quota sets the capacity of a folder of the volume (path from the root, "/u-<id>").
 	Quota(ctx context.Context, metaURL, metaPassword, path string, capacityGB int) error
-	// Files opens the volume's tree for the console (no mount).
-	Files(ctx context.Context, volume, metaURL, metaPassword string) (Files, error)
+	// Serve runs the gateway (once per process) and returns the console's root access to it.
+	Serve(ctx context.Context, spec GatewaySpec) (Gateway, error)
+}
+
+// Gateway is the console's root access to the gateway: the users' buckets (the volume's
+// top-level folders) and IAM users.
+type Gateway interface {
+	// Files is a bucket's tree.
+	Files(bucket string) Files
+	// MakeBucket creates a bucket (an existing one is fine).
+	MakeBucket(ctx context.Context, bucket string) error
+	// RemoveBucket deletes a bucket with everything in it (a missing one is fine).
+	RemoveBucket(ctx context.Context, bucket string) error
+	// Buckets lists the buckets.
+	Buckets(ctx context.Context) ([]string, error)
+	// EnsureUser creates (or resets) the user's IAM user, allowed its bucket only.
+	EnsureUser(ctx context.Context, n UserNames, secretKey string) error
+	// RemoveUser deletes the user's IAM user and policy (missing ones are fine).
+	RemoveUser(ctx context.Context, n UserNames) error
 }
 
 // FormatSpec is one juicefs format.
@@ -108,7 +126,7 @@ func (s *Service) Usage(ctx context.Context, userID string) (Usage, error) {
 	if vol.State != StateReady {
 		return Usage{}, nil
 	}
-	return s.meta.Usage(ctx, s.cfg.SharedNames().Role, vol.Subdir)
+	return s.meta.Usage(ctx, s.cfg.SharedNames().Role, vol.Bucket)
 }
 
 // Enable provisions the user's folder (or finishes a provisioning that failed). It returns the
@@ -120,7 +138,7 @@ func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
 		return Volume{}, ErrDisabled
 	}
 	ctx = context.WithoutCancel(ctx)
-	vol, owned, err := insert(ctx, s.db, s.cfg.SharedNames().Volume, userID, s.cfg.CapacityGB)
+	vol, owned, err := insert(ctx, s.db, s.vault, s.cfg.SharedNames().Volume, userID, s.cfg.CapacityGB)
 	if err == nil && !owned {
 		var claimed Volume
 		if claimed, owned, err = claimProvisioning(ctx, s.db, userID); owned {
@@ -131,7 +149,7 @@ func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
 		return vol, err
 	}
 	if err := s.provision(ctx, vol); err != nil {
-		s.log.Warn("shared folder provisioning failed", "user_id", userID, "subdir", vol.Subdir, "err", err)
+		s.log.Warn("shared folder provisioning failed", "user_id", userID, "bucket", vol.Bucket, "err", err)
 		_ = setState(ctx, s.db, userID, StateError, err.Error())
 		return Get(ctx, s.db, userID)
 	}
@@ -166,24 +184,32 @@ func (s *Service) ProvisionAll(ctx context.Context) (int, error) {
 	return ready, nil
 }
 
-// provision makes the user's folder in the volume (provisioning the volume first when this
-// process has not yet), with its projects/ and shared/ folders and its quota.
+// provision makes the user's bucket (provisioning the volume and its gateway first when this
+// process has not yet), with its projects/ and shared/ folders and its quota, then the IAM user
+// allowed that bucket.
 func (s *Service) provision(ctx context.Context, vol Volume) error {
 	v, err := s.volume(ctx)
 	if err != nil {
 		return err
 	}
-	f, err := s.volumes.Files(ctx, v.names.Volume, v.metaURL, v.secrets.MetaPassword)
-	if err != nil {
-		return fmt.Errorf("打开共享卷：%w", err)
+	if err := v.gw.MakeBucket(ctx, vol.Bucket); err != nil {
+		return fmt.Errorf("创建 bucket：%w", err)
 	}
-	for _, dir := range []string{vol.Subdir + "/projects", vol.Subdir + "/" + SharedDir} {
+	f := v.gw.Files(vol.Bucket)
+	for _, dir := range []string{"projects", SharedDir} {
 		if err := f.Mkdir(ctx, dir); err != nil {
 			return fmt.Errorf("创建目录 %s：%w", dir, err)
 		}
 	}
-	if err := s.volumes.Quota(ctx, v.metaURL, v.secrets.MetaPassword, "/"+vol.Subdir, vol.CapacityGB); err != nil {
+	if err := s.volumes.Quota(ctx, v.metaURL, v.secrets.MetaPassword, "/"+vol.Bucket, vol.CapacityGB); err != nil {
 		return fmt.Errorf("目录配额：%w", err)
+	}
+	sec, err := userSecrets(ctx, s.db, s.vault, vol)
+	if err != nil {
+		return err
+	}
+	if err := v.gw.EnsureUser(ctx, vol.Names(), sec.SecretKey); err != nil {
+		return fmt.Errorf("网关账号：%w", err)
 	}
 	return nil
 }
@@ -238,7 +264,7 @@ func (s *Service) Close() {
 
 func (s *Service) finishDisable(ctx context.Context, vol Volume) {
 	if err := s.teardown(ctx, vol); err != nil {
-		s.log.Warn("shared folder deletion failed", "user_id", vol.UserID, "subdir", vol.Subdir, "err", err)
+		s.log.Warn("shared folder deletion failed", "user_id", vol.UserID, "bucket", vol.Bucket, "err", err)
 		_ = setState(ctx, s.db, vol.UserID, StateError, "删除失败："+err.Error())
 		return
 	}
@@ -247,20 +273,28 @@ func (s *Service) finishDisable(ctx context.Context, vol Volume) {
 	}
 }
 
-// teardown deletes the folder once its nodes unmounted.
+// teardown revokes the user's key (every node loses the bucket at once), then deletes the bucket
+// once its nodes unmounted.
 func (s *Service) teardown(ctx context.Context, vol Volume) error {
-	s.waitUnmounted(ctx, vol)
-	return s.removeDir(ctx, vol.Subdir)
-}
-
-// removeDir deletes a user's folder from the volume (nothing there is fine).
-func (s *Service) removeDir(ctx context.Context, dir string) error {
-	f, err := s.sharedFiles(ctx)
+	v, err := s.volume(ctx)
 	if err != nil {
 		return err
 	}
-	if err := f.Remove(ctx, dir); err != nil && !errors.Is(err, ErrNoFile) {
-		return fmt.Errorf("删除目录：%w", err)
+	if err := v.gw.RemoveUser(ctx, vol.Names()); err != nil {
+		return fmt.Errorf("删除网关账号：%w", err)
+	}
+	s.waitUnmounted(ctx, vol)
+	return s.removeBucket(ctx, vol.Bucket)
+}
+
+// removeBucket deletes a user's bucket with everything in it (nothing there is fine).
+func (s *Service) removeBucket(ctx context.Context, bucket string) error {
+	v, err := s.volume(ctx)
+	if err != nil {
+		return err
+	}
+	if err := v.gw.RemoveBucket(ctx, bucket); err != nil {
+		return fmt.Errorf("删除 bucket：%w", err)
 	}
 	return nil
 }
@@ -271,7 +305,7 @@ func (s *Service) removeDir(ctx context.Context, dir string) error {
 func (s *Service) waitUnmounted(ctx context.Context, vol Volume) {
 	deadline := time.Now().Add(orDefault(s.UnmountWait, time.Minute))
 	for time.Now().Before(deadline) {
-		ids, err := mountedNodes(ctx, s.db, vol.UserID, vol.Subdir, true)
+		ids, err := mountedNodes(ctx, s.db, vol.UserID, vol.Bucket, true)
 		if err != nil || len(ids) == 0 {
 			break
 		}
@@ -281,8 +315,8 @@ func (s *Service) waitUnmounted(ctx context.Context, vol Volume) {
 		case <-time.After(orDefault(s.UnmountPoll, time.Second)):
 		}
 	}
-	if ids, _ := mountedNodes(ctx, s.db, vol.UserID, vol.Subdir, false); len(ids) > 0 {
-		s.log.Warn("shared folder removed while nodes still report it mounted", "user_id", vol.UserID, "subdir", vol.Subdir, "nodes", ids)
+	if ids, _ := mountedNodes(ctx, s.db, vol.UserID, vol.Bucket, false); len(ids) > 0 {
+		s.log.Warn("shared folder removed while nodes still report it mounted", "user_id", vol.UserID, "bucket", vol.Bucket, "nodes", ids)
 	}
 }
 
@@ -299,24 +333,17 @@ func (s *Service) changed(ctx context.Context, userID string) {
 	}
 }
 
-// MountSpec is the fs.mount for the user's nodes: the shared volume, mounted at the user's folder
-// only; ErrNotFound unless the folder is ready.
+// MountSpec is the fs.mount for the user's nodes: the user's bucket of the gateway and its key;
+// ErrNotFound unless the folder is ready.
 func (s *Service) MountSpec(ctx context.Context, userID string) (protocol.FsMount, error) {
 	if !s.Enabled() {
 		return protocol.FsMount{}, ErrDisabled
 	}
-	vol, err := Get(ctx, s.db, userID)
+	vol, err := s.ready(ctx, userID)
 	if err != nil {
 		return protocol.FsMount{}, err
 	}
-	if vol.State != StateReady || vol.Subdir == "" {
-		return protocol.FsMount{}, ErrNotFound
-	}
-	sec, err := s.sharedSecrets(ctx)
-	if err != nil {
-		return protocol.FsMount{}, err
-	}
-	db, err := s.cfg.database()
+	sec, err := userSecrets(ctx, s.db, s.vault, vol)
 	if err != nil {
 		return protocol.FsMount{}, err
 	}
@@ -324,30 +351,38 @@ func (s *Service) MountSpec(ctx context.Context, userID string) (protocol.FsMoun
 	for _, a := range s.cfg.ClientAssets() {
 		assets = append(assets, protocol.FsMountClientAssetsElem{Platform: a.Platform, URL: a.URL, SHA256: a.SHA256})
 	}
-	n := s.cfg.SharedNames()
-	return protocol.FsMount{Volume: vol.Volume, Subdir: vol.Subdir, Generation: vol.Generation,
-		MetaURL:      MetaURL(s.cfg.metaUser(), n.Role, s.cfg.MetaHost, db, s.cfg.MetaSSLMode),
-		MetaPassword: sec.MetaPassword, Client: protocol.FsMountClient{Version: s.cfg.ClientVersion, Assets: assets}}, nil
+	return protocol.FsMount{Bucket: vol.Bucket, Generation: vol.Generation, Endpoint: strings.TrimSuffix(s.cfg.GatewayURL, "/"),
+		AccessKey: vol.AccessKey, SecretKey: sec.SecretKey,
+		Client: protocol.FsMountClient{Tool: protocol.FsMountClientTool(s.cfg.clientTool()), Version: s.cfg.ClientVersion, Assets: assets}}, nil
 }
 
-// Files is the tree of the user's ready folder (ErrNotFound unless ready), for the console's own
-// reads and writes: paths are relative to the folder and cannot leave it.
+// ready is the user's folder when it is ready (ErrNotFound otherwise).
+func (s *Service) ready(ctx context.Context, userID string) (Volume, error) {
+	vol, err := Get(ctx, s.db, userID)
+	if err != nil {
+		return vol, err
+	}
+	if vol.State != StateReady || vol.Bucket == "" {
+		return vol, ErrNotFound
+	}
+	return vol, nil
+}
+
+// Files is the tree of the user's ready bucket (ErrNotFound unless ready), for the console's own
+// reads and writes.
 func (s *Service) Files(ctx context.Context, userID string) (Files, error) {
 	if !s.Enabled() {
 		return nil, ErrDisabled
 	}
-	vol, err := Get(ctx, s.db, userID)
+	vol, err := s.ready(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	if vol.State != StateReady || vol.Subdir == "" {
-		return nil, ErrNotFound
-	}
-	f, err := s.sharedFiles(ctx)
+	v, err := s.volume(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return subFiles{f: f, dir: vol.Subdir}, nil
+	return v.gw.Files(vol.Bucket), nil
 }
 
 // Ready tells whether the user has a ready folder (session.open sends a shared folder only then).

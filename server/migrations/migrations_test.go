@@ -10,7 +10,6 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/touwaeriol/agent-teams/server/internal/testdb"
-	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 	"github.com/touwaeriol/agent-teams/server/migrations"
 )
 
@@ -2204,10 +2203,10 @@ INSERT INTO at_job_runs (job, started_at, finished_at, ok) VALUES ('a', now(), n
 	}
 }
 
-// TestUserFsSubdirMigration: 00530 gives each row its folder of the one volume (the same path
-// userfs.UserDir computes), unique, drops the per-volume credentials and marks old rows failed so
-// they are provisioned again; Down drops the rows and the shared credentials.
-func TestUserFsSubdirMigration(t *testing.T) {
+// TestUserFsGatewayMigration: 00530 drops the rows of per-user volumes, then a row names its
+// bucket (unique: two users never share one) and key in the one volume; Down drops the rows and
+// the shared credentials.
+func TestUserFsGatewayMigration(t *testing.T) {
 	db := open(t, testdb.URL(t))
 	ctx := context.Background()
 	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
@@ -2226,18 +2225,16 @@ INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capa
 	if _, err := p.UpTo(ctx, 530); err != nil {
 		t.Fatal(err)
 	}
-	var subdir, state string
-	if err := db.QueryRow(`SELECT subdir, state FROM at_user_fs WHERE user_id = 'u1'`).Scan(&subdir, &state); err != nil {
-		t.Fatal(err)
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM at_user_fs`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("old rows left: %d %v", n, err)
 	}
-	if subdir != userfs.UserDir("u1") || state != "error" {
-		t.Fatalf("subdir %q (want %q) state %q", subdir, userfs.UserDir("u1"), state)
+	if _, err := db.Exec(`INSERT INTO at_user_fs (user_id, volume, bucket, s3_access_key, secrets, capacity_gb)
+		VALUES ('u1', 'agent-teams', 'u-a', 'fsa', '{}', 20), ('u2', 'agent-teams', 'u-b', 'fsb', '{}', 20)`); err != nil {
+		t.Fatalf("two users in the same volume: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO at_user_fs (user_id, volume, subdir, capacity_gb) VALUES ('u2', 'agent-teams', 'users/b', 20)`); err != nil {
-		t.Fatalf("second user in the same volume: %v", err)
-	}
-	if _, err := db.Exec(`UPDATE at_user_fs SET subdir = 'users/b' WHERE user_id = 'u1'`); err == nil {
-		t.Fatal("two users share a folder")
+	if _, err := db.Exec(`UPDATE at_user_fs SET bucket = 'u-b' WHERE user_id = 'u1'`); err == nil {
+		t.Fatal("two users share a bucket")
 	}
 	if _, err := db.Exec(`INSERT INTO at_settings (key, value) VALUES ('user_fs_volume', '{}')`); err != nil {
 		t.Fatal(err)
@@ -2245,7 +2242,6 @@ INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capa
 	if _, err := p.DownTo(ctx, 520); err != nil {
 		t.Fatal(err)
 	}
-	var n int
 	if err := db.QueryRow(`SELECT (SELECT count(*) FROM at_user_fs) + (SELECT count(*) FROM at_settings WHERE key = 'user_fs_volume')`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("rows left after down: %d %v", n, err)
 	}

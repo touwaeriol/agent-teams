@@ -50,15 +50,15 @@ type Config struct {
 	// AttachmentTTL (AGENT_TEAMS_ATTACHMENT_TTL, a Go duration such as 24h) is how long an
 	// attachment is kept after its last use, and how long daemons keep the downloaded copy.
 	AttachmentTTL time.Duration
-	// FS is the user shared folder (AGENT_TEAMS_FS_*, juicefs-shared-storage design); MetaHost and
-	// Bucket empty = off.
+	// FS is the user shared folder (AGENT_TEAMS_FS_*, juicefs-shared-storage design); GatewayURL
+	// and Bucket empty = off.
 	FS FS
 }
 
 // FS is the AGENT_TEAMS_FS_* settings of the JuiceFS shared folder.
 type FS struct {
-	MetaHost       string // AGENT_TEAMS_FS_META_HOST: host:port of PostgreSQL as nodes reach it (TLS)
-	MetaSSLMode    string // AGENT_TEAMS_FS_META_SSLMODE, default verify-full
+	GatewayURL     string // AGENT_TEAMS_FS_GATEWAY_URL: the console's JuiceFS gateway as nodes reach it (https://..., reverse proxy)
+	GatewayListen  string // AGENT_TEAMS_FS_GATEWAY_LISTEN: where that gateway listens, default 0.0.0.0:9310
 	AdminURL       string // AGENT_TEAMS_FS_META_ADMIN_URL: creates roles and schemas; default DATABASE_URL
 	S3Endpoint     string // AGENT_TEAMS_FS_S3_ENDPOINT, default AGENT_TEAMS_S3_ENDPOINT
 	Bucket         string // AGENT_TEAMS_FS_BUCKET: bucket all volumes share (one prefix each)
@@ -70,7 +70,8 @@ type FS struct {
 	MetaUser       string // AGENT_TEAMS_FS_META_USER: user name that role connects as (Supabase pooler: juicefs.<ref>)
 	MetaConnLimit  int    // AGENT_TEAMS_FS_META_CONN_LIMIT: that role's connection limit, default 30
 	JuiceFS        string // AGENT_TEAMS_FS_JUICEFS: the juicefs binary, default juicefs
-	ClientVersion  string // AGENT_TEAMS_FS_CLIENT_VERSION: client nodes run, default the built-in one
+	ClientTool     string // AGENT_TEAMS_FS_CLIENT_TOOL: S3 mount client nodes run (geesefs, rclone), default the built-in one
+	ClientVersion  string // AGENT_TEAMS_FS_CLIENT_VERSION: its version, default the built-in one
 	ClientBase     string // AGENT_TEAMS_FS_CLIENT_BASE: download base, default the GitHub releases
 	// ClientSHA256 (AGENT_TEAMS_FS_CLIENT_SHA256: platform=sha,platform=sha) replaces the built-in
 	// checksums; required with another ClientVersion.
@@ -78,17 +79,25 @@ type FS struct {
 }
 
 // Configured tells whether the shared folder is switched on.
-func (f FS) Configured() bool { return f.MetaHost != "" || f.Bucket != "" }
+func (f FS) Configured() bool { return f.GatewayURL != "" || f.Bucket != "" }
 
 func (f FS) check() error {
 	if !f.Configured() {
 		return nil
 	}
-	if f.MetaHost == "" || f.Bucket == "" || f.S3Endpoint == "" || f.AdminAccessKey == "" || f.AdminSecretKey == "" {
-		return errors.New("shared folder: set AGENT_TEAMS_FS_META_HOST, AGENT_TEAMS_FS_BUCKET, AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY and AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY (and an S3 endpoint), or none")
+	if f.GatewayURL == "" || f.Bucket == "" || f.S3Endpoint == "" || f.AdminAccessKey == "" || f.AdminSecretKey == "" {
+		return errors.New("shared folder: set AGENT_TEAMS_FS_GATEWAY_URL, AGENT_TEAMS_FS_BUCKET, AGENT_TEAMS_FS_S3_ADMIN_ACCESS_KEY and AGENT_TEAMS_FS_S3_ADMIN_SECRET_KEY (and an S3 endpoint), or none")
 	}
-	if _, _, err := net.SplitHostPort(f.MetaHost); err != nil {
-		return errors.New("AGENT_TEAMS_FS_META_HOST must be host:port")
+	if !IsOrigin(f.GatewayURL) {
+		return errors.New("AGENT_TEAMS_FS_GATEWAY_URL must be an http(s) origin such as https://fs.example.com")
+	}
+	if f.GatewayListen != "" {
+		if _, _, err := net.SplitHostPort(f.GatewayListen); err != nil {
+			return errors.New("AGENT_TEAMS_FS_GATEWAY_LISTEN must be host:port")
+		}
+	}
+	if f.ClientTool != "" && f.ClientTool != "geesefs" && f.ClientTool != "rclone" {
+		return errors.New("AGENT_TEAMS_FS_CLIENT_TOOL must be geesefs or rclone")
 	}
 	if f.ClientVersion != "" && len(f.ClientSHA256) == 0 {
 		return errors.New("AGENT_TEAMS_FS_CLIENT_VERSION needs AGENT_TEAMS_FS_CLIENT_SHA256 (platform=sha256,...)")
@@ -98,8 +107,9 @@ func (f FS) check() error {
 
 func fsConfig(getenv Getenv, databaseURL, s3Endpoint string) (FS, error) {
 	f := FS{
-		MetaHost:       strings.TrimSpace(getenv("AGENT_TEAMS_FS_META_HOST")),
-		MetaSSLMode:    first(getenv("AGENT_TEAMS_FS_META_SSLMODE"), "verify-full"),
+		GatewayURL:     strings.TrimRight(strings.TrimSpace(getenv("AGENT_TEAMS_FS_GATEWAY_URL")), "/"),
+		GatewayListen:  strings.TrimSpace(getenv("AGENT_TEAMS_FS_GATEWAY_LISTEN")),
+		ClientTool:     strings.TrimSpace(getenv("AGENT_TEAMS_FS_CLIENT_TOOL")),
 		AdminURL:       first(getenv("AGENT_TEAMS_FS_META_ADMIN_URL"), databaseURL),
 		S3Endpoint:     strings.TrimRight(first(getenv("AGENT_TEAMS_FS_S3_ENDPOINT"), s3Endpoint), "/"),
 		Bucket:         getenv("AGENT_TEAMS_FS_BUCKET"),

@@ -167,22 +167,47 @@ func (m MinioIAM) client() (*madmin.AdminClient, error) {
 
 // Ensure implements IAM.
 func (m MinioIAM) Ensure(ctx context.Context, n Names, secretKey string, policy []byte) error {
+	return m.ensure(ctx, n.Policy, n.AccessKey, secretKey, policy)
+}
+
+// ensure creates (or resets) user accessKey with policy name attached.
+func (m MinioIAM) ensure(ctx context.Context, name, accessKey, secretKey string, policy []byte) error {
 	c, err := m.client()
 	if err != nil {
 		return err
 	}
-	if err := c.AddCannedPolicy(ctx, n.Policy, policy); err != nil {
+	if err := c.AddCannedPolicy(ctx, name, policy); err != nil {
 		return fmt.Errorf("add policy: %w", err)
 	}
-	if err := c.AddUser(ctx, n.AccessKey, secretKey); err != nil {
+	if err := c.AddUser(ctx, accessKey, secretKey); err != nil {
 		return fmt.Errorf("add user: %w", err)
 	}
-	if _, err := c.AttachPolicy(ctx, madmin.PolicyAssociationReq{Policies: []string{n.Policy}, User: n.AccessKey}); err != nil && !alreadyAttached(err) {
-		if err2 := c.SetPolicy(ctx, n.Policy, n.AccessKey, false); err2 != nil {
+	if _, err := c.AttachPolicy(ctx, madmin.PolicyAssociationReq{Policies: []string{name}, User: accessKey}); err != nil && !alreadyAttached(err) {
+		if err2 := c.SetPolicy(ctx, name, accessKey, false); err2 != nil {
 			return fmt.Errorf("attach policy: %w (set policy: %v)", err, err2)
 		}
 	}
 	return nil
+}
+
+// remove deletes user accessKey and policy name (missing ones are fine).
+func (m MinioIAM) remove(ctx context.Context, name, accessKey string) error {
+	c, err := m.client()
+	if err != nil {
+		return err
+	}
+	if err := c.RemoveUser(ctx, accessKey); err != nil && !notFound(err) {
+		return fmt.Errorf("remove user: %w", err)
+	}
+	if err := c.RemoveCannedPolicy(ctx, name); err != nil && !notFound(err) {
+		return fmt.Errorf("remove policy: %w", err)
+	}
+	return nil
+}
+
+func notFound(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "not found") || strings.Contains(s, "does not exist") || strings.Contains(s, "nosuch")
 }
 
 func alreadyAttached(err error) bool {
@@ -195,17 +220,17 @@ func alreadyAttached(err error) bool {
 type CLI struct {
 	Bin     string
 	Timeout time.Duration
-	// Gateways serve Files (juicefs gateway children).
-	Gateways *Gateways
+	// Gateway runs the console's gateway.
+	Gateway *GatewayProcess
 }
 
-// Files implements Volumes.
-func (c CLI) Files(ctx context.Context, volume, metaURL, metaPassword string) (Files, error) {
-	return c.Gateways.Files(ctx, volume, metaURL, metaPassword)
+// Serve implements Volumes.
+func (c CLI) Serve(ctx context.Context, spec GatewaySpec) (Gateway, error) {
+	return c.Gateway.Serve(ctx, spec)
 }
 
-// Shutdown stops every gateway (Service.Close).
-func (c CLI) Shutdown() { c.Gateways.Close() }
+// Shutdown stops the gateway (Service.Close).
+func (c CLI) Shutdown() { c.Gateway.Close() }
 
 func (c CLI) run(ctx context.Context, env []string, args ...string) ([]byte, error) {
 	t := c.Timeout

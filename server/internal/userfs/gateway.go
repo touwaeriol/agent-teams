@@ -22,331 +22,260 @@ import (
 	"github.com/aws/smithy-go"
 )
 
-// The console reaches a volume through `juicefs gateway`, an S3 API over the volume run as a child
-// process on 127.0.0.1 (no FUSE, no privilege): started on first use, stopped when idle.
+// The console runs one `juicefs gateway --multi-buckets` over the volume as a child process: an
+// S3 API in which each top-level folder is a bucket. Nodes reach it through the reverse proxy
+// (Config.GatewayURL) with their user's IAM key; the console itself uses the root user, on the
+// local address, for buckets, IAM users and files.
 
-// gatewayBucket is the bucket name the gateway serves the volume under.
-const gatewayBucket = "files"
+// GatewaySpec is how the gateway runs.
+type GatewaySpec struct {
+	MetaURL      string
+	MetaPassword string
+	Listen       string // host:port
+	RootPassword string // of GatewayRoot
+}
 
-// Gateways runs one juicefs gateway per volume in use.
-type Gateways struct {
+// GatewayProcess runs the gateway and starts it again when it exits, until Close.
+type GatewayProcess struct {
 	// Bin is the juicefs binary.
 	Bin string
-	// Idle is how long an unused gateway keeps running (default 10 minutes).
-	Idle time.Duration
-	// StartTimeout bounds a start (default 30 s).
+	// StartTimeout bounds how long Serve waits for the gateway to answer (default 30 s).
 	StartTimeout time.Duration
-	Log          *slog.Logger
+	// RefreshIAM is how often the gateway reloads its IAM users and policies (default 30 s): a
+	// user deleted by another replica's gateway stops working within it.
+	RefreshIAM time.Duration
+	Log        *slog.Logger
 
 	mu      sync.Mutex
-	running map[string]*gateway
+	spec    *GatewaySpec
 	closed  bool
-	reaper  sync.Once
 	quit    chan struct{}
+	stopped chan struct{}
+	cmd     *exec.Cmd
 }
 
-// gateway is one volume's child. ready closes when its start ended (err tells how); last and
-// refs (under Gateways.mu) keep the reaper off a gateway in use.
-type gateway struct {
-	cmd   *exec.Cmd
-	files *S3Files
-	ready chan struct{}
-	err   error
-	done  chan struct{}
-	last  time.Time
-	refs  int
-	// abort cuts a start short (stop before ready).
-	abort     chan struct{}
-	abortOnce sync.Once
-}
+var errGatewayClosed = errors.New("juicefs gateway: shutting down")
 
-var errGatewaysClosed = errors.New("juicefs gateway: shutting down")
-
-// Files returns the volume's tree, starting its gateway if needed. A start runs outside the lock,
-// so other volumes are not held up; callers of the same volume wait for the one start.
-func (g *Gateways) Files(ctx context.Context, volume, metaURL, metaPassword string) (Files, error) {
-	gw, starting, err := g.entry(volume)
-	if err != nil {
-		return nil, err
-	}
-	if starting {
-		go g.launch(gw, metaURL, metaPassword)
-	}
-	select {
-	case <-gw.ready:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	if gw.err != nil {
-		g.forget(volume, gw)
-		return nil, gw.err
-	}
-	return &gatewayFiles{g: g, gw: gw}, nil
-}
-
-// entry is the volume's gateway, a new (not yet started) one when none runs.
-func (g *Gateways) entry(volume string) (*gateway, bool, error) {
+// Serve starts the gateway (the first call; later calls must pass the same spec) and waits until
+// it answers.
+func (g *GatewayProcess) Serve(ctx context.Context, spec GatewaySpec) (Gateway, error) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.closed {
-		return nil, false, errGatewaysClosed
+	switch {
+	case g.closed:
+		g.mu.Unlock()
+		return nil, errGatewayClosed
+	case g.spec == nil:
+		g.spec, g.quit, g.stopped = &spec, make(chan struct{}), make(chan struct{})
+		go g.supervise(spec)
+	case *g.spec != spec:
+		g.mu.Unlock()
+		return nil, errors.New("juicefs gateway: started with other settings")
 	}
-	g.reaper.Do(func() {
-		g.quit = make(chan struct{})
-		go g.reap(g.quit)
-	})
-	if gw := g.running[volume]; gw != nil && !gw.exited() {
-		gw.last = time.Now()
-		return gw, false, nil
-	}
-	gw := &gateway{ready: make(chan struct{}), done: make(chan struct{}), abort: make(chan struct{}), last: time.Now()}
-	if g.running == nil {
-		g.running = map[string]*gateway{}
-	}
-	g.running[volume] = gw
-	return gw, true, nil
-}
-
-// exited tells a gateway whose start ended and whose process is gone.
-func (gw *gateway) exited() bool {
-	if !gw.started() {
-		return false
-	}
-	if gw.err != nil {
-		return true
-	}
-	select {
-	case <-gw.done:
-		return true
-	default:
-		return false
-	}
-}
-
-func (g *Gateways) forget(volume string, gw *gateway) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.running[volume] == gw {
-		delete(g.running, volume)
-	}
-}
-
-// Stop stops the volume's gateway (before the volume is destroyed).
-func (g *Gateways) Stop(volume string) {
-	g.mu.Lock()
-	gw := g.running[volume]
-	delete(g.running, volume)
 	g.mu.Unlock()
-	if gw != nil {
-		gw.stop()
+	endpoint := "http://" + localAddr(spec.Listen)
+	if err := waitHealthy(ctx, endpoint, orDefault(g.StartTimeout, 30*time.Second), g.quit); err != nil {
+		return nil, fmt.Errorf("juicefs gateway: %w", err)
+	}
+	return newRootGateway(endpoint, spec.RootPassword), nil
+}
+
+// supervise runs the gateway until Close, starting it again (after a growing pause) when it exits.
+func (g *GatewayProcess) supervise(spec GatewaySpec) {
+	defer close(g.stopped)
+	pause := time.Second
+	for {
+		started := time.Now()
+		err := g.run(spec)
+		select {
+		case <-g.quit:
+			return
+		default:
+		}
+		if time.Since(started) > time.Minute {
+			pause = time.Second
+		}
+		g.log().Warn("juicefs gateway exited; starting it again", "err", err, "in", pause)
+		select {
+		case <-g.quit:
+			return
+		case <-time.After(pause):
+		}
+		pause = min(2*pause, 30*time.Second)
 	}
 }
 
-// Close stops every gateway and refuses new ones (console shutdown).
-func (g *Gateways) Close() {
+func (g *GatewayProcess) log() *slog.Logger {
+	if g.Log != nil {
+		return g.Log
+	}
+	return slog.Default()
+}
+
+// run runs the gateway process once, until it exits or Close stops it.
+func (g *GatewayProcess) run(spec GatewaySpec) error {
+	cmd := exec.Command(g.Bin, "gateway", "--multi-buckets", "--no-banner", "--log", os.DevNull, "--backup-meta", "0",
+		"--refresh-iam-interval", orDefault(g.RefreshIAM, 30*time.Second).String(), "--cache-size", "1024",
+		"--no-usage-report", "--metrics", "127.0.0.1:0", spec.MetaURL, spec.Listen)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.TempDir(), "META_PASSWORD=" + spec.MetaPassword,
+		"MINIO_ROOT_USER=" + GatewayRoot, "MINIO_ROOT_PASSWORD=" + spec.RootPassword}
+	setPdeathsig(cmd)
+	var stderr strings.Builder
+	cmd.Stderr = &limitWriter{w: &stderr, n: 4096}
 	g.mu.Lock()
-	all := g.running
-	g.running, g.closed = nil, true
+	if g.closed {
+		g.mu.Unlock()
+		return errGatewayClosed
+	}
+	if err := cmd.Start(); err != nil {
+		g.mu.Unlock()
+		return err
+	}
+	g.cmd = cmd
+	g.mu.Unlock()
+	err := cmd.Wait()
+	if err != nil {
+		err = fmt.Errorf("%w: %s", err, lastLines(stderr.String(), 3))
+	}
+	return err
+}
+
+// Close stops the gateway (console shutdown).
+func (g *GatewayProcess) Close() {
+	g.mu.Lock()
+	if g.closed {
+		g.mu.Unlock()
+		return
+	}
+	g.closed = true
+	cmd, stopped := g.cmd, g.stopped
 	if g.quit != nil {
 		close(g.quit)
 	}
 	g.mu.Unlock()
-	for _, gw := range all {
-		gw.stop()
-	}
-}
-
-// launch starts gw's process and closes ready.
-func (g *Gateways) launch(gw *gateway, metaURL, password string) {
-	defer close(gw.ready)
-	addr, err := freeAddr()
-	if err != nil {
-		gw.err = err
-		return
-	}
-	user, secret := "console", randomSecret(24)
-	cmd := exec.Command(g.Bin, "gateway", "--no-banner", "--no-bgjob", "--backup-meta", "0", "--log", os.DevNull,
-		"--bucket-name", gatewayBucket, "--cache-size", "0", "--no-usage-report", "--metrics", "127.0.0.1:0", metaURL, addr)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.TempDir(), "META_PASSWORD=" + password,
-		"MINIO_ROOT_USER=" + user, "MINIO_ROOT_PASSWORD=" + secret}
-	setPdeathsig(cmd)
-	var stderr strings.Builder
-	cmd.Stderr = &limitWriter{w: &stderr, n: 4096}
-	if err := cmd.Start(); err != nil {
-		gw.err = fmt.Errorf("juicefs gateway: %w", err)
-		close(gw.done)
-		return
-	}
-	gw.cmd, gw.files = cmd, NewS3Files("http://"+addr, user, secret, gatewayBucket)
-	go func() { _ = cmd.Wait(); close(gw.done) }()
-	if err := g.waitReady(gw, "http://"+addr); err != nil {
-		gw.kill()
-		gw.err = fmt.Errorf("juicefs gateway: %w %s", err, lastLines(stderr.String(), 3))
-	}
-}
-
-func (g *Gateways) waitReady(gw *gateway, base string) error {
-	deadline := time.Now().Add(orDefault(g.StartTimeout, 30*time.Second))
-	for time.Now().Before(deadline) {
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Signal(os.Interrupt)
 		select {
-		case <-gw.done:
-			return errors.New("exited")
-		case <-gw.abort:
-			return errors.New("stopped")
-		case <-time.After(200 * time.Millisecond):
+		case <-stopped:
+		case <-time.After(5 * time.Second):
+			_ = cmd.Process.Kill()
+			<-stopped
 		}
-		resp, err := http.Get(base + "/minio/health/live")
-		if err == nil {
+	}
+}
+
+// localAddr is the address the console dials for listen (a wildcard host is this machine).
+func localAddr(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return listen
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// waitHealthy polls endpoint's liveness until it answers, timeout passes, ctx ends or quit closes.
+func waitHealthy(ctx context.Context, endpoint string, timeout time.Duration, quit <-chan struct{}) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"/minio/health/live", nil)
+		if resp, err := http.DefaultClient.Do(req); err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}
 		}
-	}
-	return errors.New("not ready in time")
-}
-
-func (g *Gateways) reap(quit <-chan struct{}) {
-	t := time.NewTicker(time.Minute)
-	defer t.Stop()
-	for {
+		if time.Now().After(deadline) {
+			return errors.New("not answering")
+		}
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-quit:
-			return
-		case <-t.C:
-			g.reapIdle(orDefault(g.Idle, 10*time.Minute))
+			return errGatewayClosed
+		case <-time.After(200 * time.Millisecond):
 		}
 	}
 }
 
-// reapIdle stops the started gateways unused for idle and not serving a call or a download.
-func (g *Gateways) reapIdle(idle time.Duration) {
-	g.mu.Lock()
-	var old []*gateway
-	for v, gw := range g.running {
-		if gw.refs == 0 && gw.started() && time.Since(gw.last) > idle {
-			old = append(old, gw)
-			delete(g.running, v)
-		}
+// rootGateway is the console's access to the gateway as its root user.
+type rootGateway struct {
+	endpoint, password string
+	s3                 *s3.Client
+	iam                MinioIAM
+}
+
+func newRootGateway(endpoint, password string) *rootGateway {
+	return &rootGateway{endpoint: endpoint, password: password, s3: NewS3Files(endpoint, GatewayRoot, password, "").c,
+		iam: MinioIAM{Endpoint: endpoint, AccessKey: GatewayRoot, SecretKey: password}}
+}
+
+// Files implements Gateway.
+func (g *rootGateway) Files(bucket string) Files {
+	return &S3Files{c: g.s3, bucket: bucket}
+}
+
+// MakeBucket implements Gateway.
+func (g *rootGateway) MakeBucket(ctx context.Context, bucket string) error {
+	_, err := g.s3.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &bucket})
+	var owned *types.BucketAlreadyOwnedByYou
+	var exists *types.BucketAlreadyExists
+	if errors.As(err, &owned) || errors.As(err, &exists) {
+		return nil
 	}
-	g.mu.Unlock()
-	for _, gw := range old {
-		gw.stop()
-	}
-}
-
-func (gw *gateway) started() bool {
-	select {
-	case <-gw.ready:
-		return true
-	default:
-		return false
-	}
-}
-
-// acquire marks gw in use; release ends that use.
-func (g *Gateways) acquire(gw *gateway) {
-	g.mu.Lock()
-	gw.refs++
-	gw.last = time.Now()
-	g.mu.Unlock()
-}
-
-func (g *Gateways) release(gw *gateway) {
-	g.mu.Lock()
-	gw.refs--
-	gw.last = time.Now()
-	g.mu.Unlock()
-}
-
-// stop cuts a start short, waits for it to end, then stops the process.
-func (gw *gateway) stop() {
-	if gw.abort != nil {
-		gw.abortOnce.Do(func() { close(gw.abort) })
-	}
-	<-gw.ready
-	gw.kill()
-}
-
-func (gw *gateway) kill() {
-	if gw.cmd == nil || gw.cmd.Process == nil {
-		return
-	}
-	_ = gw.cmd.Process.Signal(os.Interrupt)
-	select {
-	case <-gw.done:
-	case <-time.After(5 * time.Second):
-		_ = gw.cmd.Process.Kill()
-		<-gw.done
-	}
-}
-
-// gatewayFiles is a running gateway's tree: each call (and each opened file until it is closed)
-// holds the gateway in use, so the reaper never stops it mid-transfer.
-type gatewayFiles struct {
-	g  *Gateways
-	gw *gateway
-}
-
-func (f *gatewayFiles) use() func() {
-	f.g.acquire(f.gw)
-	return func() { f.g.release(f.gw) }
-}
-
-// List implements Files.
-func (f *gatewayFiles) List(ctx context.Context, dir string) ([]Entry, error) {
-	defer f.use()()
-	return f.gw.files.List(ctx, dir)
-}
-
-// Open implements Files: the gateway stays in use until the file is closed.
-func (f *gatewayFiles) Open(ctx context.Context, name string) (io.ReadCloser, Entry, error) {
-	done := f.use()
-	r, e, err := f.gw.files.Open(ctx, name)
-	if err != nil {
-		done()
-		return nil, e, err
-	}
-	return &releasingReader{ReadCloser: r, done: done}, e, nil
-}
-
-// Put implements Files.
-func (f *gatewayFiles) Put(ctx context.Context, name string, r io.Reader, size int64) error {
-	defer f.use()()
-	return f.gw.files.Put(ctx, name, r, size)
-}
-
-// Mkdir implements Files.
-func (f *gatewayFiles) Mkdir(ctx context.Context, dir string) error {
-	defer f.use()()
-	return f.gw.files.Mkdir(ctx, dir)
-}
-
-// Remove implements Files.
-func (f *gatewayFiles) Remove(ctx context.Context, name string) error {
-	defer f.use()()
-	return f.gw.files.Remove(ctx, name)
-}
-
-type releasingReader struct {
-	io.ReadCloser
-	once sync.Once
-	done func()
-}
-
-func (r *releasingReader) Close() error {
-	err := r.ReadCloser.Close()
-	r.once.Do(r.done)
 	return err
 }
 
-func freeAddr() (string, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return "", err
+// RemoveBucket implements Gateway.
+func (g *rootGateway) RemoveBucket(ctx context.Context, bucket string) error {
+	f := g.Files(bucket)
+	entries, err := f.List(ctx, "")
+	if noBucket(err) {
+		return nil
 	}
-	defer l.Close()
-	return l.Addr().String(), nil
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := f.Remove(ctx, e.Name); err != nil && !errors.Is(err, ErrNoFile) {
+			return err
+		}
+	}
+	_, err = g.s3.DeleteBucket(ctx, &s3.DeleteBucketInput{Bucket: &bucket})
+	if noBucket(err) {
+		return nil
+	}
+	return err
+}
+
+func noBucket(err error) bool {
+	var nb *types.NoSuchBucket
+	var api smithy.APIError
+	return err != nil && (errors.As(err, &nb) || (errors.As(err, &api) && api.ErrorCode() == "NoSuchBucket"))
+}
+
+// Buckets implements Gateway.
+func (g *rootGateway) Buckets(ctx context.Context) ([]string, error) {
+	out, err := g.s3.ListBuckets(ctx, &s3.ListBucketsInput{})
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, b := range out.Buckets {
+		names = append(names, aws.ToString(b.Name))
+	}
+	return names, nil
+}
+
+// EnsureUser implements Gateway.
+func (g *rootGateway) EnsureUser(ctx context.Context, n UserNames, secretKey string) error {
+	return g.iam.ensure(ctx, n.Policy, n.AccessKey, secretKey, BucketPolicy(n.Bucket))
+}
+
+// RemoveUser implements Gateway.
+func (g *rootGateway) RemoveUser(ctx context.Context, n UserNames) error {
+	return g.iam.remove(ctx, n.Policy, n.AccessKey)
 }
 
 type limitWriter struct {

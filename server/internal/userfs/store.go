@@ -3,17 +3,20 @@ package userfs
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
+	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// Volume is an at_user_fs row: the user's folder in the shared volume.
+// Volume is an at_user_fs row without its secrets: the user's bucket of the shared volume.
 type Volume struct {
 	UserID     string    `json:"-"`
 	Volume     string    `json:"volume"`
-	Subdir     string    `json:"subdir"`
+	Bucket     string    `json:"bucket"`
+	AccessKey  string    `json:"-"`
 	Generation int       `json:"generation"`
 	State      string    `json:"state"`
 	Error      string    `json:"error"`
@@ -22,11 +25,11 @@ type Volume struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-const volumeCols = `user_id, volume, subdir, generation, state, error, capacity_gb, created_at, updated_at`
+const volumeCols = `user_id, volume, bucket, s3_access_key, generation, state, error, capacity_gb, created_at, updated_at`
 
 func scanVolume(row store.Scanner) (Volume, error) {
 	var v Volume
-	err := row.Scan(&v.UserID, &v.Volume, &v.Subdir, &v.Generation, &v.State, &v.Error, &v.CapacityGB, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.UserID, &v.Volume, &v.Bucket, &v.AccessKey, &v.Generation, &v.State, &v.Error, &v.CapacityGB, &v.CreatedAt, &v.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, ErrNotFound
 	}
@@ -43,15 +46,52 @@ func Get(ctx context.Context, q store.DB, userID string) (Volume, error) {
 const staleAfter = "15 minutes"
 
 // insert creates the user's row (provisioning) unless one exists; created tells whether this call
-// made it (and so owns its provisioning).
-func insert(ctx context.Context, q store.DB, volume, userID string, capacityGB int) (vol Volume, created bool, err error) {
-	vol, err = scanVolume(store.QueryRow(ctx, q, `INSERT INTO at_user_fs (user_id, volume, subdir, capacity_gb)
-		VALUES ($1, $2, $3, $4) ON CONFLICT (user_id) DO NOTHING RETURNING `+volumeCols, userID, volume, UserDir(userID), capacityGB))
+// made it (and so owns its provisioning). The generation comes from a sequence first, since the
+// secret key is sealed with it.
+func insert(ctx context.Context, q store.DB, v *credvault.Vault, volume, userID string, capacityGB int) (vol Volume, created bool, err error) {
+	var gen int
+	if err := store.QueryRow(ctx, q, `SELECT nextval('at_user_fs_generation')`).Scan(&gen); err != nil {
+		return Volume{}, false, err
+	}
+	n := UserNamesFor(userID)
+	raw, _ := json.Marshal(UserSecrets{SecretKey: randomSecret(30)})
+	sealed, err := v.Seal(credvault.UserFsAAD(userID, n.Bucket, gen), raw)
+	if err != nil {
+		return Volume{}, false, err
+	}
+	sj, _ := json.Marshal(sealed)
+	vol, err = scanVolume(store.QueryRow(ctx, q, `INSERT INTO at_user_fs (user_id, volume, bucket, s3_access_key, secrets, capacity_gb, generation)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (user_id) DO NOTHING RETURNING `+volumeCols, userID, volume, n.Bucket, n.AccessKey, sj, capacityGB, gen))
 	if IsNotFound(err) {
 		vol, err = Get(ctx, q, userID)
 		return vol, false, err
 	}
 	return vol, err == nil, err
+}
+
+// userSecrets opens the row's sealed secret key.
+func userSecrets(ctx context.Context, q store.DB, v *credvault.Vault, vol Volume) (UserSecrets, error) {
+	var raw []byte
+	if err := store.QueryRow(ctx, q, `SELECT secrets FROM at_user_fs WHERE user_id = $1`, vol.UserID).Scan(&raw); err != nil {
+		return UserSecrets{}, err
+	}
+	var sealed credvault.Sealed
+	if err := json.Unmarshal(raw, &sealed); err != nil {
+		return UserSecrets{}, err
+	}
+	plain, err := v.Open(credvault.UserFsAAD(vol.UserID, vol.Bucket, vol.Generation), sealed)
+	if err != nil {
+		return UserSecrets{}, err
+	}
+	var s UserSecrets
+	return s, json.Unmarshal(plain, &s)
+}
+
+// Names are the row's gateway names (its bucket and key as stored, the policy derived).
+func (v Volume) Names() UserNames {
+	n := namesOf(userBucketID(v.Bucket))
+	n.Bucket, n.AccessKey = v.Bucket, v.AccessKey
+	return n
 }
 
 // claim moves the user's row to state when its current state is one of from, or when it has
@@ -79,11 +119,11 @@ func claimDeleting(ctx context.Context, q store.DB, userID string) (Volume, bool
 // mountedNodes are the user's nodes whose last fs.status says the folder is mounted (a node's
 // status is reset when it connects or drops, so these are online); daemonOnly keeps those whose
 // daemon mounts it itself (and so can unmount it).
-func mountedNodes(ctx context.Context, q store.DB, userID, subdir string, daemonOnly bool) ([]string, error) {
+func mountedNodes(ctx context.Context, q store.DB, userID, bucket string, daemonOnly bool) ([]string, error) {
 	var ids []string
 	err := store.Raw(ctx, q, `SELECT id FROM at_nodes WHERE user_id = $1 AND fs_status->>'state' = 'mounted'
-		AND coalesce(fs_status->>'subdir', $2) = $2 AND (NOT $3 OR fs_status->>'mode' = 'daemon') ORDER BY id`,
-		userID, subdir, daemonOnly).Scan(&ids).Error
+		AND coalesce(fs_status->>'bucket', $2) = $2 AND (NOT $3 OR fs_status->>'mode' = 'daemon') ORDER BY id`,
+		userID, bucket, daemonOnly).Scan(&ids).Error
 	return ids, err
 }
 
