@@ -315,7 +315,8 @@
       "enum": [
         "project",
         "user"
-      ]
+      ],
+      "default": "project"
     }
   }
 }

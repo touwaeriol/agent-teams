@@ -27,6 +27,9 @@ describe("tool policy", () => {
         expect(decideTool(p, "Edit", { file_path: ".project-files/.memory/MEMORY.md" }, cwd)).toBeNull();
         expect(decideTool(p, "Write", { file_path: join(mem, "testing.md") }, cwd)).toBeNull();
         expect(decideTool(p, "Grep", { pattern: "x", path: ".project-files/.memory" }, cwd)).toBeNull();
+        expect(decideTool(p, "Glob", { pattern: "*.md", path: ".project-files/.memory" }, cwd)).toBeNull();
+        expect(decideTool(p, "Glob", { pattern: "/home/u/**/*", path: ".project-files/.memory" }, cwd)).not.toBeNull();
+        expect(decideTool(p, "Glob", { pattern: "../../**", path: ".project-files/.memory" }, cwd)).not.toBeNull();
         expect(decideTool(p, "Write", { file_path: ".project-files/notes.md" }, cwd)).not.toBeNull();
         expect(decideTool(p, "Write", { file_path: ".project-files/.memory/escape/x.md" }, cwd)).not.toBeNull();
         expect(decideTool(p, "Bash", { command: "rm -rf .project-files/.memory" }, cwd)).not.toBeNull();

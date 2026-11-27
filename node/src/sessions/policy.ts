@@ -29,7 +29,7 @@ export type Decision = { deny: string } | null;
 const FILE_TOOLS: Record<string, string> = { Read: "file_path", Edit: "file_path", Write: "file_path", MultiEdit: "file_path", NotebookEdit: "notebook_path", Glob: "path", Grep: "path" };
 const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS"]);
 /** The file tools allowed inside the memory directories. */
-const MEMORY_TOOLS = new Set(["Read", "Glob", "Grep", "Edit", "Write", "MultiEdit"]);
+const MEMORY_TOOLS = new Set(["Read", "Glob", "Grep", "Edit", "Write"]);
 /** Tools that walk a directory tree: their root must not contain a secret path. */
 const SEARCH_TOOLS = new Set(["Glob", "Grep"]);
 const DEFAULT_DENY_FLAGS = ["--output", "-o", "--ext-diff", "--textconv", "-c", "--exec-path", "--git-dir", "--work-tree"];
@@ -72,6 +72,8 @@ function walksProc(path: string): boolean {
 }
 
 export const PLATFORM_TOOL_PREFIX = "mcp__platform__";
+const PLATFORM_ONLY = "This session may only use platform tools.";
+const PLATFORM_OR_MEMORY = "This session may only use platform tools, and the file tools inside the memory directories.";
 
 /**
  * PreToolUse decision: a deny reason, or null to let the normal permission flow continue.
@@ -80,17 +82,24 @@ export const PLATFORM_TOOL_PREFIX = "mcp__platform__";
 export function decideTool(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): Decision {
   if (tool.startsWith(PLATFORM_TOOL_PREFIX) || CHAT_TOOLS.has(tool)) return null;
   const memory = inMemoryDirs(policy, tool, input, cwd);
-  if (policy.denyNonPlatform && !memory) return { deny: policy.memoryDirs?.length ? "This session may only use platform tools, and the file tools inside the memory directories." : "This session may only use platform tools." };
+  if (policy.denyNonPlatform && !memory) return { deny: policy.memoryDirs?.length ? PLATFORM_OR_MEMORY : PLATFORM_ONLY };
   return secretDecision(policy, tool, input, cwd) ?? (memory ? null : readOnlyDecision(policy, tool, input, cwd));
 }
 
-/** A file tool whose target (real path) is inside one of the memory directories. */
+/**
+ * A file tool whose target (real path) is inside one of the memory directories. Glob's pattern
+ * must stay below its path too: absolute or with a ".." segment it could list anything.
+ */
 export function inMemoryDirs(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): boolean {
   if (!policy.memoryDirs?.length || !MEMORY_TOOLS.has(tool)) return false;
   const path = filePathOf(tool, input, cwd);
-  if (!path) return false;
+  if (!path || (tool === "Glob" && !patternStaysBelow(input.pattern))) return false;
   const real = realTarget(path);
   return policy.memoryDirs.some((d) => isInside(realTarget(d), real));
+}
+
+function patternStaysBelow(pattern: unknown): boolean {
+  return typeof pattern === "string" && !isAbsolute(pattern) && !pattern.split(/[\\/]/).includes("..");
 }
 
 function secretDecision(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): Decision {

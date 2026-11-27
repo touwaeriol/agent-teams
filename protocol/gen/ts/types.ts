@@ -4148,7 +4148,7 @@ export interface MemoryWriteInput {
   content: string;
   scope?: MemoryScope;
   /**
-   * Optional kind of a topic file (written into its frontmatter).
+   * Optional kind of a topic file, written into its frontmatter (what the note is about, not where it is stored: that is scope).
    */
   type?: "project" | "feedback" | "reference" | "user";
 }

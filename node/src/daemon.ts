@@ -43,7 +43,7 @@ import { absPath } from "./sessions/claude/options.js";
 import { consoleImageFetcher } from "./sessions/images.js";
 import { consoleHttp, type AttachmentOptions, type ConsoleHttp } from "./sessions/attachments.js";
 import { SharedFs, type SharedFsOptions } from "./fs/shared.js";
-import { linkSharedDirs, memoryDirs, memoryFolderPrompt, safeAttachmentDir, sharedAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs, type SharedDirs } from "./fs/session.js";
+import { ensureMemoryDirs, linkSharedDirs, memoryFolderPrompt, safeAttachmentDir, sharedAttachmentDir, sharedFolderPrompt, unlinkSharedDirs, withSharedDirs, type SharedDirs } from "./fs/session.js";
 import { EXIT_FS_LOST } from "./release.js";
 import { DAEMON_BUILD, DAEMON_RELEASE, DAEMON_VERSION, PROTOCOLS } from "./version.js";
 
@@ -448,24 +448,52 @@ export class Daemon {
   // ---- session runtime construction ----
 
   private createDriver(open: SessionOpen, absCwd: string, sink: Session): { driver: Driver; ctx: DriverContext } {
-    const coordinator = open.employee.tier === "coordinator";
-    const fsDirs = this.sharedFs.sessionDirs(open.fs);
-    // The coordinator only gets the memory directories (claude.memory_files), not the folder.
-    const dirs = coordinator ? null : fsDirs;
-    const memory = open.claude?.memory_files && fsDirs ? memoryDirs(fsDirs) : [];
-    const spec = dirs ? withSharedDirs(open, dirs) : open;
-    if (fsDirs && (dirs || memory.length)) this.linkShared(absCwd, fsDirs);
-    else this.unlinkShared(absCwd);
+    const f = this.sessionFolders(open, absCwd);
+    const spec = f.dirs ? withSharedDirs(open, f.dirs) : open;
     const runtime = this.runtimes.get(spec.runtime);
     const skills = runtime.nativeSkills ? materializeSkills(this.skillsRoot, spec) : null;
     const plugins = materializePlugins(this.pluginsRoot, spec);
-    const readable = [...(skills ? [skills.pluginDir] : []), ...plugins.map((p) => p.dir), ...(dirs ? [dirs.project, dirs.shared] : [])];
-    const env: Record<string, string> = { ...this.sessionEnv(spec), ...(dirs ? { AGENT_TEAMS_PROJECT_DIR: dirs.project, AGENT_TEAMS_SHARED_DIR: dirs.shared } : {}) };
-    const folderPrompt = dirs ? sharedFolderPrompt(dirs) : memory.length ? memoryFolderPrompt(memory) : "";
-    const extra = [env.AT_SSH_CONFIG ? sshPrompt((spec.ssh_servers ?? []).map((s) => s.name)) : "", folderPrompt].filter(Boolean).join("\n\n");
-    const extraDirs = dirs ? [dirs.project, dirs.shared] : memory;
-    const ctx: DriverContext = { spec, absCwd, env, ...(extra ? { systemExtra: extra } : {}), ...(extraDirs.length ? { extraDirs } : {}), policy: { ...this.policy(spec, absCwd, readable), memoryDirs: memory }, sink, log: this.o.log.child({ session: spec.session_id }) };
+    const readable = [...(skills ? [skills.pluginDir] : []), ...plugins.map((p) => p.dir), ...(f.dirs ? [f.dirs.project, f.dirs.shared] : [])];
+    const env: Record<string, string> = { ...this.sessionEnv(spec), ...(f.dirs ? { AGENT_TEAMS_PROJECT_DIR: f.dirs.project, AGENT_TEAMS_SHARED_DIR: f.dirs.shared } : {}) };
+    const extra = [env.AT_SSH_CONFIG ? sshPrompt((spec.ssh_servers ?? []).map((s) => s.name)) : "", f.prompt].filter(Boolean).join("\n\n");
+    const ctx: DriverContext = {
+      spec,
+      absCwd,
+      env,
+      ...(extra ? { systemExtra: extra } : {}),
+      ...(f.extraDirs.length ? { extraDirs: f.extraDirs } : {}),
+      policy: this.policy(spec, absCwd, readable, f.memory),
+      sink,
+      log: this.o.log.child({ session: spec.session_id }),
+    };
     return { driver: runtime.createDriver(ctx, { skills, plugins }), ctx };
+  }
+
+  /**
+   * The shared folder as a session sees it, with the working directory linked to it: employees get
+   * the whole folder; the coordinator only its memory directories (claude.memory_files), or nothing.
+   */
+  private sessionFolders(open: SessionOpen, absCwd: string): { dirs: SharedDirs | null; memory: string[]; extraDirs: string[]; prompt: string } {
+    const none = { dirs: null, memory: [], extraDirs: [], prompt: "" };
+    const fsDirs = this.sharedFs.sessionDirs(open.fs);
+    const memory = open.claude?.memory_files && fsDirs ? this.memoryDirsOf(fsDirs) : [];
+    if (!fsDirs || (open.employee.tier === "coordinator" && !memory.length)) {
+      this.unlinkShared(absCwd);
+      return none;
+    }
+    this.linkShared(absCwd, fsDirs);
+    if (open.employee.tier === "coordinator") return { dirs: null, memory, extraDirs: memory, prompt: memoryFolderPrompt(fsDirs) };
+    return { dirs: fsDirs, memory, extraDirs: [fsDirs.project, fsDirs.shared], prompt: sharedFolderPrompt(fsDirs) };
+  }
+
+  /** The memory directories, created when missing; none (logged) when they cannot be. */
+  private memoryDirsOf(dirs: SharedDirs): string[] {
+    try {
+      return ensureMemoryDirs(dirs);
+    } catch (err) {
+      this.o.log.warn({ err: (err as Error).message }, "shared folder: cannot create the memory directories");
+      return [];
+    }
   }
 
   /** Links the working directory to the shared folder (.project-files, .user-files, .attachments). */
@@ -503,7 +531,7 @@ export class Daemon {
     return null;
   }
 
-  private policy(spec: SessionOpen, absCwd: string, readable: string[]): ToolPolicy {
+  private policy(spec: SessionOpen, absCwd: string, readable: string[], memoryDirs: string[]): ToolPolicy {
     const c = spec.claude;
     const a = spec.antigravity;
     const extra = (c?.sandbox?.extra_write_paths ?? []).map((p) => absPath(p, this.o.root, absCwd)).filter(Boolean);
@@ -513,6 +541,7 @@ export class Daemon {
       bash: c?.bash_policy ?? a?.bash_policy ?? null,
       readRoots: [absCwd, ...extra, ...readable],
       secretPaths: this.secretPaths(),
+      ...(memoryDirs.length ? { memoryDirs } : {}),
     };
   }
 

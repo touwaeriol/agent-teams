@@ -103,22 +103,28 @@ function lstatOrNull(p: string) {
   }
 }
 
-/** The memory directories of a session's folders, created when missing (none if they cannot be). */
-export function memoryDirs(dirs: SharedDirs): string[] {
-  const out = [join(dirs.project, ".memory"), join(dirs.shared, ".memory")];
-  try {
-    for (const d of out) mkdirSync(d, { recursive: true });
-  } catch {
-    return [];
-  }
+/** The memory directory's name inside the project's and the user's folder. */
+export const MEMORY_DIR = ".memory";
+
+/** The project's and the user's memory directory. */
+export function memoryDirs(dirs: SharedDirs): [string, string] {
+  return [join(dirs.project, MEMORY_DIR), join(dirs.shared, MEMORY_DIR)];
+}
+
+/** Creates the memory directories when missing; throws when they cannot be. */
+export function ensureMemoryDirs(dirs: SharedDirs): string[] {
+  const out = memoryDirs(dirs);
+  for (const d of out) mkdirSync(d, { recursive: true });
   return out;
 }
 
 /** What a session with only the memory directories (the coordinator) is told about them. */
-export function memoryFolderPrompt(memory: string[]): string {
+export function memoryFolderPrompt(dirs: SharedDirs): string {
+  const [project, user] = sharedLinks(dirs);
+  const [pm, um] = memoryDirs(dirs);
   return [
     "## Memory files",
-    `The memory is files in the user's shared folder: the project's in .project-files/.memory/ (${memory[0]}), the user's own in .user-files/.memory/ (${memory[1]}). Read, Glob, Grep, Edit and Write work there and nowhere else.`,
+    `The memory is files in the user's shared folder: the project's in ${project[0]}/${MEMORY_DIR}/ (${pm}), the user's own in ${user[0]}/${MEMORY_DIR}/ (${um}). Read, Glob, Grep, Edit and Write work there and nowhere else.`,
   ].join("\n");
 }
 
