@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -48,6 +49,17 @@ func (f *fakeMeta) Exists(_ context.Context, role string) (bool, error) {
 	defer f.mu.Unlock()
 	_, ok := f.roles[role]
 	return ok, nil
+}
+
+func (f *fakeMeta) Roles(context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.roles))
+	for r := range f.roles {
+		out = append(out, r)
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 func (f *fakeMeta) Usage(context.Context, string) (Usage, error) {
@@ -250,6 +262,9 @@ func TestPGMeta(t *testing.T) {
 	}
 	if ok, err := m.Exists(ctx, role); err != nil || !ok {
 		t.Fatalf("exists after ensure: %v %v", ok, err)
+	}
+	if roles, err := m.Roles(ctx); err != nil || !slices.Contains(roles, role) {
+		t.Fatalf("roles %v %v", roles, err)
 	}
 	var stored string
 	if err := store.QueryRow(ctx, mustStore(t, admin).Pool, `SELECT rolpassword FROM pg_authid WHERE rolname = $1`, role).Scan(&stored); err != nil ||

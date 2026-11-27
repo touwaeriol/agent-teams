@@ -3,11 +3,12 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"time"
+	"errors"
+	"fmt"
+	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
-	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
@@ -56,50 +57,33 @@ func (e *Engine) UseSharedFolder(s *userfs.Service) {
 	e.Orch.SharedFolder = e.sharedFolder
 }
 
-// fsSweepEvery is how often the automatic switch-on looks for users without a ready folder.
-const fsSweepEvery = time.Minute
-
-// runSharedFolders keeps every user's shared folder on (it is on by default): at start and every
-// fsSweepEvery it provisions the missing ones, retries failed removals and moves deliverable versions still kept in the
-// database into their owners' folders; beside it, on its own pace, memory and its folders are kept
-// in step. One replica runs both (leader lock).
-func (e *Engine) runSharedFolders(ctx context.Context) {
-	if !e.FS.Enabled() {
-		return
+// sweepSharedFolders is the shared-folders job: provision the users without a ready folder,
+// retry failed removals, move deliverable versions still kept in the database into the folders.
+// Failures of one step do not stop the next; they come back joined.
+func (e *Engine) sweepSharedFolders(ctx context.Context) (string, error) {
+	var done []string
+	ready, perr := e.FS.ProvisionAll(ctx)
+	if ready > 0 {
+		done = append(done, fmt.Sprintf("开通 %d 个", ready))
 	}
-	scheduler.RunAsLeader(ctx, e.Core.Pool, "agent-teams:shared-folders", 30*time.Second, func(ctx context.Context) {
-		go e.runMemorySweep(ctx)
-		every(ctx, fsSweepEvery, func() { e.sweepSharedFolders(ctx) })
-	})
+	removed, rerr := e.FS.RetryRemovals(ctx)
+	if removed > 0 {
+		done = append(done, fmt.Sprintf("补删 %d 个目录", removed))
+	}
+	rep, merr := e.Core.Artifacts().MoveToVolumes(ctx, e.log)
+	if rep.Moved > 0 || rep.Failed > 0 {
+		done = append(done, fmt.Sprintf("交付物搬进卷 %d 个（失败 %d）", rep.Moved, rep.Failed))
+	}
+	return strings.Join(done, "，"), errors.Join(perr, rerr, merr)
 }
 
-// every runs f now and then every d until ctx ends.
-func every(ctx context.Context, d time.Duration, f func()) {
-	for {
-		f()
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(d):
-		}
+// sweepOrphanFolders is the ownerless-volumes job.
+func (e *Engine) sweepOrphanFolders(ctx context.Context) (string, error) {
+	n, err := e.FS.SweepOrphans(ctx)
+	if n == 0 {
+		return "", err
 	}
-}
-
-func (e *Engine) sweepSharedFolders(ctx context.Context) {
-	if _, err := e.FS.ProvisionAll(ctx); err != nil {
-		e.log.Warn("shared folders: provisioning sweep", "err", err)
-	}
-	if n, err := e.FS.RetryRemovals(ctx); err != nil {
-		e.log.Warn("shared folders: retrying removals", "err", err)
-	} else if n > 0 {
-		e.log.Info("shared folders: folders left by failed removals removed", "removed", n)
-	}
-	rep, err := e.Core.Artifacts().MoveToVolumes(ctx, e.log)
-	if err != nil {
-		e.log.Warn("shared folders: moving deliverables", "err", err)
-	} else if rep.Moved > 0 || rep.Failed > 0 {
-		e.log.Info("shared folders: deliverables moved into the folders", "moved", rep.Moved, "failed", rep.Failed)
-	}
+	return fmt.Sprintf("销毁 %d 个无主卷", n), err
 }
 
 // sharedFolder is session.open fs: the project's folder and the user's shared folder, when the

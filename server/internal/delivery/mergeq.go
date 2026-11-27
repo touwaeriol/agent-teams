@@ -613,21 +613,23 @@ func (e *Engine) releaseTask(ctx context.Context, tx *core.Tx, entry core.MergeE
 	return fmt.Sprintf("。合并条目已取消，任务 %s 回到 blocked：原因解决后可以再调用 enqueue_merge(task_id=%s) 重新入队，不需要了就 cancel_task", task.ID, task.ID), nil
 }
 
-// Run is the merge/PR loop (advisory-lock leader), woken by hints and every PollInterval.
-func (e *Engine) Run(ctx context.Context) {
+// Hints fires when a merge hint arrives (the merge job then runs Tick at once).
+func (e *Engine) Hints(ctx context.Context) <-chan struct{} {
 	hints, cancel := e.hub.Subscribe(mergeChannel)
-	defer cancel()
-	scheduler.RunAsLeader(ctx, e.core.Pool, "agent-teams:merge", 5*time.Second, func(ctx context.Context) {
-		t := time.NewTicker(e.PollInterval)
-		defer t.Stop()
+	out := make(chan struct{}, 1)
+	go func() {
+		defer cancel()
 		for {
-			e.Tick(ctx)
 			select {
 			case <-ctx.Done():
 				return
 			case <-hints:
-			case <-t.C:
+				select {
+				case out <- struct{}{}:
+				default:
+				}
 			}
 		}
-	})
+	}()
+	return out
 }

@@ -38,6 +38,7 @@ Real-Claude end-to-end runs: `deploy/e2e/README.md` (`up.sh <scratch>` then `run
 - Keep functions small and flat: early returns, dispatch tables, no deep nesting.
 - Schema changes are new goose migrations (`000N0_name.sql`, next free number, with a Down when it can be reversed) plus a test in `server/migrations/migrations_test.go`; `TestLatest` pins the highest version.
 - A new route needs its line in `policy.csv` (`TestEveryRouteHasExplicitPolicy`) and a regenerated `web/src/api/openapi.json` + `schema.d.ts` (`TestOpenAPIUpToDate`).
+- Scheduled work is a built-in `jobs.Job` registered in `server/internal/engine/jobs.go` (name, title, description, default interval, optional wake channel and timeout, a one-round `Run` returning a summary), never a bare goroutine with a ticker: every job runs on River (a periodic job per task, one run at a time under its advisory lock), the registry records every run, and the admin console's 后台任务 page lists, pauses, reschedules (interval or cron) and runs it. Other River jobs add their workers through `jobs.Registry.Workers()` and share its client.
 - Every user query is scoped by user id; tool failures go back to the model as `isError` results, never as exceptions.
 - Add a test for every behavior change (Go tests run against real PostgreSQL/Valkey; node and web use vitest with fakes).
 - Default model is `claude-opus-5-5`; don't hardcode other model IDs.

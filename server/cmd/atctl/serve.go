@@ -13,6 +13,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/config"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/jobs"
 	"github.com/touwaeriol/agent-teams/server/internal/kv"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -57,7 +58,6 @@ func serve(ctx context.Context, _ []string) error {
 	srv := httpapi.New(deps)
 	start(ctx)
 	go srv.RunAuthz(ctx)
-	go maintain(ctx, db, log)
 	return listen(ctx, cfg, srv.Handler(), log)
 }
 
@@ -107,31 +107,25 @@ func openOffice(ctx context.Context, cfg config.Config, db *store.Store, log *sl
 	return reg, nil
 }
 
-// maintain runs the daily housekeeping: expired sessions, event partitions, and SSH audit rows
-// (365 days) and certificates (30 days after expiry).
-func maintain(ctx context.Context, db *store.Store, log *slog.Logger) {
-	tick := time.NewTicker(24 * time.Hour)
-	defer tick.Stop()
-	for {
-		if n, err := db.DeleteExpiredSessions(ctx); err != nil {
-			log.Warn("session cleanup failed", "err", err)
-		} else if n > 0 {
-			log.Info("expired sessions removed", "count", n)
-		}
-		if err := db.EnsurePartitions(ctx, partitionsAhead); err != nil {
-			log.Warn("event partitions", "err", err)
-		}
-		if audit, certs, err := db.PruneSSH(ctx, time.Now()); err != nil {
-			log.Warn("ssh audit cleanup failed", "err", err)
-		} else if audit+certs > 0 {
-			log.Info("old ssh audit rows and certificates removed", "audit", audit, "certs", certs)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-		}
-	}
+// jobRunsKept is how long the recorded runs of the background jobs are kept.
+const jobRunsKept = 30 * 24 * time.Hour
+
+// maintenanceJob is the daily housekeeping: expired sessions, event partitions, SSH audit rows
+// (365 days) and certificates (30 days after expiry), and old background job runs.
+func maintenanceJob(db *store.Store, reg *jobs.Registry) jobs.Job {
+	return jobs.Job{Name: "maintenance", Title: "每日维护", Every: 24 * time.Hour,
+		Description: "清理过期登录会话、预建事件分区、清理一年前的 SSH 审计和过期证书、清理 30 天前的后台任务记录",
+		Run: func(ctx context.Context, _ jobs.Trigger) (string, error) {
+			sessions, serr := db.DeleteExpiredSessions(ctx)
+			perr := db.EnsurePartitions(ctx, partitionsAhead)
+			audit, certs, aerr := db.PruneSSH(ctx, time.Now())
+			runs, rerr := reg.Prune(ctx, jobRunsKept)
+			summary := ""
+			if sessions+audit+certs+runs > 0 {
+				summary = fmt.Sprintf("过期会话 %d，SSH 审计 %d，证书 %d，任务记录 %d", sessions, audit, certs, runs)
+			}
+			return summary, errors.Join(serr, perr, aerr, rerr)
+		}}
 }
 
 func listen(ctx context.Context, cfg config.Config, h http.Handler, log *slog.Logger) error {

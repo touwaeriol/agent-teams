@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -627,17 +626,8 @@ func (e *Engine) timeout(ctx context.Context, conv, id string) {
 	}
 }
 
-// RunSweeper runs SweepTimeouts every interval until ctx ends.
-func (e *Engine) RunSweeper(ctx context.Context, every time.Duration) {
-	t := time.NewTicker(every)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			e.SweepLeadReviews(ctx)
-			e.SweepTimeouts(ctx)
-		}
-	}
+// Sweep ends the lead reviews and approvals that waited too long (the approvals background job).
+func (e *Engine) Sweep(ctx context.Context) {
+	e.SweepLeadReviews(ctx)
+	e.SweepTimeouts(ctx)
 }

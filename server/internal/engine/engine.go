@@ -6,15 +6,13 @@
 package engine
 
 import (
-	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
-	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
-
 	"context"
 	"log/slog"
 	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/approvals"
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
+	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/delivery"
@@ -23,6 +21,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
 	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
+	"github.com/touwaeriol/agent-teams/server/internal/jobs"
 	"github.com/touwaeriol/agent-teams/server/internal/kv"
 	"github.com/touwaeriol/agent-teams/server/internal/memfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
@@ -61,6 +60,8 @@ type Deps struct {
 	AttachmentTTL time.Duration
 	// FS provisions the users' shared folders (nil: not configured, sessions get none).
 	FS *userfs.Service
+	// JobsPoll is how often River looks for due jobs (0 = jobs.DefaultFetchPoll).
+	JobsPoll time.Duration
 }
 
 // Engine holds every orchestration component.
@@ -78,10 +79,12 @@ type Engine struct {
 	Delivery  *delivery.Engine
 	Tools     *toolsvc.Service
 	Timers    *timers.Runner
-	GH        *ghops.GitHub
-	SSH       *sshgw.Gateway
-	FS        *userfs.Service
-	log       *slog.Logger
+	// Jobs are the background jobs (the admin console's 后台任务 page).
+	Jobs *jobs.Registry
+	GH   *ghops.GitHub
+	SSH  *sshgw.Gateway
+	FS   *userfs.Service
+	log  *slog.Logger
 	// memory keeps auto memory in the shared folders (nil: rows only).
 	memory *memfiles.Syncer
 }
@@ -106,15 +109,15 @@ func New(d Deps) (*Engine, error) {
 	e.SSH = sshgw.New(sshgw.Deps{Store: d.Store, Core: cs, Nodes: gw, Fan: fan, Vault: vault, Log: d.Log, Cfg: d.SSH})
 	e.Status = status.New(cs, gw.Online, d.Log)
 	e.Orch = orchestrator.New(cs, d.Store, gw, e.Status, gh, d.Office, d.Log)
+	e.Jobs = jobs.New(cs.Pool, d.Log)
+	e.Jobs.FetchPoll = d.JobsPoll
 	e.Sched = scheduler.New(cs, e.Orch, e.Status, fan, d.Log)
 	e.Approvals = approvals.New(cs, e.Orch, gw, d.Log)
 	e.Delivery = delivery.New(cs, e.Orch, e.Sched, gh, gw, fan, d.Log)
 	if e.Tools, err = toolsvc.New(cs, d.Store, e.Orch, e.Sched, e.Delivery, e.Status, gw, d.Log); err != nil {
 		return nil, err
 	}
-	if e.Timers, err = timers.New(cs, e.Orch, d.Log); err != nil {
-		return nil, err
-	}
+	e.Timers = timers.New(cs, e.Orch, e.Jobs, d.Log)
 	e.Tools.Schedules = e.Timers
 	e.Orch.Kick = e.Sched.Kick
 	e.Sched.PushWork = func(ctx context.Context, tx *core.Tx, emp core.Employee, t core.Thread) error {
@@ -127,24 +130,24 @@ func New(d Deps) (*Engine, error) {
 	e.Tools.Reviews = e.Approvals
 	e.UseSharedFolder(d.FS)
 	gw.SetHandler(&router{e: e})
+	if err := e.Jobs.Build(); err != nil { // every River worker is added by now
+		return nil, err
+	}
 	return e, nil
 }
 
-// Start runs the background loops until ctx ends.
+// Start runs the background loops until ctx ends (the scheduled ones are River jobs: e.Jobs).
 func (e *Engine) Start(ctx context.Context) {
 	if e.memory != nil {
 		e.memory.Start(ctx)
 	}
 	go e.Fan.Run(ctx)
-	go e.Sched.Run(ctx)
-	go e.Delivery.Run(ctx)
-	go e.Approvals.RunSweeper(ctx, 15*time.Second)
-	go e.Timers.Run(ctx)
+	go e.Sched.ListenHints(ctx)
 	go e.SSH.Run(ctx)
-	go e.runSharedFolders(ctx)
-	go scheduler.RunAsLeader(ctx, e.Core.Pool, "agent-teams:blobs", 30*time.Second, func(ctx context.Context) {
-		(&blobgc.Worker{DB: e.Core.Pool, Blobs: e.Core.Blobs, Log: e.log}).Run(ctx, time.Minute)
-	})
+	e.registerJobs(ctx)
+	if err := e.Jobs.Start(ctx); err != nil {
+		e.log.Error("background jobs not started", "err", err)
+	}
 	go func() {
 		e.Orch.WarmAll(ctx)
 		e.Orch.StartAllQueued(ctx)

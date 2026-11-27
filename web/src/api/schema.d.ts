@@ -103,6 +103,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Background jobs and their state */
+        get: operations["admin-list-jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/jobs/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Pause or resume a background job, or change its interval or cron schedule */
+        patch: operations["admin-update-job"];
+        trace?: never;
+    };
+    "/api/admin/jobs/{name}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a background job now (within a second or so, on whichever replica fetches it) */
+        post: operations["admin-run-job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/jobs/{name}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recorded runs of a background job (the ones that did something, failed or were asked for) */
+        get: operations["admin-job-runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/office/layouts": {
         parameters: {
             query?: never;
@@ -3543,6 +3611,81 @@ export interface components {
             roles: string[] | null;
             server_id: string;
         };
+        JobPatchInputBody: {
+            /** @description Run on this cron schedule (five fields or a descriptor such as @daily; the interval override goes); empty = back to the registered interval */
+            cron?: string;
+            /**
+             * Format: int64
+             * @description Run on this interval (a cron schedule goes); 0 = back to the registered interval
+             */
+            every_seconds?: number;
+            paused?: boolean;
+            /** @description IANA zone the cron schedule is read in; empty = UTC */
+            timezone?: string;
+        };
+        JobRunView: {
+            error: string;
+            /** Format: date-time */
+            finished_at: string;
+            /** Format: int64 */
+            id: number;
+            ok: boolean;
+            replica: string;
+            /** Format: date-time */
+            started_at: string;
+            summary: string;
+            /** @enum {string} */
+            trigger: "scheduled" | "woken" | "manual";
+        };
+        JobView: {
+            /** @description The cron schedule replacing the interval; empty = runs on the interval */
+            cron: string;
+            /**
+             * Format: int64
+             * @description The registered interval
+             */
+            default_seconds: number;
+            description: string;
+            /** Format: int64 */
+            failures: number;
+            /**
+             * Format: int64
+             * @description The interval in force (the override when set); unused while cron is set
+             */
+            interval_seconds: number;
+            /**
+             * @description builtin: registered by the code, cannot be deleted; added: created by the system, deletable
+             * @enum {string}
+             */
+            kind: "builtin" | "added";
+            last_error: string;
+            /** Format: date-time */
+            last_finished_at?: string;
+            last_ok?: boolean;
+            last_replica: string;
+            /** Format: date-time */
+            last_started_at?: string;
+            last_summary: string;
+            name: string;
+            /**
+             * Format: date-time
+             * @description About when the next scheduled run starts; absent while paused
+             */
+            next_run_at?: string;
+            /** @description An administrator changed the schedule (interval or cron) */
+            override: boolean;
+            paused: boolean;
+            /** @description A run was asked for and has not started yet */
+            run_requested: boolean;
+            running: boolean;
+            /** Format: date-time */
+            running_since?: string;
+            /** Format: int64 */
+            runs: number;
+            /** @description The zone cron is read in (IANA name; empty = UTC) */
+            timezone: string;
+            title: string;
+        };
         Language: {
             code: string;
             /** @description The language's own name */
@@ -5676,6 +5819,134 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ManifestOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-list-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"][] | null;
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-update-job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobPatchInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-run-job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "admin-job-runs": {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRunView"][] | null;
                 };
             };
             /** @description Error */

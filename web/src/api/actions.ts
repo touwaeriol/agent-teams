@@ -211,6 +211,11 @@ export const admin = {
   removeSkill: (id: string) => unwrap(client.DELETE("/api/admin/skills/{id}", { params: { path: { id } } })),
 };
 
+export const jobs = {
+  run: (name: string) => unwrap(client.POST("/api/admin/jobs/{name}/run", { params: { path: { name } } })),
+  update: (name: string, body: S["JobPatchInputBody"]) => unwrap(client.PATCH("/api/admin/jobs/{name}", { params: { path: { name } }, body })),
+};
+
 export const feedback = {
   setHandled: (id: string, handled: boolean) => unwrap(client.PATCH("/api/admin/feedback/{id}", { params: { path: { id } }, body: { handled } })),
 };

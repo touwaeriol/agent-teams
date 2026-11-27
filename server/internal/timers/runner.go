@@ -2,7 +2,6 @@ package timers
 
 import (
 	"context"
-	"database/sql"
 	"log/slog"
 	"time"
 
@@ -10,8 +9,8 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/jobs"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
-	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
 )
 
 // Runner runs scheduled tasks (on River, river.go) and, in a 20 s loop, resumes threads whose
@@ -19,41 +18,18 @@ import (
 type Runner struct {
 	core     *core.Store
 	orch     *orchestrator.Orchestrator
-	river    *river.Client[*sql.Tx]
+	jobs     *jobs.Registry
 	log      *slog.Logger
 	Interval time.Duration
 	Now      func() time.Time
 }
 
-// New returns a runner whose loop checks every 20 seconds.
-func New(cs *core.Store, orch *orchestrator.Orchestrator, log *slog.Logger) (*Runner, error) {
-	r := &Runner{core: cs, orch: orch, log: log, Interval: 20 * time.Second, Now: time.Now}
-	rc, err := newRiver(cs.Pool, r, log)
-	if err != nil {
-		return nil, err
-	}
-	r.river = rc
-	return r, nil
-}
-
-// Run starts River (every replica works jobs; River elects its own leader for maintenance and
-// the periodic reconcile) and loops while this process holds the timers lock.
-func (r *Runner) Run(ctx context.Context) {
-	go r.startRiver(ctx)
-	scheduler.RunAsLeader(ctx, r.core.Pool, "agent-teams:timers", 5*time.Second, r.loop)
-}
-
-func (r *Runner) loop(ctx context.Context) {
-	t := time.NewTicker(r.Interval)
-	defer t.Stop()
-	for {
-		r.Tick(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
+// New returns a runner whose Tick runs every 20 seconds; its schedule_fire worker joins the
+// background jobs' River client (reg, before reg.Build).
+func New(cs *core.Store, orch *orchestrator.Orchestrator, reg *jobs.Registry, log *slog.Logger) *Runner {
+	r := &Runner{core: cs, orch: orch, jobs: reg, log: log, Interval: 20 * time.Second, Now: time.Now}
+	river.AddWorker(reg.Workers(), &fireWorker{r: r})
+	return r
 }
 
 // Tick does one round: usage-limit resumes first, then thread reminders, then stale session moves.

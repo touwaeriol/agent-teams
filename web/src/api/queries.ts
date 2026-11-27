@@ -87,6 +87,8 @@ export const keys = {
   adminSettings: ["admin", "settings"] as const,
   audit: ["admin", "audit"] as const,
   feedback: ["admin", "feedback"] as const,
+  jobs: ["admin", "jobs"] as const,
+  jobRuns: (name: string) => ["admin", "jobs", name, "runs"] as const,
   sessions: ["me", "sessions"] as const,
 };
 
@@ -462,6 +464,16 @@ export const useAdminSettings = () => useQuery({ queryKey: keys.adminSettings, q
 
 export const useAudit = () =>
   useQuery({ queryKey: keys.audit, queryFn: () => unwrap(client.GET("/api/admin/audit", { params: { query: { limit: 50 } } })) });
+
+/** The background jobs; refreshed every 5 s while the page is open (runs start and end on their own). */
+export const useAdminJobs = () => useQuery({ queryKey: keys.jobs, queryFn: () => list(client.GET("/api/admin/jobs")), refetchInterval: 5_000 });
+
+export const useJobRuns = (name: Arg<string | undefined | null>) =>
+  useKeyed(
+    () => keys.jobRuns(val(name)),
+    () => list(client.GET("/api/admin/jobs/{name}/runs", { params: { path: { name: val(name) }, query: { limit: 50 } } })),
+    { enabled: has(name), refetchInterval: 5_000 },
+  );
 
 export const useFeedback = () => useQuery({ queryKey: keys.feedback, queryFn: () => list(client.GET("/api/admin/feedback")) });
 

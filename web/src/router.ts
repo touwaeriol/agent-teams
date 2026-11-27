@@ -43,6 +43,7 @@ export const adminRoutes: RouteRecordRaw[] = [
   { path: "platform", component: () => import("@/pages/admin/Platform.vue") },
   { path: "library", component: () => import("@/pages/admin/Library.vue") },
   { path: "feedback", component: () => import("@/pages/admin/Feedback.vue") },
+  { path: "jobs", component: () => import("@/pages/admin/Jobs.vue") },
   { path: "github-app", component: () => import("@/pages/admin/GitHubApp.vue") },
   { path: "audit", component: () => import("@/pages/admin/Audit.vue") },
 ];
