@@ -26,6 +26,7 @@ import {
   uploadProjectFiles,
 } from "@/lib/projectFiles";
 import { ApiError } from "@/api/client";
+import { folderPoll } from "@/api/queries";
 import { formatBytes } from "@/lib/bytes";
 import { UploadCancelled } from "@/lib/upload";
 import ProjectFiles from "@/pages/ProjectFiles.vue";
@@ -49,6 +50,19 @@ const fake = (name: string, size: number) => {
   Object.defineProperty(f, "size", { value: size });
   return f;
 };
+
+describe("folderPoll", () => {
+  it("polls fast at the start of each change, slowly after two minutes, every minute after a failure", () => {
+    const on = (state?: string) => ({ configured: true, ...(state ? { volume: { state } } : {}) });
+    expect(folderPoll(on("ready"), 0)).toBe(false);
+    expect(folderPoll(on(), 1000)).toBe(2000);
+    expect(folderPoll(on("provisioning"), 120_999)).toBe(2000);
+    expect(folderPoll(on("provisioning"), 121_000)).toBe(30_000);
+    expect(folderPoll(on("error"), 200_000)).toBe(60_000);
+    expect(folderPoll(on("provisioning"), 300_000)).toBe(2000); // a retry starts fast again
+    expect(folderPoll({ configured: false }, 0)).toBe(false);
+  });
+});
 
 describe("paths", () => {
   it("prints binary units", () => {

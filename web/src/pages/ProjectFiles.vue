@@ -214,7 +214,7 @@ function createFolder() {
       <Callout v-if="!available" tone="warn" data-testid="files-unavailable">
         <strong class="font-semibold">{{ list.data.value?.reason }}</strong>
         <span class="block text-xs opacity-90">
-          项目文件放在你的共享文件夹里（默认开通）。开通完成后，员工在工作目录的 .project-files/ 里就能直接读写它们。
+          项目文件放在你的共享文件夹里。开通完成后，员工在工作目录的 .project-files/ 里就能直接读写它们。
           <RouterLink to="/settings/storage" class="underline">{{ setupLink }}</RouterLink>
         </span>
       </Callout>

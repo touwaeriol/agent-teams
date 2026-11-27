@@ -12,9 +12,9 @@ export function memorySource(pid: string | null) {
   if (pid === null) {
     return {
       useList: useUserMemory,
-      useFile: (name: () => string) => useUserMemoryFile(name),
-      put: (name: string, body: MemoryBody) => userMemory.put(name, body),
-      remove: (name: string) => userMemory.remove(name),
+      useFile: useUserMemoryFile,
+      put: userMemory.put,
+      remove: userMemory.remove,
       invalidate: () => [keys.userMemory],
     };
   }

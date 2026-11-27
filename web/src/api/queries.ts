@@ -361,18 +361,30 @@ export const useDeliverableFiles = (id: Arg, version: Arg<number> = 0, enabled: 
 export const useDeliverableComments = (id: Arg) =>
   useKeyed(() => keys.deliverableComments(val(id)), () => unwrap(client.GET("/api/deliverables/{id}/comments", path({ id: val(id) }))), { enabled: has(id) });
 
+let folderChangingSince = 0;
+
+/**
+ * How often to read the shared folder: every 2 s for the first two minutes of a change (no volume
+ * yet, provisioning, deleting), then every 30 s; every minute after a failure (the console retries
+ * on its own every 10 minutes); not at all otherwise.
+ */
+export function folderPoll(d: { configured: boolean; volume?: { state: string } } | undefined, now = Date.now()): number | false {
+  const state = d?.volume?.state;
+  const changing = d?.configured && (!state || state === "provisioning" || state === "deleting");
+  if (!changing) {
+    folderChangingSince = 0;
+    return d?.configured && state === "error" ? 60_000 : false;
+  }
+  folderChangingSince ||= now;
+  return now - folderChangingSince < 120_000 ? 2000 : 30_000;
+}
+
 export const useSharedFolder = (enabled: Arg<boolean> = true) =>
   useQuery({
     queryKey: keys.sharedFolder,
     enabled: computed(() => toValue(enabled)),
     queryFn: () => unwrap(client.GET("/api/storage/fs")),
-    // On by default: while the folder is changing (no volume yet, provisioning, deleting), poll;
-    // every 2 s for the first two minutes, then every 30 s (the console retries every 10 minutes).
-    refetchInterval: (q) => {
-      const d = q.state.data;
-      const changing = d?.configured && (!d.volume || d.volume.state === "provisioning" || d.volume.state === "deleting");
-      return changing ? (q.state.dataUpdateCount < 60 ? 2000 : 30_000) : false;
-    },
+    refetchInterval: (q) => folderPoll(q.state.data),
   });
 
 export const useServers = () => useQuery({ queryKey: keys.servers, queryFn: () => list(client.GET("/api/servers")) as Promise<ServerView[]> });

@@ -27,7 +27,7 @@ const vol = computed(() => view.value?.volume);
 const state = computed(() => STATE[vol.value?.state ?? ""] ?? null);
 const docker = ref<Docker | null>(null);
 
-const retry = useAction(() => sharedFolder.enable(), { invalidate: [keys.sharedFolder] });
+const retry = useAction(() => sharedFolder.enable(), { invalidate: [keys.sharedFolder], success: "已重新开始开通" });
 const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker>, { onSuccess: (d) => (docker.value = d) });
 </script>
 
