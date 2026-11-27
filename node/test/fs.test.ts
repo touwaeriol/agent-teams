@@ -259,7 +259,7 @@ describe("safeAttachmentDir", () => {
 describe("sharedFolderPrompt", () => {
   it("names the three links and keeps employees out of the deliverables' folder", () => {
     const p = sharedFolderPrompt({ project: "/mnt/fs/projects/p1", shared: "/mnt/fs/shared" });
-    for (const s of [".project-files/ → /mnt/fs/projects/p1", ".user-files/ → /mnt/fs/shared", ".attachments/ → /mnt/fs/projects/p1/attachments", ".deliverables", "never write"]) expect(p).toContain(s);
+    for (const s of [".project-files/ → /mnt/fs/projects/p1", ".user-files/ → /mnt/fs/shared", ".attachments/ → /mnt/fs/projects/p1/attachments", ".deliverables", "do not write"]) expect(p).toContain(s);
   });
 });
 
