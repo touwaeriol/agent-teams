@@ -17,10 +17,14 @@ import (
 
 // Config is everything atctl needs from its environment (architecture.md §12.2).
 type Config struct {
-	DatabaseURL  string
-	ValkeyURL    string
-	SecretKeys   []string // first one seals, all of them open
-	PublicURL    string
+	DatabaseURL string
+	ValkeyURL   string
+	SecretKeys  []string // first one seals, all of them open
+	PublicURL   string
+	// NodeURL (AGENT_TEAMS_NODE_URL) is the console address daemons connect to, put in the
+	// "add node" install command, install-node.sh and the Docker guide; empty = PublicURL. Lets
+	// nodes reach the control plane directly while the web app stays on its own domain.
+	NodeURL      string
 	Bind         string
 	Port         string
 	OfficeDir    string
@@ -201,6 +205,7 @@ func Load(getenv Getenv) (Config, error) {
 		ValkeyURL:      getenv("VALKEY_URL"),
 		SecretKeys:     secretKeys(getenv),
 		PublicURL:      strings.TrimRight(first(getenv("AGENT_TEAMS_PUBLIC_URL"), getenv("PUBLIC_URL")), "/"),
+		NodeURL:        strings.TrimRight(getenv("AGENT_TEAMS_NODE_URL"), "/"),
 		Bind:           first(getenv("BIND"), "0.0.0.0"),
 		Port:           first(getenv("PORT"), "3001"),
 		OfficeDir:      first(getenv("OFFICE_DIR"), getenv("OFFICE_LAYOUT_DIR")),
@@ -234,6 +239,12 @@ func (c Config) check() error {
 	if c.PublicURL == "" {
 		return errors.New("set AGENT_TEAMS_PUBLIC_URL (or PUBLIC_URL), e.g. https://agent.example.com")
 	}
+	if c.NodeURL != "" {
+		u, err := url.Parse(c.NodeURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+			return errors.New("AGENT_TEAMS_NODE_URL must be a URL like https://agent-backend.example.com")
+		}
+	}
 	if err := c.S3.check(); err != nil {
 		return err
 	}
@@ -264,6 +275,9 @@ func (c Config) Addr() string { return net.JoinHostPort(c.Bind, c.Port) }
 
 // LocalURL is how atctl healthcheck reaches its own server.
 func (c Config) LocalURL() string { return fmt.Sprintf("http://127.0.0.1:%s", c.Port) }
+
+// NodeConsole is the console URL handed to node daemons: NodeURL, or PublicURL when unset.
+func (c Config) NodeConsole() string { return first(c.NodeURL, c.PublicURL) }
 
 // SecureCookies is true behind TLS.
 func (c Config) SecureCookies() bool { return strings.HasPrefix(c.PublicURL, "https://") }

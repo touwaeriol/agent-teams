@@ -15,7 +15,7 @@ type Enrollment struct {
 }
 
 func (s *Server) enrollment(name, token string) Enrollment {
-	console := s.cfg.PublicURL
+	console := s.cfg.NodeConsole()
 	cmd := fmt.Sprintf("curl -fsSL %s/install-node.sh | AGENT_TEAMS_NODE_TOKEN=%s bash -s -- --console %s --name %s",
 		console, token, shellQuote(console), shellQuote(name))
 	n := nodeContainer{name: name, host: strings.ReplaceAll(name, "_", "-"), slug: "agent-teams-node-" + strings.ToLower(name), console: console, token: token, image: s.cfg.NodeImage}
