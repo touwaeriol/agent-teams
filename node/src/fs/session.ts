@@ -1,5 +1,5 @@
 import { lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { SessionOpen } from "../protocol.js";
 import { isInside } from "../util/paths.js";
 
@@ -111,11 +111,20 @@ export function memoryDirs(dirs: SharedDirs): [string, string] {
   return [join(dirs.project, MEMORY_DIR), join(dirs.shared, MEMORY_DIR)];
 }
 
-/** Creates the memory directories when missing; throws when they cannot be. */
+/**
+ * Creates the memory directories when missing and returns their real paths; throws when one cannot
+ * be made or is not a plain directory of its folder (anyone writing the folder could make .memory a
+ * link to elsewhere, which would open that place to the sessions allowed into the memory).
+ */
 export function ensureMemoryDirs(dirs: SharedDirs): string[] {
-  const out = memoryDirs(dirs);
-  for (const d of out) mkdirSync(d, { recursive: true });
-  return out;
+  return memoryDirs(dirs).map((d, i) => {
+    mkdirSync(d, { recursive: true });
+    const parent = realpathSync(i === 0 ? dirs.project : dirs.shared);
+    if (lstatSync(d).isSymbolicLink()) throw new Error(`${d} is a symbolic link`);
+    const real = realpathSync(d);
+    if (dirname(real) !== parent) throw new Error(`${d} is not a directory of its folder`);
+    return real;
+  });
 }
 
 /** What a session with only the memory directories (the coordinator) is told about them. */
@@ -124,8 +133,14 @@ export function memoryFolderPrompt(dirs: SharedDirs): string {
   const [pm, um] = memoryDirs(dirs);
   return [
     "## Memory files",
-    `The memory is files in the user's shared folder: the project's in ${project[0]}/${MEMORY_DIR}/ (${pm}), the user's own in ${user[0]}/${MEMORY_DIR}/ (${um}). Read, Glob, Grep, Edit and Write work there and nowhere else.`,
+    `The memory is files in the user's shared folder: the project's in ${project[0]}/${MEMORY_DIR}/ (${pm}), the user's own in ${user[0]}/${MEMORY_DIR}/ (${um}). Read, Glob, Grep, Edit and Write work there and nowhere else; give Glob and Grep the directory as path.`,
   ].join("\n");
+}
+
+/** What a read-only session with the whole folder is told about the one place it may write. */
+export function memoryWritePrompt(dirs: SharedDirs): string {
+  const [project, user] = sharedLinks(dirs);
+  return `The memory files are the one thing you may change: Edit and Write work in ${project[0]}/${MEMORY_DIR}/ and ${user[0]}/${MEMORY_DIR}/ and nowhere else.`;
 }
 
 /** What the employee is told about the folders (appended to the system prompt). */

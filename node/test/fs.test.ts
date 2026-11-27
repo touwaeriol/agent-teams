@@ -270,7 +270,15 @@ describe("memory directories", () => {
     expect(ensureMemoryDirs(dirs)).toEqual([join(vol, "projects/p1/.memory"), join(vol, "shared/.memory")]);
     expect(existsSync(join(vol, "shared/.memory"))).toBe(true);
     const p = memoryFolderPrompt(dirs);
-    for (const s of [".project-files/.memory/", ".user-files/.memory/", join(vol, "shared/.memory"), "nowhere else"]) expect(p).toContain(s);
+    for (const s of [".project-files/.memory/", ".user-files/.memory/", join(vol, "shared/.memory"), "nowhere else", "as path"]) expect(p).toContain(s);
+  });
+
+  it("refuse a .memory that is a link to elsewhere", () => {
+    const vol = tmp();
+    mkdirSync(join(vol, "projects/p1"), { recursive: true });
+    mkdirSync(join(vol, "shared"));
+    symlinkSync("/", join(vol, "projects/p1/.memory"), "dir");
+    expect(() => ensureMemoryDirs({ project: join(vol, "projects/p1"), shared: join(vol, "shared") })).toThrow(/link/);
   });
 });
 
