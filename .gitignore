@@ -5,3 +5,4 @@ node_modules/
 
 # Redis/Valkey snapshots from local test runs
 dump.rdb
+/server/atctl
