@@ -2,29 +2,34 @@ package orchapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/cronx"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
 	"github.com/touwaeriol/agent-teams/server/internal/jobs"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
-// The admin console's 后台任务 page: every background job registered in engine.Jobs, its state
-// and runs, and the controls (run now, pause / resume, interval).
+// The admin console's 后台任务 page: every scheduled task in engine.Jobs (all run on River), its
+// state and runs, and the controls (run now, pause / resume, interval or cron). Built-in tasks
+// cannot be deleted; there are no added ones yet, so there is no delete route.
 
 // JobView is one background job with its state.
 type JobView struct {
 	Name            string     `json:"name"`
 	Title           string     `json:"title"`
 	Description     string     `json:"description"`
-	Scope           string     `json:"scope" enum:"single,every" doc:"single: one replica runs it (leader lock); every: each replica"`
+	Kind            string     `json:"kind" enum:"builtin,added" doc:"builtin: registered by the code, cannot be deleted; added: created by the system, deletable"`
 	DefaultSeconds  int        `json:"default_seconds" doc:"The registered interval"`
-	IntervalSeconds int        `json:"interval_seconds" doc:"The interval in force (the override when set)"`
-	Override        bool       `json:"override" doc:"An administrator changed the interval"`
+	IntervalSeconds int        `json:"interval_seconds" doc:"The interval in force (the override when set); unused while cron is set"`
+	Cron            string     `json:"cron" doc:"The cron schedule replacing the interval; empty = runs on the interval"`
+	Timezone        string     `json:"timezone" doc:"The zone cron is read in (IANA name; empty = UTC)"`
+	Override        bool       `json:"override" doc:"An administrator changed the schedule (interval or cron)"`
 	Paused          bool       `json:"paused"`
 	Running         bool       `json:"running"`
 	RunRequested    bool       `json:"run_requested" doc:"A run was asked for and has not started yet"`
@@ -68,8 +73,10 @@ type jobRunsOutput struct{ Body []JobRunView }
 type jobPatchInput struct {
 	Name string `path:"name" maxLength:"64"`
 	Body struct {
-		Paused       *bool `json:"paused,omitempty"`
-		EverySeconds *int  `json:"every_seconds,omitempty" minimum:"0" maximum:"604800" doc:"0 = back to the default"`
+		Paused       *bool   `json:"paused,omitempty"`
+		EverySeconds *int    `json:"every_seconds,omitempty" minimum:"0" maximum:"604800" doc:"Run on this interval (a cron schedule goes); 0 = back to the registered interval"`
+		Cron         *string `json:"cron,omitempty" maxLength:"200" doc:"Run on this cron schedule (five fields or a descriptor such as @daily; the interval override goes); empty = back to the registered interval"`
+		Timezone     string  `json:"timezone,omitempty" maxLength:"64" doc:"IANA zone the cron schedule is read in; empty = UTC"`
 	}
 }
 
@@ -81,9 +88,9 @@ func (a *API) registerJobs(api huma.API) {
 	huma.Register(api, op("admin-job-runs", "GET", "/api/admin/jobs/{name}/runs", admin,
 		summary("Recorded runs of a background job (the ones that did something, failed or were asked for)")), a.jobRuns)
 	huma.Register(api, op("admin-run-job", "POST", "/api/admin/jobs/{name}/run", admin,
-		summary("Run a background job now (within a few seconds, on the replica running it)")), a.runJob)
+		summary("Run a background job now (within a second or so, on whichever replica fetches it)")), a.runJob)
 	huma.Register(api, op("admin-update-job", "PATCH", "/api/admin/jobs/{name}", admin,
-		summary("Pause or resume a background job, or change its interval")), a.updateJob)
+		summary("Pause or resume a background job, or change its interval or cron schedule")), a.updateJob)
 }
 
 func (a *API) listJobs(ctx context.Context, _ *struct{}) (*jobsOutput, error) {
@@ -102,17 +109,21 @@ func (a *API) listJobs(ctx context.Context, _ *struct{}) (*jobsOutput, error) {
 }
 
 func jobView(j jobs.Job, c jobs.Control) JobView {
-	v := JobView{Name: j.Name, Title: j.Title, Description: j.Description, Scope: "single",
+	kind := c.Kind
+	if kind == "" {
+		kind = jobs.Builtin
+	}
+	v := JobView{Name: j.Name, Title: j.Title, Description: j.Description, Kind: string(kind),
 		DefaultSeconds: int(j.Every / time.Second), IntervalSeconds: int(c.Interval(j) / time.Second),
-		Override: c.EverySeconds != nil, Paused: c.Paused, Running: c.RunningSince != nil, RunningSince: c.RunningSince,
+		Cron: c.Cron, Timezone: c.Timezone, Override: c.EverySeconds != nil || c.Cron != "", Paused: c.Paused, Running: c.RunningSince != nil, RunningSince: c.RunningSince,
 		LastStartedAt: c.LastStartedAt, LastFinishedAt: c.LastFinishedAt, LastOK: c.LastOK, LastSummary: c.LastSummary,
 		LastError: c.LastError, LastReplica: c.LastReplica, Runs: c.Runs, Failures: c.Failures}
-	if j.Lock == "" {
-		v.Scope = "every"
-	}
 	v.RunRequested = c.RunRequestedAt != nil && (c.LastStartedAt == nil || c.RunRequestedAt.After(*c.LastStartedAt))
-	if !c.Paused && c.LastStartedAt != nil {
-		next := c.LastStartedAt.Add(c.Interval(j))
+	var last time.Time
+	if c.LastStartedAt != nil {
+		last = *c.LastStartedAt
+	}
+	if next := c.Next(j, last, time.Now()); !c.Paused && !next.IsZero() {
 		v.NextRunAt = &next
 	}
 	return v
@@ -144,7 +155,11 @@ func (a *API) updateJob(ctx context.Context, in *jobPatchInput) (*jobOutput, err
 				return err
 			}
 		}
-		if b.EverySeconds != nil {
+		switch {
+		case b.Cron != nil:
+			detail["cron"], detail["timezone"] = *b.Cron, b.Timezone
+			return a.e.Jobs.SetCron(ctx, in.Name, *b.Cron, b.Timezone)
+		case b.EverySeconds != nil:
 			detail["every_seconds"] = *b.EverySeconds
 			return a.e.Jobs.SetEvery(ctx, in.Name, *b.EverySeconds)
 		}
@@ -177,8 +192,11 @@ func (a *API) changeJob(ctx context.Context, name, action string, detail map[str
 }
 
 func jobErr(err error) error {
-	if err == jobs.ErrUnknown {
+	switch {
+	case errors.Is(err, jobs.ErrUnknown):
 		return httpapi.Fail(http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, cronx.ErrCron), errors.Is(err, jobs.ErrSchedule):
+		return httpapi.Fail(http.StatusUnprocessableEntity, "bad_schedule", err.Error())
 	}
 	return err
 }

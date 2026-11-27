@@ -3047,8 +3047,13 @@
       "JobPatchInputBody": {
         "additionalProperties": false,
         "properties": {
+          "cron": {
+            "description": "Run on this cron schedule (five fields or a descriptor such as @daily; the interval override goes); empty = back to the registered interval",
+            "maxLength": 200,
+            "type": "string"
+          },
           "every_seconds": {
-            "description": "0 = back to the default",
+            "description": "Run on this interval (a cron schedule goes); 0 = back to the registered interval",
             "format": "int64",
             "maximum": 604800,
             "minimum": 0,
@@ -3056,6 +3061,11 @@
           },
           "paused": {
             "type": "boolean"
+          },
+          "timezone": {
+            "description": "IANA zone the cron schedule is read in; empty = UTC",
+            "maxLength": 64,
+            "type": "string"
           }
         },
         "type": "object"
@@ -3111,6 +3121,10 @@
       "JobView": {
         "additionalProperties": false,
         "properties": {
+          "cron": {
+            "description": "The cron schedule replacing the interval; empty = runs on the interval",
+            "type": "string"
+          },
           "default_seconds": {
             "description": "The registered interval",
             "format": "int64",
@@ -3124,9 +3138,17 @@
             "type": "integer"
           },
           "interval_seconds": {
-            "description": "The interval in force (the override when set)",
+            "description": "The interval in force (the override when set); unused while cron is set",
             "format": "int64",
             "type": "integer"
+          },
+          "kind": {
+            "description": "builtin: registered by the code, cannot be deleted; added: created by the system, deletable",
+            "enum": [
+              "builtin",
+              "added"
+            ],
+            "type": "string"
           },
           "last_error": {
             "type": "string"
@@ -3157,7 +3179,7 @@
             "type": "string"
           },
           "override": {
-            "description": "An administrator changed the interval",
+            "description": "An administrator changed the schedule (interval or cron)",
             "type": "boolean"
           },
           "paused": {
@@ -3178,12 +3200,8 @@
             "format": "int64",
             "type": "integer"
           },
-          "scope": {
-            "description": "single: one replica runs it (leader lock); every: each replica",
-            "enum": [
-              "single",
-              "every"
-            ],
+          "timezone": {
+            "description": "The zone cron is read in (IANA name; empty = UTC)",
             "type": "string"
           },
           "title": {
@@ -3194,9 +3212,11 @@
           "name",
           "title",
           "description",
-          "scope",
+          "kind",
           "default_seconds",
           "interval_seconds",
+          "cron",
+          "timezone",
           "override",
           "paused",
           "running",
@@ -9990,7 +10010,7 @@
             "description": "Error"
           }
         },
-        "summary": "Pause or resume a background job, or change its interval",
+        "summary": "Pause or resume a background job, or change its interval or cron schedule",
         "tags": [
           "admin"
         ]
@@ -10032,7 +10052,7 @@
             "description": "Error"
           }
         },
-        "summary": "Run a background job now (within a few seconds, on the replica running it)",
+        "summary": "Run a background job now (within a second or so, on whichever replica fetches it)",
         "tags": [
           "admin"
         ]

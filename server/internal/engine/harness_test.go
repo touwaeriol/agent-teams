@@ -114,7 +114,7 @@ func newWorldWith(t *testing.T, gh *httptest.Server, tune func(*engine.Engine)) 
 	box := auth.NewSecretBox(secret)
 	tokens := github.NewTokens(client, github.NewApps(db, box), cache, box)
 	e, err := engine.New(engine.Deps{Store: db, KV: cache, GitHub: client, Tokens: tokens, Box: box, Office: reg, Log: log,
-		Gateway: nodegw.Config{Validate: true, PingInterval: time.Hour}, Vault: testVault(t), Blobs: blobtest.New(t)})
+		Gateway: nodegw.Config{Validate: true, PingInterval: time.Hour}, Vault: testVault(t), Blobs: blobtest.New(t), JobsPoll: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

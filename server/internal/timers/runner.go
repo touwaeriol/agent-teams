@@ -2,7 +2,6 @@ package timers
 
 import (
 	"context"
-	"database/sql"
 	"log/slog"
 	"time"
 
@@ -10,6 +9,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/jobs"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 )
 
@@ -18,26 +18,19 @@ import (
 type Runner struct {
 	core     *core.Store
 	orch     *orchestrator.Orchestrator
-	river    *river.Client[*sql.Tx]
+	jobs     *jobs.Registry
 	log      *slog.Logger
 	Interval time.Duration
 	Now      func() time.Time
 }
 
-// New returns a runner whose loop checks every 20 seconds.
-func New(cs *core.Store, orch *orchestrator.Orchestrator, log *slog.Logger) (*Runner, error) {
-	r := &Runner{core: cs, orch: orch, log: log, Interval: 20 * time.Second, Now: time.Now}
-	rc, err := newRiver(cs.Pool, r, log)
-	if err != nil {
-		return nil, err
-	}
-	r.river = rc
-	return r, nil
+// New returns a runner whose Tick runs every 20 seconds; its schedule_fire worker joins the
+// background jobs' River client (reg, before reg.Build).
+func New(cs *core.Store, orch *orchestrator.Orchestrator, reg *jobs.Registry, log *slog.Logger) *Runner {
+	r := &Runner{core: cs, orch: orch, jobs: reg, log: log, Interval: 20 * time.Second, Now: time.Now}
+	river.AddWorker(reg.Workers(), &fireWorker{r: r})
+	return r
 }
-
-// StartRiver runs River until ctx ends: every replica works jobs; River elects its own leader for
-// maintenance and the periodic reconcile. Tick is the timers background job.
-func (r *Runner) StartRiver(ctx context.Context) { r.startRiver(ctx) }
 
 // Tick does one round: usage-limit resumes first, then thread reminders, then stale session moves.
 func (r *Runner) Tick(ctx context.Context) {

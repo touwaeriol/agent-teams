@@ -87,6 +87,21 @@ export function intervalText(seconds: number): string {
   return `每 ${seconds} 秒`;
 }
 
+/** A job's schedule in force: its cron schedule (with the zone) or its interval. */
+export function scheduleText(j: { cron: string; timezone: string; interval_seconds: number }): string {
+  if (!j.cron) return intervalText(j.interval_seconds);
+  return `cron ${j.cron}（${j.timezone || "UTC"}）`;
+}
+
+/** The browser's IANA zone, the default zone of a new cron schedule. */
+export function browserZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
 /** 0.4 秒 / 12 秒 / 3 分 5 秒. */
 export function durationText(fromIso: string, toIso: string): string {
   const ms = Math.max(0, new Date(toIso).getTime() - new Date(fromIso).getTime());
@@ -109,4 +124,4 @@ export function jobState(j: { running: boolean; paused: boolean; run_requested: 
   return j.last_ok === false ? { label: "上次失败", type: "danger" } : { label: "正常", type: "success" };
 }
 
-export const TRIGGER_LABEL: Record<string, string> = { scheduled: "按间隔", woken: "有新工作", manual: "手动" };
+export const TRIGGER_LABEL: Record<string, string> = { scheduled: "按周期", woken: "有新工作", manual: "手动" };

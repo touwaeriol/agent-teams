@@ -6,11 +6,11 @@ import { flushPromises, mount } from "@vue/test-utils";
 import ElementPlus from "element-plus";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
-import { durationText, intervalText, jobState } from "@/pages/admin/admin";
+import { durationText, intervalText, jobState, scheduleText } from "@/pages/admin/admin";
 import Jobs from "@/pages/admin/Jobs.vue";
 
 const JOB = {
-  name: "blobs", title: "附件存储清理", description: "删除待删的对象", scope: "single", default_seconds: 60, interval_seconds: 60,
+  name: "blobs", title: "附件存储清理", description: "删除待删的对象", kind: "builtin", cron: "", timezone: "", default_seconds: 60, interval_seconds: 60,
   override: false, paused: false, running: false, run_requested: false, last_started_at: "2026-11-27T10:00:00Z",
   last_finished_at: "2026-11-27T10:00:01.5Z", last_ok: false, last_summary: "", last_error: "bucket gone", last_replica: "box/1",
   next_run_at: "2026-11-27T10:01:00Z", runs: 7, failures: 1,
@@ -53,6 +53,7 @@ describe("后台任务 page", () => {
     expect(w.text()).toContain("上次失败");
     expect(w.text()).toContain("bucket gone");
     expect(w.text()).toContain("每 1 分钟");
+    expect(w.text()).toContain("内置");
     const button = (label: string) => w.findAll("button").find((b) => b.text() === label)!;
     await button("立即运行").trigger("click");
     await button("暂停").trigger("click");
@@ -69,6 +70,9 @@ describe("后台任务 page", () => {
 describe("job helpers", () => {
   it("words intervals, durations and states", () => {
     expect([intervalText(15), intervalText(60), intervalText(7200), intervalText(86400), intervalText(90)]).toEqual(["每 15 秒", "每 1 分钟", "每 2 小时", "每天", "每 90 秒"]);
+    expect(scheduleText({ cron: "0 3 * * *", timezone: "Asia/Shanghai", interval_seconds: 60 })).toBe("cron 0 3 * * *（Asia/Shanghai）");
+    expect(scheduleText({ cron: "@daily", timezone: "", interval_seconds: 60 })).toBe("cron @daily（UTC）");
+    expect(scheduleText({ cron: "", timezone: "", interval_seconds: 60 })).toBe("每 1 分钟");
     expect(durationText("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.4Z")).toBe("0.4 秒");
     expect(durationText("2026-01-01T00:00:00Z", "2026-01-01T00:03:05Z")).toBe("3 分 5 秒");
     const base = { running: false, paused: false, run_requested: false, last_ok: true, last_started_at: "x" };

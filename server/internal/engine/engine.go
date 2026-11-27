@@ -60,6 +60,8 @@ type Deps struct {
 	AttachmentTTL time.Duration
 	// FS provisions the users' shared folders (nil: not configured, sessions get none).
 	FS *userfs.Service
+	// JobsPoll is how often River looks for due jobs (0 = jobs.DefaultFetchPoll).
+	JobsPoll time.Duration
 }
 
 // Engine holds every orchestration component.
@@ -108,15 +110,14 @@ func New(d Deps) (*Engine, error) {
 	e.Status = status.New(cs, gw.Online, d.Log)
 	e.Orch = orchestrator.New(cs, d.Store, gw, e.Status, gh, d.Office, d.Log)
 	e.Jobs = jobs.New(cs.Pool, d.Log)
+	e.Jobs.FetchPoll = d.JobsPoll
 	e.Sched = scheduler.New(cs, e.Orch, e.Status, fan, d.Log)
 	e.Approvals = approvals.New(cs, e.Orch, gw, d.Log)
 	e.Delivery = delivery.New(cs, e.Orch, e.Sched, gh, gw, fan, d.Log)
 	if e.Tools, err = toolsvc.New(cs, d.Store, e.Orch, e.Sched, e.Delivery, e.Status, gw, d.Log); err != nil {
 		return nil, err
 	}
-	if e.Timers, err = timers.New(cs, e.Orch, d.Log); err != nil {
-		return nil, err
-	}
+	e.Timers = timers.New(cs, e.Orch, e.Jobs, d.Log)
 	e.Tools.Schedules = e.Timers
 	e.Orch.Kick = e.Sched.Kick
 	e.Sched.PushWork = func(ctx context.Context, tx *core.Tx, emp core.Employee, t core.Thread) error {
@@ -129,17 +130,19 @@ func New(d Deps) (*Engine, error) {
 	e.Tools.Reviews = e.Approvals
 	e.UseSharedFolder(d.FS)
 	gw.SetHandler(&router{e: e})
+	if err := e.Jobs.Build(); err != nil { // every River worker is added by now
+		return nil, err
+	}
 	return e, nil
 }
 
-// Start runs the background loops until ctx ends.
+// Start runs the background loops until ctx ends (the scheduled ones are River jobs: e.Jobs).
 func (e *Engine) Start(ctx context.Context) {
 	if e.memory != nil {
 		e.memory.Start(ctx)
 	}
 	go e.Fan.Run(ctx)
 	go e.Sched.ListenHints(ctx)
-	go e.Timers.StartRiver(ctx)
 	go e.SSH.Run(ctx)
 	e.registerJobs(ctx)
 	if err := e.Jobs.Start(ctx); err != nil {

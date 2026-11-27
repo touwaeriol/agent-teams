@@ -7,8 +7,9 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/orchapi"
 )
 
-// TestAdminJobs: the background jobs are listed for administrators only; one can be run now,
-// paused and given another interval, and its runs are listed.
+// TestAdminJobs: the background jobs (all built in) are listed for administrators only; one can
+// be run now, paused and given another interval or a cron schedule, not deleted, and its runs are
+// listed.
 func TestAdminJobs(t *testing.T) {
 	tm := startTeam(t) // tm.b registered first: an administrator
 	user := tm.w.signUp("jobs-user@example.com")
@@ -21,13 +22,10 @@ func TestAdminJobs(t *testing.T) {
 	for _, j := range list {
 		names[j.Name] = j
 	}
-	for _, n := range []string{"scheduler", "merge-queue", "timers", "approvals", "blobs"} {
-		if names[n].Title == "" {
-			t.Fatalf("job %s missing from %+v", n, list)
+	for _, n := range []string{"scheduler", "merge-queue", "timers", "schedules", "approvals", "blobs"} {
+		if names[n].Title == "" || names[n].Kind != "builtin" {
+			t.Fatalf("job %s missing or not built in: %+v", n, list)
 		}
-	}
-	if names["approvals"].Scope != "every" || names["scheduler"].Scope != "single" {
-		t.Fatalf("scopes %+v", names)
 	}
 
 	var j orchapi.JobView
@@ -52,6 +50,17 @@ func TestAdminJobs(t *testing.T) {
 	if j.Paused || j.Override || j.IntervalSeconds != 60 {
 		t.Fatalf("reset %+v", j)
 	}
+	tm.b.must(200, "PATCH", "/api/admin/jobs/blobs", map[string]any{"cron": "30 4 * * *", "timezone": "Asia/Shanghai"}, &j)
+	if j.Cron != "30 4 * * *" || j.Timezone != "Asia/Shanghai" || !j.Override || j.NextRunAt == nil {
+		t.Fatalf("cron %+v", j)
+	}
+	tm.b.must(422, "PATCH", "/api/admin/jobs/blobs", map[string]any{"cron": "not cron"}, nil)
+	tm.b.must(422, "PATCH", "/api/admin/jobs/blobs", map[string]any{"cron": "* * * * *", "timezone": "Nowhere/Land"}, nil)
+	tm.b.must(200, "PATCH", "/api/admin/jobs/blobs", map[string]any{"cron": ""}, &j)
+	if j.Cron != "" || j.Override {
+		t.Fatalf("cron cleared %+v", j)
+	}
+	tm.b.must(405, "DELETE", "/api/admin/jobs/blobs", nil, nil)
 	tm.b.must(404, "POST", "/api/admin/jobs/nope/run", nil, nil)
 	if code, _ := user.do("POST", "/api/admin/jobs/blobs/run", nil); code != 403 {
 		t.Fatalf("non-admin run = %d", code)

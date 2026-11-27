@@ -1,11 +1,17 @@
-// Package jobs runs the console's background jobs in one place: every periodic loop registers
-// here, and the admin console's 后台任务 page shows their state and controls them (pause, resume,
-// run now, change the interval). A job with a Lock runs on the one replica holding that advisory
-// lock; without one it runs on every replica.
+// Package jobs runs the console's scheduled tasks in one place, all on River (riverqueue/river):
+// every periodic job registers here, and the admin console's 后台任务 page shows their state and
+// controls them (pause, resume, run now, change the interval or set a cron schedule).
+//
+// A task is built in (registered by the code, kind "builtin": it cannot be deleted, only paused
+// or rescheduled) or added (kind "added", created later and deletable; none exist yet). Each
+// task is a River periodic job inserting job_run jobs (river.go); a wake or a manual run inserts
+// one more. Whichever replica fetches a run works it, under the task's advisory lock, so a task
+// never runs twice at once.
 package jobs
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,7 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
+	"github.com/riverqueue/river"
+
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -22,7 +29,7 @@ import (
 type Trigger string
 
 const (
-	// Scheduled: the interval passed.
+	// Scheduled: the interval passed or the cron time came.
 	Scheduled Trigger = "scheduled"
 	// Woken: the job's Wake channel fired (work was hinted).
 	Woken Trigger = "woken"
@@ -30,13 +37,30 @@ const (
 	Manual Trigger = "manual"
 )
 
-// Job is one background job.
+// Kind tells built-in tasks from added ones (at_jobs.kind).
+type Kind string
+
+const (
+	// Builtin: registered by the code; not deletable.
+	Builtin Kind = "builtin"
+	// Added: created by the system at run time; deletable.
+	Added Kind = "added"
+)
+
+// DefaultFetchPoll is how often River looks for due jobs (database/sql has no LISTEN): the
+// longest a wake or a "run now" waits before it starts.
+const DefaultFetchPoll = 250 * time.Millisecond
+
+// DefaultTimeout is how long a run may take when the job sets no Timeout.
+const DefaultTimeout = 10 * time.Minute
+
+// Job is one scheduled task.
 type Job struct {
 	Name        string        // stable id ("shared-folders")
 	Title       string        // shown on the admin page
 	Description string        // what it does, shown on the admin page
-	Every       time.Duration // default interval; the admin page can override it
-	Lock        string        // advisory lock: one replica runs it; "" = every replica
+	Every       time.Duration // default interval; the admin page can override it or set a cron schedule
+	Timeout     time.Duration // longest run (0 = DefaultTimeout)
 	// Wake, when set, starts a run each time it receives (a hint that there is work).
 	Wake <-chan struct{}
 	// Run does one round and says what it did ("" = nothing worth keeping).
@@ -46,26 +70,32 @@ type Job struct {
 // ErrUnknown is a job name nobody registered.
 var ErrUnknown = errors.New("没有这个后台任务")
 
-// Registry holds the jobs of this process.
+// Registry holds the tasks of this process and the River client that runs them (and the other
+// River jobs, whose workers are added through Workers before Build).
 type Registry struct {
-	DB      store.DB
+	DB      *store.Pool
 	Log     *slog.Logger
 	Replica string        // this process, in the runs it records
-	Poll    time.Duration // how often controls are read (default 2 s)
+	Poll    time.Duration // how often schedule changes are picked up (default 2 s)
+	// FetchPoll is how often River looks for due jobs (0 = DefaultFetchPoll; set before Build).
+	FetchPoll time.Duration
 
-	mu   sync.Mutex
-	jobs []*Job
-	ctl  map[string]Control
-	at   time.Time
+	mu      sync.Mutex
+	jobs    []*Job
+	workers *river.Workers
+	client  *river.Client[*sql.Tx]
+	armed   map[string]string // periodic jobs added: task → schedule signature
 }
 
 // New builds an empty registry.
-func New(db store.DB, log *slog.Logger) *Registry {
+func New(db *store.Pool, log *slog.Logger) *Registry {
 	host, _ := os.Hostname()
-	return &Registry{DB: db, Log: log, Replica: fmt.Sprintf("%s/%d", host, os.Getpid())}
+	r := &Registry{DB: db, Log: log, Replica: fmt.Sprintf("%s/%d", host, os.Getpid()), workers: river.NewWorkers(), armed: map[string]string{}}
+	river.AddWorker(r.workers, &runWorker{r: r})
+	return r
 }
 
-// Add registers a job (before Start).
+// Add registers a built-in job (before Start).
 func (r *Registry) Add(j Job) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -93,65 +123,55 @@ func (r *Registry) Job(name string) (Job, bool) {
 	return Job{}, false
 }
 
-// Start creates the jobs' rows and runs each job until ctx ends.
+// Start creates the jobs' rows, adds their periodic jobs, starts River, keeps the schedules in
+// step and forwards the jobs' wakes, until ctx ends.
 func (r *Registry) Start(ctx context.Context) error {
+	if err := r.Build(); err != nil {
+		return err
+	}
 	for _, j := range r.Jobs() {
-		if _, err := store.Exec(ctx, r.DB, `INSERT INTO at_jobs (name) VALUES ($1) ON CONFLICT DO NOTHING`, j.Name); err != nil {
+		if _, err := store.Exec(ctx, r.DB, `INSERT INTO at_jobs (name, kind) VALUES ($1, $2)
+			ON CONFLICT (name) DO UPDATE SET kind = EXCLUDED.kind`, j.Name, string(Builtin)); err != nil {
 			return err
 		}
 	}
+	if err := r.sync(ctx); err != nil {
+		return err
+	}
+	if err := r.client.Start(ctx); err != nil {
+		return err
+	}
+	go r.stopWith(ctx)
+	go r.keepSynced(ctx)
 	for _, j := range r.Jobs() {
-		go r.run(ctx, j)
+		if j.Wake != nil {
+			go r.forward(ctx, j)
+		}
 	}
 	return nil
 }
 
-func (r *Registry) run(ctx context.Context, j Job) {
-	if j.Lock == "" {
-		r.loop(ctx, j)
-		return
+func (r *Registry) stopWith(ctx context.Context) {
+	<-ctx.Done()
+	stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := r.client.Stop(stop); err != nil {
+		r.Log.Warn("stop river", "err", err)
 	}
-	pool, ok := r.DB.(*store.Pool)
-	if !ok {
-		r.loop(ctx, j)
-		return
-	}
-	scheduler.RunAsLeader(ctx, pool, j.Lock, 5*time.Second, func(ctx context.Context) { r.loop(ctx, j) })
 }
 
-// loop runs j at start, then whenever its interval passed, it was woken or a run was asked for;
-// a paused job runs only when asked.
-func (r *Registry) loop(ctx context.Context, j Job) {
-	next := time.Now()
-	poll := orDefault(r.Poll, 2*time.Second)
-	for ctx.Err() == nil {
-		c := r.control(ctx, j.Name)
-		if t, ok := c.due(next); ok {
-			r.RunOnce(ctx, j, t)
-			next = time.Now().Add(c.Interval(j))
-		}
-		timer := time.NewTimer(max(min(poll, time.Until(next)), 10*time.Millisecond))
+// forward turns j's wakes into woken runs.
+func (r *Registry) forward(ctx context.Context, j Job) {
+	for {
 		select {
 		case <-ctx.Done():
-		case <-timer.C:
+			return
 		case <-j.Wake:
-			if !r.control(ctx, j.Name).Paused {
-				r.RunOnce(ctx, j, Woken)
+			if err := r.wake(ctx, j.Name); err != nil && ctx.Err() == nil {
+				r.Log.Warn("background job wake", "job", j.Name, "err", err)
 			}
 		}
-		timer.Stop()
 	}
-}
-
-// due tells whether a run starts now, and why.
-func (c Control) due(next time.Time) (Trigger, bool) {
-	switch {
-	case c.RunRequestedAt != nil && (c.LastStartedAt == nil || c.RunRequestedAt.After(*c.LastStartedAt)):
-		return Manual, true
-	case !c.Paused && !time.Now().Before(next):
-		return Scheduled, true
-	}
-	return "", false
 }
 
 // RunOnce runs j now and records it (a panic is a failed run).

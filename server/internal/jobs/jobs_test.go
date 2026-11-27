@@ -22,12 +22,13 @@ func newRegistry(t *testing.T) *Registry {
 	t.Cleanup(st.Close)
 	r := New(st.Pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r.Poll = 20 * time.Millisecond
+	r.FetchPoll = 20 * time.Millisecond
 	return r
 }
 
 func eventually(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		if ok() {
 			return
 		}
@@ -44,9 +45,9 @@ func (r *Registry) state(t *testing.T, name string) Control {
 	return ctl[name]
 }
 
-// TestRegistry: a job runs at start and on its interval, records its last run and the runs that
-// did something; a wake runs it at once; paused it runs only when asked; an interval override
-// applies; a failing or panicking run is recorded as failed and the loop goes on.
+// TestRegistry: on River, a job runs at start and on its interval, records its last run and the
+// runs that did something; a wake runs it at once; paused it runs only when asked; an interval
+// override applies; a failing or panicking run is recorded as failed and the schedule goes on.
 func TestRegistry(t *testing.T) {
 	r := newRegistry(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -55,7 +56,7 @@ func TestRegistry(t *testing.T) {
 	fail := atomic.Value{}
 	fail.Store("")
 	wake := make(chan struct{}, 1)
-	r.Add(Job{Name: "probe", Title: "探针", Every: time.Hour, Lock: "test:probe", Wake: wake,
+	r.Add(Job{Name: "probe", Title: "探针", Every: time.Hour, Wake: wake,
 		Run: func(_ context.Context, t Trigger) (string, error) {
 			runs.Add(1)
 			if t == Woken {
@@ -149,5 +150,89 @@ func TestNothingWorthKeeping(t *testing.T) {
 	}
 	if list, _ := r.Runs(ctx, "idle", 10); len(list) != 0 {
 		t.Fatalf("kept %d runs", len(list))
+	}
+}
+
+// TestCronSchedule: a cron schedule replaces the interval (read in its zone), an interval drops
+// it again; malformed, too frequent or never-running schedules and unknown zones are refused.
+func TestCronSchedule(t *testing.T) {
+	r := newRegistry(t)
+	ctx := context.Background()
+	j := Job{Name: "nightly", Every: time.Hour, Run: func(context.Context, Trigger) (string, error) { return "", nil }}
+	r.Add(j)
+	if _, err := store.Exec(ctx, r.DB, `INSERT INTO at_jobs (name) VALUES ('nightly')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetCron(ctx, "nightly", " 0  3 * * * ", "Asia/Shanghai"); err != nil {
+		t.Fatal(err)
+	}
+	c := r.state(t, "nightly")
+	if c.Cron != "0 3 * * *" || c.Timezone != "Asia/Shanghai" {
+		t.Fatalf("stored %+v", c)
+	}
+	sh, _ := time.LoadLocation("Asia/Shanghai")
+	from := time.Date(2026, 11, 27, 12, 0, 0, 0, sh)
+	if next := c.Next(j, time.Time{}, from); !next.Equal(time.Date(2026, 11, 28, 3, 0, 0, 0, sh)) {
+		t.Fatalf("next %v", next)
+	}
+	last := time.Date(2026, 11, 28, 3, 0, 1, 0, sh)
+	if next := c.Next(j, last, from); !next.Equal(time.Date(2026, 11, 29, 3, 0, 0, 0, sh)) {
+		t.Fatalf("next after a run %v", next)
+	}
+	for _, bad := range [][2]string{{"61 * * * *", ""}, {"@every 1s", ""}, {"0 0 31 2 *", ""}, {"0 3 * * *", "Mars/Base"}} {
+		if err := r.SetCron(ctx, "nightly", bad[0], bad[1]); err == nil {
+			t.Fatalf("%q in %q accepted", bad[0], bad[1])
+		}
+	}
+	if err := r.SetEvery(ctx, "nightly", 120); err != nil {
+		t.Fatal(err)
+	}
+	if c := r.state(t, "nightly"); c.Cron != "" || c.Interval(j) != 2*time.Minute {
+		t.Fatalf("interval did not replace cron %+v", c)
+	}
+	if err := r.SetCron(ctx, "nightly", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if c := r.state(t, "nightly"); c.Cron != "" || c.EverySeconds != nil || c.Interval(j) != time.Hour {
+		t.Fatalf("reset %+v", c)
+	}
+}
+
+// TestOneAtATime: runs asked for together wait for each other (the task's lock); a task on a
+// cron schedule does not run at start.
+func TestOneAtATime(t *testing.T) {
+	r := newRegistry(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var now, peak, done atomic.Int32
+	r.Add(Job{Name: "slow", Every: time.Hour, Run: func(context.Context, Trigger) (string, error) {
+		n := now.Add(1)
+		for p := peak.Load(); n > p && !peak.CompareAndSwap(p, n); p = peak.Load() {
+		}
+		time.Sleep(300 * time.Millisecond)
+		now.Add(-1)
+		done.Add(1)
+		return "", nil
+	}})
+	var cronRuns atomic.Int32
+	r.Add(Job{Name: "cron", Every: time.Hour, Run: func(context.Context, Trigger) (string, error) { cronRuns.Add(1); return "", nil }})
+	if _, err := store.Exec(ctx, r.DB, `INSERT INTO at_jobs (name, cron) VALUES ('cron', '0 3 1 1 *')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the run at start", func() bool { return done.Load() == 1 })
+	for range 2 {
+		if err := r.RequestRun(ctx, "slow"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eventually(t, "both asked-for runs", func() bool { return done.Load() == 3 })
+	if peak.Load() != 1 {
+		t.Fatalf("%d runs at once", peak.Load())
+	}
+	if cronRuns.Load() != 0 {
+		t.Fatal("a cron task ran at start")
 	}
 }

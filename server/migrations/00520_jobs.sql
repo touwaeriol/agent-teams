@@ -1,11 +1,16 @@
 -- +goose Up
--- Background jobs (the admin console's 后台任务 page): one row per registered job with the
--- administrator's controls (paused, an interval override, a run asked for) and its last run;
+-- Background jobs (the admin console's 后台任务 page; they run as River job_run jobs): one row per
+-- task, built in (registered by the code, not deletable) or added by the system later, with the
+-- administrator's controls (paused, an interval or a cron schedule replacing the registered
+-- interval, a run asked for) and its last run;
 -- at_job_runs keeps the runs that did something or failed.
 CREATE TABLE at_jobs (
   name             TEXT PRIMARY KEY,
+  kind             TEXT NOT NULL DEFAULT 'builtin' CHECK (kind IN ('builtin', 'added')),
   paused           BOOLEAN NOT NULL DEFAULT false,
   every_seconds    INT CHECK (every_seconds IS NULL OR every_seconds > 0),
+  cron             TEXT NOT NULL DEFAULT '',
+  timezone         TEXT NOT NULL DEFAULT '',
   run_requested_at TIMESTAMPTZ,
   running_since    TIMESTAMPTZ,
   last_started_at  TIMESTAMPTZ,

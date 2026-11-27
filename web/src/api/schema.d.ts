@@ -133,7 +133,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Pause or resume a background job, or change its interval */
+        /** Pause or resume a background job, or change its interval or cron schedule */
         patch: operations["admin-update-job"];
         trace?: never;
     };
@@ -146,7 +146,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Run a background job now (within a few seconds, on the replica running it) */
+        /** Run a background job now (within a second or so, on whichever replica fetches it) */
         post: operations["admin-run-job"];
         delete?: never;
         options?: never;
@@ -3612,12 +3612,16 @@ export interface components {
             server_id: string;
         };
         JobPatchInputBody: {
+            /** @description Run on this cron schedule (five fields or a descriptor such as @daily; the interval override goes); empty = back to the registered interval */
+            cron?: string;
             /**
              * Format: int64
-             * @description 0 = back to the default
+             * @description Run on this interval (a cron schedule goes); 0 = back to the registered interval
              */
             every_seconds?: number;
             paused?: boolean;
+            /** @description IANA zone the cron schedule is read in; empty = UTC */
+            timezone?: string;
         };
         JobRunView: {
             error: string;
@@ -3634,6 +3638,8 @@ export interface components {
             trigger: "scheduled" | "woken" | "manual";
         };
         JobView: {
+            /** @description The cron schedule replacing the interval; empty = runs on the interval */
+            cron: string;
             /**
              * Format: int64
              * @description The registered interval
@@ -3644,9 +3650,14 @@ export interface components {
             failures: number;
             /**
              * Format: int64
-             * @description The interval in force (the override when set)
+             * @description The interval in force (the override when set); unused while cron is set
              */
             interval_seconds: number;
+            /**
+             * @description builtin: registered by the code, cannot be deleted; added: created by the system, deletable
+             * @enum {string}
+             */
+            kind: "builtin" | "added";
             last_error: string;
             /** Format: date-time */
             last_finished_at?: string;
@@ -3661,7 +3672,7 @@ export interface components {
              * @description About when the next scheduled run starts; absent while paused
              */
             next_run_at?: string;
-            /** @description An administrator changed the interval */
+            /** @description An administrator changed the schedule (interval or cron) */
             override: boolean;
             paused: boolean;
             /** @description A run was asked for and has not started yet */
@@ -3671,11 +3682,8 @@ export interface components {
             running_since?: string;
             /** Format: int64 */
             runs: number;
-            /**
-             * @description single: one replica runs it (leader lock); every: each replica
-             * @enum {string}
-             */
-            scope: "single" | "every";
+            /** @description The zone cron is read in (IANA name; empty = UTC) */
+            timezone: string;
             title: string;
         };
         Language: {

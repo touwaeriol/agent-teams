@@ -101,7 +101,8 @@ func (s *Scheduler) ListenHints(ctx context.Context) {
 // Signal fires when projects were marked for scheduling.
 func (s *Scheduler) Signal() <-chan struct{} { return s.signal }
 
-// Round is one scheduling round (the background job, on the scheduler lock's holder): the marked
+// Round is one scheduling round (the scheduler background job, on whichever replica works it;
+// every replica marks every hint, so any replica has the marks): the marked
 // projects when woken, else the sweep. It says how many projects it went through.
 func (s *Scheduler) Round(ctx context.Context, woken bool) string {
 	n := 0

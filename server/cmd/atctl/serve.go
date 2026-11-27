@@ -113,7 +113,7 @@ const jobRunsKept = 30 * 24 * time.Hour
 // maintenanceJob is the daily housekeeping: expired sessions, event partitions, SSH audit rows
 // (365 days) and certificates (30 days after expiry), and old background job runs.
 func maintenanceJob(db *store.Store, reg *jobs.Registry) jobs.Job {
-	return jobs.Job{Name: "maintenance", Title: "每日维护", Lock: "agent-teams:maintenance", Every: 24 * time.Hour,
+	return jobs.Job{Name: "maintenance", Title: "每日维护", Every: 24 * time.Hour,
 		Description: "清理过期登录会话、预建事件分区、清理一年前的 SSH 审计和过期证书、清理 30 天前的后台任务记录",
 		Run: func(ctx context.Context, _ jobs.Trigger) (string, error) {
 			sessions, serr := db.DeleteExpiredSessions(ctx)
