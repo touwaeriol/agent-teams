@@ -647,12 +647,13 @@ CREATE TABLE at_deliverable_files (                -- publish_file 发布的文�
   PRIMARY KEY (deliverable_id, version, path)
 );
 
--- in_volume（00490，artifacts/volume.go）：所有者的共享文件夹开着时，新版本的文件写进卷、行不带 data；
--- 之前发布的版本留在库里，MoveToVolumes 可以把它们搬进卷。读取时按 size 和 sha256 校验卷里的文件，
+-- in_volume（00490，artifacts/volume.go）：共享文件夹默认开通，新版本的文件只写进所有者的卷、行不带 data；
+-- 卷还没开通好时发布被拒（ErrFolderNotReady），不再写库；只有没配置 AGENT_TEAMS_FS_* 的控制面板（本地开发）写库。
+-- 库里的旧版本由后台每分钟一次的 runSharedFolders 用 MoveToVolumes 搬进卷。读取时按 size 和 sha256 校验卷里的文件，
 -- 被删或被改过就当作取不到（签名 URL 404，@ 引用只附一句说明）。同一交付物的并发发布由 NextVersion
 -- 锁 at_deliverables 行（SELECT … FOR UPDATE）排队，已经有行的版本不会被覆盖，卷里只有失败尝试留下的
 -- 同号目录会被替换。删交付物先删行，提交后再尽力删卷里的目录；删项目提交后尽力删卷里的 projects/<pid>/。
--- 关掉共享文件夹（销毁卷）之前 MoveFromVolumes 把这个用户的 in_volume 版本读回 data；卷里已经没有的文件记日志、行不动。
+-- 共享文件夹只随账号删除而销毁（卷里的交付物一起删）。
 CREATE TABLE at_upload_chunks (                    -- file.chunk 暂存，tool.call 认领后删除；一天没认领的清掉
   upload_id  TEXT NOT NULL,
   idx        INT  NOT NULL,

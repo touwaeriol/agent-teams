@@ -147,6 +147,9 @@ type Hooks interface {
 	ProjectArchived(ctx context.Context, userID, projectID string) error
 	// UserCutOff runs when a user is deactivated or deleted (close sessions, cancel waits).
 	UserCutOff(ctx context.Context, userID string) error
+	// UserDeleting runs before a user's rows are deleted (destroy their shared folder; best effort,
+	// failures are logged).
+	UserDeleting(ctx context.Context, userID string)
 	// NodeDeleting runs before a node row is deleted (reassign its employees).
 	NodeDeleting(ctx context.Context, userID, nodeID string) error
 	// RolesSaved runs after the user's role templates were saved (re-staff the projects).
@@ -276,6 +279,9 @@ func (NoHooks) ProjectArchived(context.Context, string, string) error { return n
 
 // UserCutOff implements Hooks.
 func (NoHooks) UserCutOff(context.Context, string) error { return nil }
+
+// UserDeleting implements Hooks.
+func (NoHooks) UserDeleting(context.Context, string) {}
 
 // NodeDeleting implements Hooks.
 func (NoHooks) NodeDeleting(context.Context, string, string) error { return nil }

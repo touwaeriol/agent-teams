@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -69,16 +68,11 @@ type Service struct {
 	// OnChange runs after a user's volume became ready or was removed (push fs.mount / fs.unmount
 	// to the user's nodes).
 	OnChange func(ctx context.Context, userID string)
-	// BeforeTeardown runs once the nodes unmounted and before the volume is destroyed (move the
-	// deliverable versions kept in it back into the database); an error stops the deletion. The
-	// volume opens read-only meanwhile (Files).
-	BeforeTeardown func(ctx context.Context, userID string) error
 	// UnmountWait bounds how long a deletion waits for the nodes to unmount (default 60 s), polling
 	// every UnmountPoll (default 1 s).
 	UnmountWait, UnmountPoll time.Duration
 
-	bg       sync.WaitGroup
-	draining sync.Map // user id → true while BeforeTeardown runs
+	bg sync.WaitGroup
 }
 
 // ErrBusy: the volume is being switched on; it can be deleted once that ends.
@@ -130,6 +124,26 @@ func (s *Service) Enable(ctx context.Context, userID string) (Volume, error) {
 	return Get(ctx, s.db, userID)
 }
 
+// ProvisionAll switches the shared folder on for every user who lacks a ready one (the folder is
+// on by default): new accounts, failed attempts after retryAfter, provisionings left standing.
+// It returns how many volumes became ready.
+func (s *Service) ProvisionAll(ctx context.Context) (int, error) {
+	if !s.Enabled() {
+		return 0, nil
+	}
+	ids, err := usersToProvision(ctx, s.db, 50)
+	if err != nil {
+		return 0, err
+	}
+	ready := 0
+	for _, id := range ids {
+		if vol, err := s.Enable(ctx, id); err == nil && vol.State == StateReady {
+			ready++
+		}
+	}
+	return ready, nil
+}
+
 func (s *Service) provision(ctx context.Context, vol Volume) error {
 	metaURL, sec, err := s.consoleMeta(ctx, vol)
 	if err != nil {
@@ -164,9 +178,10 @@ func (s *Service) consoleMeta(ctx context.Context, vol Volume) (string, Secrets,
 	return metaURL(vol.MetaRole, s.cfg.adminHost(), db, s.cfg.adminTLS()), sec, nil
 }
 
-// Disable deletes the user's volume: every file in it, its metadata, role and account. It returns
-// once the volume is marked deleting and the nodes were told to unmount; the deletion itself runs
-// in the background (Wait) and ends with the row gone, or in state error with the reason.
+// Disable deletes the user's volume (the account is being deleted): every file in it, its
+// metadata, role and account. It returns once the volume is marked deleting and the nodes were
+// told to unmount; the deletion itself runs in the background (Wait) from the secrets read now,
+// so it finishes even when the row goes with the user meanwhile.
 func (s *Service) Disable(ctx context.Context, userID string) error {
 	if !s.Enabled() {
 		return ErrDisabled
@@ -178,10 +193,15 @@ func (s *Service) Disable(ctx context.Context, userID string) error {
 	if !ok {
 		return s.notClaimed(ctx, userID)
 	}
+	metaURL, sec, err := s.consoleMeta(ctx, vol)
+	if err != nil {
+		_ = setState(ctx, s.db, userID, StateError, "删除失败："+err.Error())
+		return err
+	}
 	s.changed(ctx, userID) // nodes unmount before the data goes
 	ctx = context.WithoutCancel(ctx)
 	s.bg.Add(1)
-	go func() { defer s.bg.Done(); s.finishDisable(ctx, vol) }()
+	go func() { defer s.bg.Done(); s.finishDisable(ctx, vol, metaURL, sec.MetaPassword) }()
 	return nil
 }
 
@@ -212,8 +232,8 @@ func (s *Service) Close() {
 	}
 }
 
-func (s *Service) finishDisable(ctx context.Context, vol Volume) {
-	if err := s.teardown(ctx, vol); err != nil {
+func (s *Service) finishDisable(ctx context.Context, vol Volume, metaURL, password string) {
+	if err := s.teardown(ctx, vol, metaURL, password); err != nil {
 		s.log.Warn("shared folder deletion failed", "user_id", vol.UserID, "volume", vol.Volume, "err", err)
 		_ = setState(ctx, s.db, vol.UserID, StateError, "删除失败："+err.Error())
 		return
@@ -223,15 +243,12 @@ func (s *Service) finishDisable(ctx context.Context, vol Volume) {
 	}
 }
 
-// teardown deletes the volume once its nodes unmounted: the deliverables kept in it go back to the
-// database, then its data and metadata, the account and the role.
-func (s *Service) teardown(ctx context.Context, vol Volume) error {
+// teardown deletes the volume once its nodes unmounted: its data and metadata, the account and
+// the role.
+func (s *Service) teardown(ctx context.Context, vol Volume, metaURL, password string) error {
 	s.waitUnmounted(ctx, vol)
-	if err := s.beforeTeardown(ctx, vol.UserID); err != nil {
-		return fmt.Errorf("交付物移回数据库：%w", err)
-	}
 	s.volumes.Close(vol.Volume)
-	if err := s.destroy(ctx, vol); err != nil {
+	if err := s.destroy(ctx, vol, metaURL, password); err != nil {
 		return err
 	}
 	n := vol.Names()
@@ -241,19 +258,9 @@ func (s *Service) teardown(ctx context.Context, vol Volume) error {
 	return s.meta.Drop(ctx, n.Role)
 }
 
-// beforeTeardown runs BeforeTeardown with the volume open read-only.
-func (s *Service) beforeTeardown(ctx context.Context, userID string) error {
-	if s.BeforeTeardown == nil {
-		return nil
-	}
-	s.draining.Store(userID, true)
-	defer s.draining.Delete(userID)
-	return s.BeforeTeardown(ctx, userID)
-}
-
 // destroy runs juicefs destroy unless the volume's metadata is not there (never created, or
 // already dropped by an earlier attempt).
-func (s *Service) destroy(ctx context.Context, vol Volume) error {
+func (s *Service) destroy(ctx context.Context, vol Volume, metaURL, password string) error {
 	exists, err := s.meta.Exists(ctx, vol.MetaRole)
 	if err != nil {
 		return fmt.Errorf("元数据库：%w", err)
@@ -261,11 +268,7 @@ func (s *Service) destroy(ctx context.Context, vol Volume) error {
 	if !exists {
 		return nil
 	}
-	metaURL, sec, err := s.consoleMeta(ctx, vol)
-	if err != nil {
-		return err
-	}
-	if err := s.volumes.Destroy(ctx, metaURL, sec.MetaPassword); err != nil {
+	if err := s.volumes.Destroy(ctx, metaURL, password); err != nil {
 		return fmt.Errorf("juicefs destroy：%w", err)
 	}
 	return nil
@@ -334,7 +337,7 @@ func (s *Service) MountSpec(ctx context.Context, userID string) (protocol.FsMoun
 }
 
 // Files is the tree of the user's ready volume (ErrNotFound unless ready), for the console's
-// own reads and writes. While a deletion runs BeforeTeardown it opens read-only.
+// own reads and writes.
 func (s *Service) Files(ctx context.Context, userID string) (Files, error) {
 	if !s.Enabled() {
 		return nil, ErrDisabled
@@ -343,19 +346,14 @@ func (s *Service) Files(ctx context.Context, userID string) (Files, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, draining := s.draining.Load(userID)
-	if vol.State != StateReady && (vol.State != StateDeleting || !draining) {
+	if vol.State != StateReady {
 		return nil, ErrNotFound
 	}
 	metaURL, sec, err := s.consoleMeta(ctx, vol)
 	if err != nil {
 		return nil, err
 	}
-	f, err := s.volumes.Files(ctx, vol.Volume, metaURL, sec.MetaPassword)
-	if err != nil || vol.State == StateReady {
-		return f, err
-	}
-	return ReadOnly{f}, nil
+	return s.volumes.Files(ctx, vol.Volume, metaURL, sec.MetaPassword)
 }
 
 // Ready tells whether the user has a ready volume (session.open sends a shared folder only then).
@@ -369,18 +367,3 @@ func (s *Service) Ready(ctx context.Context, userID string) bool {
 
 // IsNotFound reports ErrNotFound.
 func IsNotFound(err error) bool { return errors.Is(err, ErrNotFound) }
-
-// ErrReadOnly: the volume is being deleted; it can be read, not changed.
-var ErrReadOnly = errors.New("共享文件夹正在删除，只能读取")
-
-// ReadOnly is a volume's tree that refuses changes (a volume being deleted).
-type ReadOnly struct{ Files }
-
-// Put implements Files.
-func (ReadOnly) Put(context.Context, string, io.Reader, int64) error { return ErrReadOnly }
-
-// Mkdir implements Files.
-func (ReadOnly) Mkdir(context.Context, string) error { return ErrReadOnly }
-
-// Remove implements Files.
-func (ReadOnly) Remove(context.Context, string) error { return ErrReadOnly }

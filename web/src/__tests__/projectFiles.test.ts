@@ -84,8 +84,8 @@ describe("paths", () => {
     expect(isManaged(folder("data/.deliverables"))).toBe(false);
     expect(isManaged(entry(".deliverables"))).toBe(false);
     const vol = (state: string) => ({ volume: { state } as never });
-    expect(folderLinkText(undefined)).toBe("去开通");
-    expect(folderLinkText({})).toBe("去开通");
+    expect(folderLinkText(undefined)).toBe("正在开通，去查看");
+    expect(folderLinkText({})).toBe("正在开通，去查看");
     expect(folderLinkText(vol("error"))).toContain("重试");
     expect(folderLinkText(vol("provisioning"))).toContain("正在开通");
   });
@@ -215,10 +215,10 @@ describe("ProjectFiles page", () => {
   }
 
   it("says why and links to the setting until the shared folder is on", async () => {
-    const { w } = await mountPage({ "": listing([], { available: false, reason: "共享文件夹还没有开通或还不可用（设置 → 共享文件夹）" }) });
-    expect(w.get("[data-testid=files-unavailable]").text()).toContain("还没有开通");
+    const { w } = await mountPage({ "": listing([], { available: false, reason: "共享文件夹正在自动开通或暂时不可用，稍后再试（状态见 设置 → 共享文件夹）" }) });
+    expect(w.get("[data-testid=files-unavailable]").text()).toContain("正在自动开通");
     expect(w.get("[data-testid=files-unavailable] a").attributes("href")).toBe("/settings/storage");
-    expect(w.get("[data-testid=files-unavailable] a").text()).toBe("去开通");
+    expect(w.get("[data-testid=files-unavailable] a").text()).toBe("正在开通，去查看");
     expect(w.find("[data-testid=files-drop]").exists()).toBe(false);
   });
 

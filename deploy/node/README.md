@@ -69,7 +69,7 @@ git 走 ssh 的话，在 `compose.yml` 里打开 `~/.ssh:/home/agent/.ssh:ro` �
 
 ## 共享文件夹（可选）
 
-控制面板“设置 → 共享文件夹”开通后，每个用户有一个 JuiceFS 网络文件夹（项目文件、附件、交付物都在里面）。
+每个用户默认有一个 JuiceFS 网络文件夹（控制面板自动开通，状态见“设置 → 共享文件夹”；项目文件、附件、交付物都在里面）。
 Docker 节点由宿主机挂载，容器不需要特权、也拿不到存储密码：
 
 1. 宿主机装一次 JuiceFS 卷插件：`docker plugin install juicedata/juicefs --alias juicedata/juicefs --grant-all-permissions`

@@ -353,7 +353,11 @@ export const useSharedFolder = (enabled: Arg<boolean> = true) =>
     queryKey: keys.sharedFolder,
     enabled: computed(() => toValue(enabled)),
     queryFn: () => unwrap(client.GET("/api/storage/fs")),
-    refetchInterval: (q) => (q.state.data?.volume?.state === "provisioning" || q.state.data?.volume?.state === "deleting" ? 2000 : false),
+    // On by default: while the console is still provisioning it (no volume yet, or provisioning), poll.
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      return d?.configured && (!d.volume || d.volume.state === "provisioning" || d.volume.state === "deleting") ? 2000 : false;
+    },
   });
 
 export const useServers = () => useQuery({ queryKey: keys.servers, queryFn: () => list(client.GET("/api/servers")) as Promise<ServerView[]> });

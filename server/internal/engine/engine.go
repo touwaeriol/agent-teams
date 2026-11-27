@@ -135,6 +135,7 @@ func (e *Engine) Start(ctx context.Context) {
 	go e.Approvals.RunSweeper(ctx, 15*time.Second)
 	go e.Timers.Run(ctx)
 	go e.SSH.Run(ctx)
+	go e.runSharedFolders(ctx)
 	go scheduler.RunAsLeader(ctx, e.Core.Pool, "agent-teams:blobs", 30*time.Second, func(ctx context.Context) {
 		(&blobgc.Worker{DB: e.Core.Pool, Blobs: e.Core.Blobs, Log: e.log}).Run(ctx, time.Minute)
 	})

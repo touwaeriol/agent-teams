@@ -2428,20 +2428,6 @@
         ],
         "type": "object"
       },
-      "FsDeleteInputBody": {
-        "additionalProperties": false,
-        "properties": {
-          "confirm": {
-            "description": "The volume name, typed by the user: every file in it is deleted",
-            "maxLength": 64,
-            "type": "string"
-          }
-        },
-        "required": [
-          "confirm"
-        ],
-        "type": "object"
-      },
       "FsDockerVolume": {
         "additionalProperties": false,
         "properties": {
@@ -2469,7 +2455,7 @@
         "additionalProperties": false,
         "properties": {
           "configured": {
-            "description": "The console has AGENT_TEAMS_FS_* (otherwise the folder cannot be switched on)",
+            "description": "The console has AGENT_TEAMS_FS_* (then every user's folder is switched on by itself)",
             "type": "boolean"
           },
           "project_dir": {
@@ -2482,7 +2468,7 @@
           },
           "volume": {
             "$ref": "#/components/schemas/FsVolumeView",
-            "description": "Absent until switched on"
+            "description": "Absent until the console has started provisioning it"
           }
         },
         "required": [
@@ -16750,38 +16736,6 @@
       }
     },
     "/api/storage/fs": {
-      "delete": {
-        "operationId": "delete-shared-folder",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FsDeleteInputBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/APIError"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Delete the shared folder and every file in it",
-        "tags": [
-          "storage"
-        ]
-      },
       "get": {
         "operationId": "get-shared-folder",
         "responses": {
@@ -16835,7 +16789,7 @@
             "description": "Error"
           }
         },
-        "summary": "Switch the shared folder on (or retry a failed provisioning)",
+        "summary": "Provision the shared folder now (it is on by default; this retries a failed attempt at once)",
         "tags": [
           "storage"
         ]

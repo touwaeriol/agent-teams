@@ -27,6 +27,15 @@ func (s *Service) HandleChunk(ctx context.Context, m *protocol.FileChunk) error 
 	return err
 }
 
+// saveRefusal turns a shared folder that is not ready yet into a tool refusal (the model retries
+// later) instead of a platform failure.
+func saveRefusal(err error) error {
+	if errors.Is(err, artifacts.ErrFolderNotReady) {
+		return refuse("%s", err.Error())
+	}
+	return err
+}
+
 // publishFile stores the uploaded files as a new deliverable or as the next version of one.
 func (s *Service) publishFile(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
 	var in protocol.PublishFileInput
@@ -56,7 +65,7 @@ func (s *Service) publishFile(ctx context.Context, tx *core.Tx, c *call) (Result
 	}
 	// Saved only now: fileDeliverable settled the version under the deliverable's row lock.
 	if err := s.core.Artifacts().Save(ctx, tx, d.ID, version, artifacts.Publisher{Name: c.emp().Name, EmployeeID: c.emp().ID}, files); err != nil {
-		return Result{}, err
+		return Result{}, saveRefusal(err)
 	}
 	if err := artifacts.DeleteUpload(ctx, tx, string(c.upload.UploadID)); err != nil {
 		return Result{}, err

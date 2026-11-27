@@ -54,10 +54,10 @@ func useFolder(t *testing.T, w *world) *fsFakes {
 	return fakes
 }
 
-// TestSharedFolderReachesNodesAndSessions: switching the folder on sends the user's mounting node
-// fs.mount on the live link only (never the outbox), the node's fs.status shows on the node page,
-// sessions opened there carry the folders, and deleting the folder sends fs.unmount and destroys
-// the volume only once the node reports it unmounted.
+// TestSharedFolderReachesNodesAndSessions: the folder is on by default: the sweep provisions it
+// and sends the user's mounting node fs.mount on the live link only (never the outbox), the node's
+// fs.status shows on the node page, sessions opened there carry the folders, and deleting the
+// account sends fs.unmount and destroys the volume only once the node reports it unmounted.
 func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
 	w := newWorldWith(t, nil, nil)
 	fakes := useFolder(t, w)
@@ -73,7 +73,8 @@ func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
 		Configured bool
 		Volume     struct{ Volume, State string }
 	}
-	tm.b.must(200, "POST", "/api/storage/fs", nil, &view)
+	w.e.SweepSharedFolders(w.ctx)
+	tm.b.must(200, "GET", "/api/storage/fs", nil, &view)
 	if !view.Configured || view.Volume.State != userfs.StateReady || fakes.formatted != 1 {
 		t.Fatalf("enable: %+v formatted %d", view, fakes.formatted)
 	}
@@ -111,8 +112,8 @@ func TestSharedFolderReachesNodesAndSessions(t *testing.T) {
 		t.Fatalf("session.open fs %+v", open.Fs)
 	}
 
-	tm.b.must(422, "DELETE", "/api/storage/fs", map[string]string{"confirm": "nope"}, nil)
-	tm.b.must(204, "DELETE", "/api/storage/fs", map[string]string{"confirm": vol}, nil)
+	tm.projectID = project.ID
+	w.e.Hooks().UserDeleting(w.ctx, tm.ownerID(t))
 	if _, err := tm.n.Wait(ctx, protocol.TypeFsUnmount, nil); err != nil {
 		t.Fatal(err)
 	}

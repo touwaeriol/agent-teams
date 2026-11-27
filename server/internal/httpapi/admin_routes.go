@@ -251,6 +251,7 @@ func (s *Server) adminDeleteUser(ctx context.Context, in *userIDInput) (*struct{
 	if err := s.authz.forget(in.ID); err != nil {
 		return nil, err
 	}
+	s.hooks.UserDeleting(ctx, in.ID)
 	if err := s.store.DeleteUser(ctx, in.ID); err != nil {
 		return nil, storeErr(err, "没有这个用户")
 	}

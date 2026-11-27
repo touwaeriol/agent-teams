@@ -1988,10 +1988,9 @@ export interface paths {
         /** My shared folder (JuiceFS volume) */
         get: operations["get-shared-folder"];
         put?: never;
-        /** Switch the shared folder on (or retry a failed provisioning) */
+        /** Provision the shared folder now (it is on by default; this retries a failed attempt at once) */
         post: operations["enable-shared-folder"];
-        /** Delete the shared folder and every file in it */
-        delete: operations["delete-shared-folder"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3316,10 +3315,6 @@ export interface components {
             thread_no: number;
             title: string;
         };
-        FsDeleteInputBody: {
-            /** @description The volume name, typed by the user: every file in it is deleted */
-            confirm: string;
-        };
         FsDockerVolume: {
             /** @description Compose fragment: the juicedata/juicefs volume and how the node service mounts it */
             compose: string;
@@ -3329,13 +3324,13 @@ export interface components {
             plugin: string;
         };
         FsView: {
-            /** @description The console has AGENT_TEAMS_FS_* (otherwise the folder cannot be switched on) */
+            /** @description The console has AGENT_TEAMS_FS_* (then every user's folder is switched on by itself) */
             configured: boolean;
             /** @description A project's folder inside the volume, with {project_id} */
             project_dir: string;
             /** @description The folder every project of the user shares */
             shared_dir: string;
-            /** @description Absent until switched on */
+            /** @description Absent until the console has started provisioning it */
             volume?: components["schemas"]["FsVolumeView"];
         };
         FsVolumeView: {
@@ -10634,37 +10629,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["FsView"];
                 };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["APIError"];
-                };
-            };
-        };
-    };
-    "delete-shared-folder": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FsDeleteInputBody"];
-            };
-        };
-        responses: {
-            /** @description No Content */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Error */
             default: {

@@ -52,9 +52,13 @@ separate S3 user).
 - Only one call works on a volume at a time: `Enable` provisions only when its insert created the
   row or it claimed a failed provisioning (a conditional `UPDATE … RETURNING`), and `Disable` only
   when it moved a ready or failed volume to deleting; a provisioning or deletion left standing for
-  15 minutes (console stopped) can be taken over. Deleting while provisioning answers 409
-  `fs_busy`. Provisioning runs detached from the request, so a closed browser does not leave it
-  failed.
+  15 minutes (console stopped) can be taken over. Provisioning runs detached from the request.
+- **On by default.** Every user gets a folder without asking: one console replica (leader lock)
+  runs `engine.runSharedFolders` at start and every minute; it provisions users without a volume,
+  failed volumes 10 minutes after their last attempt and provisionings left standing
+  (`Service.ProvisionAll`), then moves deliverable versions still kept in the database into their
+  owners' folders (`artifacts.Store.MoveToVolumes`). `POST /api/storage/fs` retries a failed one at
+  once. Users cannot switch it off; it is destroyed only with the account.
 - Storage is always the platform's (no user-supplied S3 or JuiceFS).
 
 ## Quota
@@ -108,25 +112,26 @@ with an unsigned payload, since the gateway speaks plain http. Through it:
 
 - the project's 共享文件 page lists, uploads, downloads and deletes `projects/<pid>/`
   (`/api/projects/{pid}/files…`, api.md §3.5.1) and saves attachments there;
-- deliverable versions are written and read (`artifacts.Store`): with the owner's folder on,
-  `publish_file` writes `projects/<pid>/.deliverables/<id>/v<N>/` and `at_deliverable_files` keeps
-  only the metadata (`in_volume`); signed URLs and `read_deliverable` read the files back and refuse
-  one whose size changed. The page cannot write into `.deliverables/` (403 `managed_folder`), and
-  employees are told to leave it alone. Versions from before the folder was on stay in the database.
+- deliverable versions are written and read (`artifacts.Store`): `publish_file` writes
+  `projects/<pid>/.deliverables/<id>/v<N>/` and `at_deliverable_files` keeps only the metadata
+  (`in_volume`); they never go to the database again. Until the owner's folder is ready a publish is
+  refused (`ErrFolderNotReady`: a tool refusal, 409 `folder_not_ready` for a library upload). Only a
+  console without `AGENT_TEAMS_FS_*` (local development) keeps them in the database. Signed URLs
+  and `read_deliverable` read the files back and refuse one whose size or sha256 changed. The page
+  cannot write into `.deliverables/` (403 `managed_folder`), and employees are told to leave it
+  alone. Older versions still in the database are moved in by the sweep above.
 
 ## Deleting
 
-`DELETE /api/storage/fs` marks the volume deleting, sends `fs.unmount` and returns; the deletion
-runs in the background, detached from the request:
+Only deleting the account removes the folder (admin `DELETE /api/admin/users/{id}` → hook
+`UserDeleting` → `Service.Disable`). The volume is marked deleting, `fs.unmount` goes to the
+user's nodes, and the deletion runs in the background from the secrets read at that moment (the row
+goes with the user):
 
 1. wait (60 s at most) until no node whose daemon mounts the volume still reports it mounted. A
    Docker node (external mount) cannot unmount on request: the volume is destroyed under it, which
    is logged;
-2. move the deliverable versions kept in the volume back into the database
-   (`artifacts.Store.MoveFromVolumes`, `Service.BeforeTeardown`); meanwhile the volume opens
-   read-only for the console. A failure stops the deletion (state error with the reason; deleting
-   again retries);
-3. stop the console's gateway, `juicefs destroy` (skipped when the role or schema is not there:
+2. stop the console's gateway, `juicefs destroy` (skipped when the role or schema is not there:
    provisioning failed before creating them, or an earlier attempt dropped them), remove the S3
    user and policy, drop the schema and role, delete the row.
 

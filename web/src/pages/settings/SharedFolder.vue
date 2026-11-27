@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // 共享文件夹: the user's JuiceFS volume, mounted on every node of theirs. Each project gets
-// projects/<id>, and shared/ is open to all their projects. Switched on once here; nodes mount it
-// themselves (fs_mount) or through the Docker volume plugin (fs_external).
+// projects/<id>, and shared/ is open to all their projects. It is on by default: the console
+// provisions it by itself (a failed attempt can be retried here); nodes mount it themselves
+// (fs_mount) or through the Docker volume plugin (fs_external).
 import { computed, ref } from "vue";
 import { sharedFolder } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -25,15 +26,8 @@ const view = computed(() => fs.data.value);
 const vol = computed(() => view.value?.volume);
 const state = computed(() => STATE[vol.value?.state ?? ""] ?? null);
 const docker = ref<Docker | null>(null);
-const typed = ref("");
-const showSetup = computed(() => !vol.value || vol.value.state === "error");
 
-const enable = useAction(() => sharedFolder.enable(), { invalidate: [keys.sharedFolder], success: "共享文件夹已开通" });
-const remove = useAction(() => sharedFolder.remove(typed.value), {
-  invalidate: [keys.sharedFolder],
-  success: "共享文件夹已删除",
-  onSuccess: () => ((typed.value = ""), (docker.value = null)),
-});
+const retry = useAction(() => sharedFolder.enable(), { invalidate: [keys.sharedFolder] });
 const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker>, { onSuccess: (d) => (docker.value = d) });
 </script>
 
@@ -45,7 +39,7 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
         <div class="flex flex-col gap-1.5">
           <h1 class="text-2xl font-semibold">共享文件夹</h1>
           <p class="max-w-[680px] text-[13px] leading-[22px] text-muted-foreground">
-            一个属于你的网络文件夹，挂在你所有节点上，员工像本地目录一样读写，会话结束也不会丢。每个项目有自己的目录，另有一个所有项目都能用的公共目录。代码仍放在各节点的 Git 工作区。
+            一个属于你的网络文件夹，默认开通，挂在你所有节点上，员工像本地目录一样读写，会话结束也不会丢。每个项目有自己的目录，另有一个所有项目都能用的公共目录；交付物也存在这里。代码仍放在各节点的 Git 工作区。SQLite 这类数据库可以放进去，但同一个库同一时间只能由一个会话写入。
           </p>
         </div>
       </header>
@@ -54,17 +48,7 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
       <template v-else-if="view">
         <Callout v-if="!view.configured" tone="warn">控制面板还没有配置共享存储（AGENT_TEAMS_FS_*），请管理员先配置。</Callout>
 
-        <template v-else>
-          <Panel v-if="showSetup" title="开通共享文件夹">
-            <p class="text-[13px] leading-[22px] text-muted-foreground">
-              开通即用，节点连上后会自动挂载。SQLite 这类数据库可以放进去，但同一个库同一时间只能由一个会话写入。
-            </p>
-            <Callout v-if="vol?.state === 'error'" tone="bad">{{ vol.error || "开通失败" }}</Callout>
-            <div>
-              <el-button type="primary" :loading="enable.isPending.value" @click="enable.mutate()">{{ vol ? "重试" : "开通" }}</el-button>
-            </div>
-          </Panel>
-        </template>
+        <Callout v-else-if="!vol" tone="info">正在自动开通你的共享文件夹，通常一分钟内完成。</Callout>
 
         <template v-if="view.configured && vol">
           <Panel title="状态">
@@ -81,6 +65,10 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
               <dt class="text-muted-foreground">公共目录</dt>
               <dd class="font-mono">{{ view.shared_dir }}</dd>
             </dl>
+            <Callout v-if="vol.state === 'error'" tone="bad">
+              开通失败：{{ vol.error || "未知原因" }}。系统会每 10 分钟自动重试，也可以现在重试。
+              <el-button class="ml-2" size="small" :loading="retry.isPending.value" @click="retry.mutate()">重试</el-button>
+            </Callout>
             <p class="text-[13px] leading-[22px] text-muted-foreground">
               员工会话里用环境变量 <code>$AGENT_TEAMS_PROJECT_DIR</code> 和 <code>$AGENT_TEAMS_SHARED_DIR</code> 找到这两个目录。节点的挂载状态在“节点”页查看。
             </p>
@@ -101,16 +89,6 @@ const makeDocker = useAction(() => sharedFolder.dockerVolume() as Promise<Docker
             </template>
           </Panel>
 
-          <Panel v-if="vol.state !== 'deleting'" title="删除" tone="danger">
-            <p class="text-[13px] leading-[22px] text-muted-foreground">
-              开通期间发布的交付物会先移回平台存储，不会丢；卷里的其他文件（项目文件、公共目录等）会全部删除，无法恢复。确认请输入卷名
-              <span class="font-mono">{{ vol.volume }}</span>。
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <el-input v-model="typed" class="max-w-[280px]" :placeholder="vol.volume" aria-label="输入卷名确认删除" />
-              <el-button type="danger" :disabled="typed !== vol.volume" :loading="remove.isPending.value" @click="remove.mutate()">删除共享文件夹</el-button>
-            </div>
-          </Panel>
         </template>
       </template>
     </div>

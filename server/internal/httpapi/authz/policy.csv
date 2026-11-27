@@ -186,7 +186,6 @@ p, user, /api/projects/:pid/session-controls, PUT
 p, user, /api/session-options, GET
 p, user, /api/storage/fs, GET
 p, user, /api/storage/fs, POST
-p, user, /api/storage/fs, DELETE
 p, user, /api/storage/fs/docker-volume, POST
 p, user, /api/threads/:tid, DELETE
 p, user, /api/threads/:tid, GET
