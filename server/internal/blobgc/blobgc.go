@@ -204,23 +204,13 @@ func (w *Worker) RunOnce(ctx context.Context) (Stats, error) {
 	return st, first
 }
 
-// Run loops RunOnce every interval until ctx ends (call it under a leader lock).
-func (w *Worker) Run(ctx context.Context, interval time.Duration) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		if st, err := w.RunOnce(ctx); err != nil {
-			w.log().Warn("blob maintenance", "err", err)
-		} else if st != (Stats{}) {
-			w.log().Info("blob maintenance", "deleted", st.Deleted, "delete_failed", st.DeleteFailed, "hashed", st.Hashed,
-				"hash_failed", st.HashFailed, "aborted", st.Aborted, "expired", st.Expired)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
+// String says what a round did ("" when nothing).
+func (st Stats) String() string {
+	if st == (Stats{}) {
+		return ""
 	}
+	return fmt.Sprintf("删除 %d（失败 %d），补哈希 %d（失败 %d），中止上传 %d，过期 %d",
+		st.Deleted, st.DeleteFailed, st.Hashed, st.HashFailed, st.Aborted, st.Expired)
 }
 
 // expireUploads aborts multipart uploads open for longer than Stale: attachments still

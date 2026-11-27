@@ -21,7 +21,7 @@ func (e *Engine) SharedFolderFor(ctx context.Context, userID, nodeID, projectID 
 
 // SweepSharedFolders runs one pass of the automatic switch-on (provision, then move deliverables).
 func (e *Engine) SweepSharedFolders(ctx context.Context) {
-	e.sweepSharedFolders(ctx)
+	_, _ = e.sweepSharedFolders(ctx)
 	if e.memory != nil {
 		e.memory.Sweep(ctx, true)
 	}

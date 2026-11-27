@@ -20,7 +20,7 @@ async function visit(role: "admin" | "member", url: string) {
   return { router, route: router.currentRoute.value };
 }
 
-const ADMIN_PAGES = ["/admin/users", "/admin/platform", "/admin/library", "/admin/feedback", "/admin/github-app", "/admin/audit"];
+const ADMIN_PAGES = ["/admin/users", "/admin/platform", "/admin/library", "/admin/feedback", "/admin/jobs", "/admin/github-app", "/admin/audit"];
 
 // The first visits import the real (lazy) page modules, which takes a few seconds cold.
 describe("admin console routes", { timeout: 30_000 }, () => {

@@ -11,7 +11,6 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
-	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
 )
 
 // Runner runs scheduled tasks (on River, river.go) and, in a 20 s loop, resumes threads whose
@@ -36,25 +35,9 @@ func New(cs *core.Store, orch *orchestrator.Orchestrator, log *slog.Logger) (*Ru
 	return r, nil
 }
 
-// Run starts River (every replica works jobs; River elects its own leader for maintenance and
-// the periodic reconcile) and loops while this process holds the timers lock.
-func (r *Runner) Run(ctx context.Context) {
-	go r.startRiver(ctx)
-	scheduler.RunAsLeader(ctx, r.core.Pool, "agent-teams:timers", 5*time.Second, r.loop)
-}
-
-func (r *Runner) loop(ctx context.Context) {
-	t := time.NewTicker(r.Interval)
-	defer t.Stop()
-	for {
-		r.Tick(ctx)
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
-}
+// StartRiver runs River until ctx ends: every replica works jobs; River elects its own leader for
+// maintenance and the periodic reconcile. Tick is the timers background job.
+func (r *Runner) StartRiver(ctx context.Context) { r.startRiver(ctx) }
 
 // Tick does one round: usage-limit resumes first, then thread reminders, then stale session moves.
 func (r *Runner) Tick(ctx context.Context) {

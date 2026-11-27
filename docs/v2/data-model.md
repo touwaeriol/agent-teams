@@ -1045,6 +1045,7 @@ ALTER TABLE at_deliverable_comments ADD COLUMN attachments JSONB NOT NULL DEFAUL
 
 `00500_memory_in_folder.sql`：记忆进共享文件夹——`at_memory_files` 加 type / pending / file_mtime / file_size，存量行全标 pending（第一次同步写进文件夹）；新建 `at_user_memory_files`（用户记忆，随用户删除）和 `at_memory_touches`。Down 删掉它们。
 `00510_fs_removals.sql`：新建 `at_fs_removals`（user_id, path 主键，attempts / error）——删项目时没删掉的卷内目录记在这里，共享文件夹巡检每分钟重试，删掉就去掉这行；随用户删除。Down 删表。
+`00520_jobs.sql`：后台任务——新建 `at_jobs`（每个登记的任务一行：paused、every_seconds 覆盖间隔、run_requested_at、上次运行的时间/结果/错误/副本、累计次数）和 `at_job_runs`（做了事、失败或手动的运行，每日维护清理 30 天前的）。Down 删两张表。
 
 `00460_blob_storage.sql`、`00470_attachments_unowned.sql`（#58）：附件和共享文件改存对象存储、附件保留期、进行中的共享文件上传、删除队列、任务 / 会话首条消息 / 批注带附件（§2.15）。两个一起上线，上线前 pg_dump（存量附件 24 小时未用即删除，见 `attachments-rollout.md`）。
 

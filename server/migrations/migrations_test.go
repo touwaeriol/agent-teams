@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 510 {
+	if migrations.Latest() != 520 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -2166,5 +2166,32 @@ INSERT INTO at_fs_removals (user_id, path) VALUES ('u1', 'projects/p1')`); err !
 	}
 	if _, err := db.Exec(`SELECT 1 FROM at_fs_removals`); err == nil {
 		t.Fatal("at_fs_removals survived down")
+	}
+}
+
+// TestJobsMigration: 00520 adds at_jobs (an interval override must be positive) and at_job_runs;
+// Down drops them.
+func TestJobsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 520); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_jobs (name, every_seconds) VALUES ('a', 60);
+INSERT INTO at_job_runs (job, started_at, finished_at, ok) VALUES ('a', now(), now(), true)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_jobs (name, every_seconds) VALUES ('b', 0)`); err == nil {
+		t.Fatal("zero interval accepted")
+	}
+	if _, err := p.DownTo(ctx, 510); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT 1 FROM at_jobs`); err == nil {
+		t.Fatal("at_jobs survived down")
 	}
 }

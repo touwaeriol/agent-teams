@@ -78,3 +78,35 @@ export function shortDate(iso: string): string {
 export function auditTime(iso: string): string {
   return new Date(iso).toLocaleString("zh-CN");
 }
+
+/** 每 15 秒 / 每 5 分钟 / 每 2 小时 / 每天. */
+export function intervalText(seconds: number): string {
+  if (seconds > 0 && seconds % 86400 === 0) return seconds === 86400 ? "每天" : `每 ${seconds / 86400} 天`;
+  if (seconds >= 3600 && seconds % 3600 === 0) return `每 ${seconds / 3600} 小时`;
+  if (seconds >= 60 && seconds % 60 === 0) return `每 ${seconds / 60} 分钟`;
+  return `每 ${seconds} 秒`;
+}
+
+/** 0.4 秒 / 12 秒 / 3 分 5 秒. */
+export function durationText(fromIso: string, toIso: string): string {
+  const ms = Math.max(0, new Date(toIso).getTime() - new Date(fromIso).getTime());
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)} 秒`;
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`;
+}
+
+export interface JobState {
+  label: string;
+  type: "success" | "warning" | "danger" | "info" | "primary";
+}
+
+/** What the 状态 column shows for a job. */
+export function jobState(j: { running: boolean; paused: boolean; run_requested: boolean; last_ok?: boolean | null; last_started_at?: string | null }): JobState {
+  if (j.running) return { label: "运行中", type: "primary" };
+  if (j.run_requested) return { label: "即将运行", type: "primary" };
+  if (j.paused) return { label: "已暂停", type: "info" };
+  if (!j.last_started_at) return { label: "还没运行", type: "info" };
+  return j.last_ok === false ? { label: "上次失败", type: "danger" } : { label: "正常", type: "success" };
+}
+
+export const TRIGGER_LABEL: Record<string, string> = { scheduled: "按间隔", woken: "有新工作", manual: "手动" };

@@ -7,6 +7,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -82,57 +83,58 @@ func (s *Scheduler) take() []string {
 	return out
 }
 
-// Run is the scheduling loop; only the advisory-lock holder schedules.
-func (s *Scheduler) Run(ctx context.Context) {
+// ListenHints marks the projects other replicas hint at (every replica listens; the replica running
+// the scheduling job schedules them when Signal fires).
+func (s *Scheduler) ListenHints(ctx context.Context) {
 	hints, cancel := s.hub.SubscribePrefix(kickPrefix)
 	defer cancel()
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case id := <-hints:
-				s.mark(id)
-			}
-		}
-	}()
-	RunAsLeader(ctx, s.core.Pool, "agent-teams:scheduler", 5*time.Second, s.loop)
-}
-
-func (s *Scheduler) loop(ctx context.Context) {
-	t := time.NewTicker(s.Interval)
-	defer t.Stop()
-	s.sweep(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.signal:
-			for _, id := range s.take() {
-				s.Schedule(ctx, id)
-			}
-		case <-t.C:
-			s.sweep(ctx)
+		case id := <-hints:
+			s.mark(id)
 		}
 	}
+}
+
+// Signal fires when projects were marked for scheduling.
+func (s *Scheduler) Signal() <-chan struct{} { return s.signal }
+
+// Round is one scheduling round (the background job, on the scheduler lock's holder): the marked
+// projects when woken, else the sweep. It says how many projects it went through.
+func (s *Scheduler) Round(ctx context.Context, woken bool) string {
+	n := 0
+	for _, id := range s.take() {
+		s.Schedule(ctx, id)
+		n++
+	}
+	if !woken {
+		n += s.sweep(ctx)
+	}
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("调度了 %d 个项目", n)
 }
 
 // sweep schedules every project with claimable work (the 10 s safety net) and moves on the tasks
 // whose pre-task compaction or sync timed out. A project that has work but no members yet (created before
 // members were project staff) is staffed first.
-func (s *Scheduler) sweep(ctx context.Context) {
+func (s *Scheduler) sweep(ctx context.Context) int {
 	s.releaseStaleCompactions(ctx)
 	s.releaseStaleSyncs(ctx)
 	s.repairReady(ctx)
 	ids, err := core.ProjectsWithWork(ctx, s.core.Pool)
 	if err != nil {
 		s.log.Warn("scheduler sweep", "err", err)
-		return
+		return 0
 	}
 	for _, id := range ids {
 		s.staff(ctx, id)
 		s.Schedule(ctx, id)
 	}
+	return len(ids)
 }
 
 // ReadyRepairAfter is how long a pending task whose dependencies are all done may stay without

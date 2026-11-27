@@ -49,6 +49,7 @@ func wire(d httpapi.Deps) (httpapi.Deps, func(context.Context), error) {
 	}
 	d.Nodes, d.Events, d.Hooks, d.SSH, d.Memory = e.Gateway, e.Events, e.Hooks(), e.SSHHooks(), e.Core.Memory
 	d.Extensions = append(d.Extensions, orchapi.New(e, d.Office).WithOrigins(d.Config.ArtifactOrigin, d.Config.PublicURL).Register)
+	e.Jobs.Add(maintenanceJob(d.Store, e.Jobs))
 	start := func(ctx context.Context) {
 		e.Start(ctx)
 		go func() { <-ctx.Done(); fs.Close() }() // stop the juicefs gateways on shutdown

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/jobs"
 	"github.com/touwaeriol/agent-teams/server/internal/memfiles"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
@@ -36,20 +37,21 @@ func (e *Engine) useMemoryFiles(s *userfs.Service) {
 // memorySweepEvery is how often the scopes with pending rows or fresh touches are synced.
 const memorySweepEvery = time.Minute
 
-// runMemorySweep syncs the scopes with something to do every memorySweepEvery, and every ready
-// folder once every memoryFullEvery (the leader's loop).
-func (e *Engine) runMemorySweep(ctx context.Context) {
-	if e.memory == nil {
-		return
-	}
+// memorySweep is the memory-files job: the scopes with something to do, and every ready folder
+// once every memoryFullEvery.
+func (e *Engine) memorySweep() func(ctx context.Context, t jobs.Trigger) (string, error) {
 	var fullAt time.Time
-	every(ctx, memorySweepEvery, func() {
-		full := time.Since(fullAt) >= memoryFullEvery
+	return func(ctx context.Context, t jobs.Trigger) (string, error) {
+		full := t == jobs.Manual || time.Since(fullAt) >= memoryFullEvery
 		if full {
 			fullAt = time.Now()
 		}
 		e.memory.Sweep(ctx, full)
-	})
+		if full {
+			return "全量同步", nil
+		}
+		return "", nil
+	}
 }
 
 // memoryChanged refreshes the pages showing a memory file changed in the folder.
