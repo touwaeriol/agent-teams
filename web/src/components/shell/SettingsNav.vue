@@ -13,6 +13,7 @@ const props = defineProps<{ me: UserView }>();
 const emit = defineEmits<{ navigate: [] }>();
 const ITEMS = [
   { to: "/settings/team", label: "团队岗位", hint: "统筹、组长和成员模板" },
+  { to: "/settings/workflows", label: "工作流程", hint: "流程图：哪一步交给哪个岗位" },
   { to: "/settings/nodes", label: "节点", hint: "运行成员的机器" },
   { to: "/settings/git", label: "Git 仓库", hint: "GitHub 连接和其他 Git 仓库" },
   { to: "/settings/servers", label: "服务器", hint: "员工能访问的远程机器" },

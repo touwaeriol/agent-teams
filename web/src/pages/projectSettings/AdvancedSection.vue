@@ -3,7 +3,8 @@
 // workflow edits, merge method,
 // and how thread branches are named and cleaned up (fixed by the platform, shown for reference).
 import { computed } from "vue";
-import { useRoles } from "@/api/queries";
+import { RouterLink } from "vue-router";
+import { useRoles, useWorkflows } from "@/api/queries";
 import type { ProjectView } from "@/api/views";
 import { usesAsk } from "@/lib/roles";
 import ApprovalRows from "./ApprovalRows.vue";
@@ -16,6 +17,16 @@ const props = defineProps<{ project: ProjectView }>();
 const update = useUpdate(() => props.project.id);
 const roles = useRoles();
 const ask = computed(() => usesAsk(roles.data.value?.roles ?? []));
+const flows = useWorkflows();
+const flowOptions = computed(() => {
+  const list = flows.data.value?.workflows ?? [];
+  const def = list.find((f) => f.is_default);
+  return [
+    { value: "", label: def ? `默认流程（${def.name}）` : "默认流程（还没有）" },
+    { value: "none", label: "不用流程" },
+    ...list.map((f) => ({ value: f.id, label: f.name })),
+  ];
+});
 const POLICY: { value: ProjectView["merge_policy"]; label: string }[] = [
   { value: "pr", label: "提交 PR 即完成" },
   { value: "auto", label: "检查通过后自动合并" },
@@ -31,6 +42,17 @@ const MERGE = [
 <template>
   <div class="flex flex-col">
     <Heading>高级</Heading>
+    <Row title="工作流程" desc="讨论串的组长拆任务、指派岗位时参考的流程图；改了以后，新开的组长会话按新流程。">
+      <el-select
+        :model-value="project.workflow"
+        aria-label="工作流程"
+        class="at-select-36 at-raised !w-52"
+        @update:model-value="(v: string) => update.mutate({ workflow: v })"
+      >
+        <el-option v-for="f in flowOptions" :key="f.value" :value="f.value" :label="f.label" />
+      </el-select>
+      <RouterLink to="/settings/workflows" class="text-[13px] text-brand hover:underline">编辑流程</RouterLink>
+    </Row>
     <span class="pb-1 text-[13px] text-muted-foreground">审批与交付</span>
     <span v-if="!ask" class="pb-2 text-xs leading-[18px] text-muted-foreground">成员都是“直接执行”，不会弹权限确认。有岗位改成“逐条问”时，这里才有审批方式可设。</span>
     <ApprovalRows v-else :project="project" />

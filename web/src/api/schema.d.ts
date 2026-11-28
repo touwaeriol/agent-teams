@@ -2576,6 +2576,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** My workflows (流程图), the default first */
+        get: operations["list-workflows"];
+        put?: never;
+        /** Add a workflow (the first one becomes the default) */
+        post: operations["create-workflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace a workflow's name, steps and edges */
+        put: operations["update-workflow"];
+        post?: never;
+        /** Delete a workflow; projects that picked it fall back to the default */
+        delete: operations["delete-workflow"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/login": {
         parameters: {
             query?: never;
@@ -3371,6 +3407,57 @@ export interface components {
         };
         FilesUploaded: {
             files: components["schemas"]["FileEntry"][] | null;
+        };
+        Flow: {
+            /** Format: date-time */
+            created_at: string;
+            description: string;
+            edges: components["schemas"]["FlowEdge"][] | null;
+            id: string;
+            is_default: boolean;
+            name: string;
+            steps: components["schemas"]["FlowStep"][] | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        FlowDraft: {
+            description?: string;
+            edges?: components["schemas"]["FlowEdge"][] | null;
+            /** @description The flow of the projects that pick none */
+            is_default?: boolean;
+            name: string;
+            steps: components["schemas"]["FlowStep"][] | null;
+        };
+        FlowEdge: {
+            from: string;
+            /**
+             * @description next = then; reject = back to this step when the step rejects
+             * @enum {string}
+             */
+            kind?: "next" | "reject";
+            label?: string;
+            to: string;
+        };
+        FlowStep: {
+            /** @description Unique in the flow: letters, digits, _ and - */
+            id: string;
+            /** @description What the step does and how it is accepted */
+            instructions?: string;
+            /**
+             * @description work = does the step; review / decision = checks the previous step's result; approval = waits for the user's confirmation
+             * @enum {string}
+             */
+            kind?: "work" | "review" | "decision" | "approval";
+            name: string;
+            /** @description A member role (its role key, e.g. dev) or lead; '' only for an approval step (the user confirms) */
+            role: string;
+            /**
+             * Format: double
+             * @description Position on the canvas
+             */
+            x?: number;
+            /** Format: double */
+            y?: number;
         };
         FolderCreate: {
             path: string;
@@ -4297,6 +4384,8 @@ export interface components {
             thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
+            /** @description '' = my default workflow, none = no workflow, else a workflow id */
+            workflow?: string;
         };
         ProjectUsage: {
             by_day: components["schemas"]["DayUsage"][] | null;
@@ -4357,6 +4446,8 @@ export interface components {
             waiting: number;
             /** @enum {string} */
             work_mode: "worktree" | "clone";
+            /** @description The workflow (流程图) its thread leads follow: '' = my default workflow, none = no workflow, else a workflow id */
+            workflow: string;
         };
         PutLayoutInputBody: {
             /** @description Layout document (office-layout.schema.json) */
@@ -5610,6 +5701,9 @@ export interface components {
             path: string;
             push_branches: string[] | null;
             triggers: string[] | null;
+        };
+        WorkflowsBody: {
+            workflows: components["schemas"]["Flow"][] | null;
         };
         YamlInputBody: {
             yaml: string;
@@ -12119,6 +12213,132 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["VoiceSession"];
                 };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "list-workflows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowsBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "create-workflow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlowDraft"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Flow"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "update-workflow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlowDraft"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Flow"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "delete-workflow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Error */
             default: {

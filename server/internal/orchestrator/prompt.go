@@ -11,6 +11,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
+	"github.com/touwaeriol/agent-teams/server/internal/workflows"
 )
 
 const coordinatorGuide = `你是这个项目的项目统筹（coordinator）。你不能执行命令，除了记忆文件（见“## 记忆”）也不能读写文件，只能使用平台工具：
@@ -223,6 +224,15 @@ func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Emplo
 			return "", err
 		}
 		parts = append(parts, "## 团队（成员是项目共用的，谁正在哪个讨论串忙用 list_team 查看）\n"+roster)
+	}
+	if e.Tier == "lead" {
+		flow, err := workflows.LeadSection(ctx, q, p.UserID, p.Workflow)
+		if err != nil {
+			return "", err
+		}
+		if flow != "" {
+			parts = append(parts, flow)
+		}
 	}
 	return strings.Join(parts, "\n\n"), nil
 }

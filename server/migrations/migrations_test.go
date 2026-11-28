@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 530 {
+	if migrations.Latest() != 540 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -2248,5 +2248,50 @@ INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capa
 	}
 	if _, err := db.Exec(`INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capacity_gb) VALUES ('u1', 'at-u1', 'jfs_u1', 'jfs-u1', '{}', 20)`); err != nil {
 		t.Fatalf("old shape after down: %v", err)
+	}
+}
+
+// TestWorkflowsMigration: 00540 adds at_workflows (names unique per user, at most one default
+// per user) and at_projects.workflow (” for existing projects); Down drops both.
+func TestWorkflowsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 530); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x'), ('u2', 'b@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'P');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 540); err != nil {
+		t.Fatal(err)
+	}
+	var pick string
+	if err := db.QueryRow(`SELECT workflow FROM at_projects WHERE id = 'p1'`).Scan(&pick); err != nil || pick != "" {
+		t.Fatalf("existing project pick %q %v", pick, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_workflows (id, user_id, name, is_default) VALUES
+		('wf1', 'u1', 'a', TRUE), ('wf2', 'u1', 'b', FALSE), ('wf3', 'u2', 'a', TRUE)`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_workflows (id, user_id, name) VALUES ('wf4', 'u1', 'a')`); err == nil {
+		t.Fatal("duplicate name for one user")
+	}
+	if _, err := db.Exec(`UPDATE at_workflows SET is_default = TRUE WHERE id = 'wf2'`); err == nil {
+		t.Fatal("two defaults for one user")
+	}
+	if _, err := p.DownTo(ctx, 530); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT 1 FROM at_workflows`); err == nil {
+		t.Fatal("at_workflows survived down")
+	}
+	if _, err := db.Exec(`SELECT workflow FROM at_projects`); err == nil {
+		t.Fatal("at_projects.workflow survived down")
 	}
 }

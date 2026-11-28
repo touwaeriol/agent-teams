@@ -2335,6 +2335,181 @@
         ],
         "type": "object"
       },
+      "Flow": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/FlowEdge"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/FlowStep"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "steps",
+          "edges",
+          "is_default",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "FlowDraft": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/FlowEdge"
+            },
+            "maxItems": 60,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "is_default": {
+            "description": "The flow of the projects that pick none",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 40,
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/FlowStep"
+            },
+            "maxItems": 30,
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "steps"
+        ],
+        "type": "object"
+      },
+      "FlowEdge": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "maxLength": 32,
+            "type": "string"
+          },
+          "kind": {
+            "description": "next = then; reject = back to this step when the step rejects",
+            "enum": [
+              "next",
+              "reject"
+            ],
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 20,
+            "type": "string"
+          },
+          "to": {
+            "maxLength": 32,
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "FlowStep": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "Unique in the flow: letters, digits, _ and -",
+            "maxLength": 32,
+            "type": "string"
+          },
+          "instructions": {
+            "description": "What the step does and how it is accepted",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "kind": {
+            "description": "work = does the step; review / decision = checks the previous step's result; approval = waits for the user's confirmation",
+            "enum": [
+              "work",
+              "review",
+              "decision",
+              "approval"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 40,
+            "type": "string"
+          },
+          "role": {
+            "description": "A member role (its role key, e.g. dev) or lead; '' only for an approval step (the user confirms)",
+            "maxLength": 24,
+            "type": "string"
+          },
+          "x": {
+            "description": "Position on the canvas",
+            "format": "double",
+            "type": "number"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role"
+        ],
+        "type": "object"
+      },
       "FolderCreate": {
         "additionalProperties": false,
         "properties": {
@@ -5366,6 +5541,11 @@
               "clone"
             ],
             "type": "string"
+          },
+          "workflow": {
+            "description": "'' = my default workflow, none = no workflow, else a workflow id",
+            "maxLength": 64,
+            "type": "string"
           }
         },
         "type": "object"
@@ -5535,6 +5715,10 @@
               "clone"
             ],
             "type": "string"
+          },
+          "workflow": {
+            "description": "The workflow (流程图) its thread leads follow: '' = my default workflow, none = no workflow, else a workflow id",
+            "type": "string"
           }
         },
         "required": [
@@ -5556,6 +5740,7 @@
           "thread_codex_model",
           "thread_effort",
           "auto_resume",
+          "workflow",
           "kind",
           "waiting",
           "threads_active",
@@ -9611,6 +9796,24 @@
           "path",
           "triggers",
           "push_branches"
+        ],
+        "type": "object"
+      },
+      "WorkflowsBody": {
+        "additionalProperties": false,
+        "properties": {
+          "workflows": {
+            "items": {
+              "$ref": "#/components/schemas/Flow"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "workflows"
         ],
         "type": "object"
       },
@@ -18924,6 +19127,161 @@
         },
         "tags": [
           "voice"
+        ]
+      }
+    },
+    "/api/workflows": {
+      "get": {
+        "operationId": "list-workflows",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowsBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "My workflows (流程图), the default first",
+        "tags": [
+          "team"
+        ]
+      },
+      "post": {
+        "operationId": "create-workflow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlowDraft"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Flow"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Add a workflow (the first one becomes the default)",
+        "tags": [
+          "team"
+        ]
+      }
+    },
+    "/api/workflows/{id}": {
+      "delete": {
+        "operationId": "delete-workflow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Delete a workflow; projects that picked it fall back to the default",
+        "tags": [
+          "team"
+        ]
+      },
+      "put": {
+        "operationId": "update-workflow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlowDraft"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Flow"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Replace a workflow's name, steps and edges",
+        "tags": [
+          "team"
         ]
       }
     },

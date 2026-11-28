@@ -167,6 +167,10 @@ p, user, /api/roles/look/random, POST
 p, user, /api/roles/presets, GET
 p, user, /api/roles/yaml, GET
 p, user, /api/roles/yaml, PUT
+p, user, /api/workflows, GET
+p, user, /api/workflows, POST
+p, user, /api/workflows/:id, PUT
+p, user, /api/workflows/:id, DELETE
 p, user, /api/schedules/:id, DELETE
 p, user, /api/schedules/:id, PATCH
 p, user, /api/schedules/:id/run, POST
