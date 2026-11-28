@@ -27,10 +27,13 @@ var (
 	writeTools        = []string{"Edit", "Write", "NotebookEdit", "MultiEdit"}
 	coordinatorDeny   = []string{"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit", "Read", "Glob", "Grep", "WebFetch", "WebSearch", "Task"}
 	readOnlyBashAllow = []string{"git log", "git diff", "git show", "git status", "git rev-parse", "git ls-files", "git blame",
-		"git merge-base", "git branch:list", "gh pr view", "gh pr diff", "gh pr checks", "gh pr list", "gh pr status",
+		"git merge-base", "git branch:list", "git tag:list", "git remote:list", "git remote get-url", "git remote show",
+		"git fetch:fetch", "git ls-remote:fetch", "git reflog:reflog", "git describe", "git shortlog", "git show-ref",
+		"git for-each-ref", "git name-rev", "git rev-list", "git cat-file", "git count-objects", "git stash list", "git worktree list",
+		"gh pr view", "gh pr diff", "gh pr checks", "gh pr list", "gh pr status",
 		"gh pr create", "gh pr comment", "gh pr review", "gh pr edit", "gh issue", "gh run list", "gh run view",
 		"gh workflow list", "gh workflow view", "gh repo view", "gh search", "gh release list", "gh release view", "gh auth status"}
-	readOnlyDenyFlags = []string{"--output", "-o", "--ext-diff", "--textconv", "-c", "--exec-path", "--git-dir", "--work-tree"}
+	readOnlyDenyFlags = []string{"--output", "-o", "--ext-diff", "--textconv", "--filters", "-c", "--exec-path", "--git-dir", "--work-tree", "--upload-pack"}
 )
 
 // ProtectedRefsEnv names the branches an employee may not push, space separated (read by the pre-push hook).

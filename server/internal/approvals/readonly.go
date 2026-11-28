@@ -23,9 +23,15 @@ var (
 	}
 	findDeny = []string{"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"}
 	rgDeny   = []string{"--pre", "--pre-glob", "-z", "--search-zip", "--hostname-bin"}
-	gitRead  = []string{"log", "status", "diff", "show", "rev-parse", "ls-files", "blame", "merge-base"}
-	gitDeny  = []string{"--output", "-o", "--ext-diff", "--textconv", "--exec-path", "--git-dir", "--work-tree"}
-	listFlag = []string{"--list", "-l", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--no-color", "--color",
+	gitRead  = []string{"log", "status", "diff", "show", "rev-parse", "ls-files", "blame", "merge-base", "describe", "shortlog",
+		"show-ref", "for-each-ref", "name-rev", "rev-list", "cat-file", "count-objects"}
+	gitDeny = []string{"--output", "-o", "--ext-diff", "--textconv", "--filters", "--exec-path", "--git-dir", "--work-tree",
+		"--upload-pack"}
+	// git fetch / ls-remote options that only read the remote or update remote-tracking refs.
+	fetchFlag = []string{"--prune", "-p", "--prune-tags", "-P", "--all", "--tags", "-t", "--no-tags", "-n", "--quiet", "-q",
+		"--verbose", "-v", "--dry-run", "--unshallow", "--heads", "-h", "--refs", "--symref", "--get-url", "--branches", "-b"}
+	fetchFlagValue = regexp.MustCompile(`^--(depth|deepen|shallow-since|sort)=[^=]+$`)
+	listFlag       = []string{"--list", "-l", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--no-color", "--color",
 		"--show-current"}
 	// Commands whose options cannot write or run programs, so a glob expanding to a file
 	// named like a flag (say "-delete" or "--pre=x") stays harmless.
@@ -186,15 +192,60 @@ func sedArgs(args []string) bool {
 	return sedPrint.MatchString(args[1]) && !slices.ContainsFunc(args[2:], func(a string) bool { return strings.HasPrefix(a, "-") })
 }
 
-// gitArgs allows the read subcommands, and `git branch` in its list form.
+// gitArgs allows the read subcommands, and `git branch` in its list form. Leading
+// `-C <dir>` options are allowed (insideWorktree has already refused absolute and parent
+// paths): sessions work one directory above their repositories and cannot cd.
 func gitArgs(args []string) bool {
-	if len(args) == 0 || hasFlag(args, gitDeny) {
+	args, ok := stripGitDirs(args)
+	if !ok || len(args) == 0 || hasFlag(args, gitDeny) {
 		return false
 	}
-	if args[0] == "branch" {
-		return listOnly(args[1:])
+	rest := args[1:]
+	switch args[0] {
+	case "branch", "tag":
+		return listOnly(rest)
+	case "remote":
+		return listOnly(rest) || (len(rest) > 0 && (rest[0] == "get-url" || rest[0] == "show"))
+	case "fetch", "ls-remote":
+		return fetchOnly(rest)
+	case "reflog":
+		return len(rest) == 0 || (rest[0] != "expire" && rest[0] != "delete")
+	case "stash", "worktree":
+		return len(rest) > 0 && rest[0] == "list"
 	}
 	return slices.Contains(gitRead, args[0])
+}
+
+// stripGitDirs drops leading `-C <dir>` / `-C<dir>` options; ok is false for a -C without a directory.
+func stripGitDirs(args []string) ([]string, bool) {
+	for len(args) > 0 && strings.HasPrefix(args[0], "-C") {
+		if args[0] != "-C" {
+			args = args[1:]
+			continue
+		}
+		if len(args) < 2 || args[1] == "" {
+			return nil, false
+		}
+		args = args[2:]
+	}
+	return args, true
+}
+
+// fetchOnly allows a configured remote name and plain refs: no URLs, paths or refspecs with a
+// destination (a:b, +a), so only FETCH_HEAD and remote-tracking refs change.
+func fetchOnly(args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			if !slices.Contains(fetchFlag, a) && !fetchFlagValue.MatchString(a) {
+				return false
+			}
+			continue
+		}
+		if a == "" || strings.Contains(a, ":") || strings.ContainsAny(a[:1], "/.~+") {
+			return false
+		}
+	}
+	return true
 }
 
 func listOnly(args []string) bool {

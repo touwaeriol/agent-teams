@@ -196,6 +196,104 @@ describe("read-only bash argv policy", () => {
     expect(splitArgv(`git log ""`)).toEqual(["git", "log", ""]);
   });
 
+  describe("git -C into a repository subdirectory", () => {
+    const lead = mkdtempSync(join(tmpdir(), "lead-"));
+    const outside = mkdtempSync(join(tmpdir(), "outside-"));
+    mkdirSync(join(lead, "owner__repo", "sub"), { recursive: true });
+    symlinkSync(outside, join(lead, "escape"));
+    const ctx = { cwd: lead, readRoots: [lead] };
+
+    it.each([
+      ["git -C owner__repo log --oneline -5", true],
+      ["git -C owner__repo status", true],
+      ["git -C ./owner__repo diff HEAD~1", true],
+      ["git -Cowner__repo log", true],
+      ["git -C owner__repo -C sub log", true],
+      ["git -C 'owner__repo' branch -a", true],
+      [`git -C ${join(lead, "owner__repo")} log`, true],
+      ["git -C owner__repo push origin HEAD", false],
+      ["git -C owner__repo branch new", false],
+      ["git -C owner__repo -c core.pager=sh log", false],
+      ["git -C owner__repo log --output=/tmp/x", false],
+      ["git -C .. log", false],
+      ["git -C owner__repo/../.. log", false],
+      ["git -C owner__repo -C ../.. log", false],
+      [`git -C ${outside} log`, false],
+      ["git -C escape log", false],
+      ["git -C /etc log", false],
+      ["git -C", false],
+      ["git -C owner__repo", false],
+    ])("%s → %s", (cmd, ok) => {
+      expect(bashDecision(BASH, cmd, ctx) === null).toBe(ok);
+    });
+
+    it("refuses -C without a working directory context", () => {
+      expect(bashDecision(BASH, "git -C owner__repo log")).not.toBeNull();
+    });
+
+    it("goes through decideTool with the session's read roots", () => {
+      const policy: ToolPolicy = { denyNonPlatform: false, readOnly: true, bash: BASH, readRoots: [lead], secretPaths: [] };
+      expect(decideTool(policy, "Bash", { command: "git -C owner__repo log" }, lead)).toBeNull();
+      expect(decideTool(policy, "Bash", { command: `git -C ${outside} log` }, lead)).not.toBeNull();
+    });
+  });
+
+  describe("git view commands (the platform's read-only allow list)", () => {
+    // Mirrors readOnlyBashAllow / readOnlyDenyFlags in server/internal/orchestrator/spec.go.
+    const FULL = {
+      mode: "argv" as const,
+      allow: ["git log", "git diff", "git show", "git status", "git rev-parse", "git ls-files", "git blame",
+        "git merge-base", "git branch:list", "git tag:list", "git remote:list", "git remote get-url", "git remote show",
+        "git fetch:fetch", "git ls-remote:fetch", "git reflog:reflog", "git describe", "git shortlog", "git show-ref",
+        "git for-each-ref", "git name-rev", "git rev-list", "git cat-file", "git count-objects", "git stash list", "git worktree list"],
+      deny_flags: ["--output", "-o", "--ext-diff", "--textconv", "--filters", "-c", "--exec-path", "--git-dir", "--work-tree", "--upload-pack"],
+      deny_metachar: true,
+    };
+    it.each([
+      ["git fetch", true],
+      ["git fetch origin", true],
+      ["git fetch --prune origin", true],
+      ["git fetch origin main", true],
+      ["git fetch --all --tags -q", true],
+      ["git fetch --depth=50 origin", true],
+      ["git ls-remote --heads origin", true],
+      ["git remote", true],
+      ["git remote -v", true],
+      ["git remote get-url origin", true],
+      ["git tag", true],
+      ["git tag --list", true],
+      ["git reflog", true],
+      ["git reflog show HEAD", true],
+      ["git describe --tags", true],
+      ["git stash list", true],
+      ["git worktree list", true],
+      ["git rev-list --count HEAD", true],
+      ["git cat-file -p HEAD", true],
+      ["git fetch origin main:main", false],
+      ["git fetch origin +refs/heads/x", false],
+      ["git fetch https://evil.example/x", false],
+      ["git fetch ext::sh", false],
+      ["git fetch /tmp/repo", false],
+      ["git fetch ../other", false],
+      ["git fetch --upload-pack=touch origin", false],
+      ["git fetch --upload-pa=touch origin", false],
+      ["git fetch --force origin", false],
+      ["git fetch --recurse-submodules origin", false],
+      ["git ls-remote --upload-pack=x origin", false],
+      ["git tag v1.0", false],
+      ["git tag -d v1.0", false],
+      ["git remote add x https://e", false],
+      ["git remote remove origin", false],
+      ["git reflog expire --all", false],
+      ["git reflog delete HEAD@{1}", false],
+      ["git cat-file --filters HEAD:a", false],
+      ["git stash pop", false],
+      ["git worktree add x", false],
+    ])("%s → %s", (cmd, ok) => {
+      expect(bashDecision(FULL, cmd) === null).toBe(ok);
+    });
+  });
+
   it("denies bash entirely without a policy", () => {
     expect(bashDecision(null, "git log")).not.toBeNull();
   });
