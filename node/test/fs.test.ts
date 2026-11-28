@@ -375,6 +375,12 @@ describe("sharedFolderPrompt", () => {
     const p = sharedFolderPrompt({ project: "/mnt/fs/projects/p1", shared: "/mnt/fs/shared" });
     for (const s of [".project-files/ → /mnt/fs/projects/p1", ".user-files/ → /mnt/fs/shared", ".attachments/ → /mnt/fs/projects/p1/attachments", ".deliverables", "do not write"]) expect(p).toContain(s);
   });
+
+  it("explains how the folder works so the employee can decide what to keep there", () => {
+    const p = sharedFolderPrompt({ project: "/mnt/fs/projects/p1", shared: "/mnt/fs/shared" });
+    for (const s of ["geesefs over S3 object storage", "no file locks", "no hard links", "no file locks", "PostgreSQL", "SQLite", "local disk", "snapshot", "decide"]) expect(p).toContain(s);
+    expect(p).not.toContain("one session at a time");
+  });
 });
 
 describe("memory directories", () => {
