@@ -212,6 +212,8 @@ type nodeLogsOutput struct {
 func (s *Server) registerNodes(api huma.API) {
 	tags := []string{"nodes"}
 	huma.Register(api, huma.Operation{OperationID: "list-nodes", Method: "GET", Path: "/api/nodes", Tags: tags}, s.listNodes)
+	huma.Register(api, huma.Operation{OperationID: "node-guide", Method: "GET", Path: "/api/nodes/guide", Tags: tags,
+		Summary: "Link to the public Docker guide on the node registration address"}, s.nodeGuide)
 	huma.Register(api, huma.Operation{OperationID: "add-node", Method: "POST", Path: "/api/nodes", Tags: tags, DefaultStatus: 201,
 		Summary: "Register a node; returns its one-time token and install command"}, s.addNode)
 	huma.Register(api, huma.Operation{OperationID: "update-node", Method: "PATCH", Path: "/api/nodes/{id}", Tags: tags}, s.updateNode)

@@ -2,7 +2,7 @@
 // 节点: totals, then one card per machine. Adding a node or rotating its token shows the one-time
 // commands (host, docker run, compose).
 import { computed, ref } from "vue";
-import { useNodes } from "@/api/queries";
+import { useNodeGuide, useNodes } from "@/api/queries";
 import type { Enrollment } from "@/api/views";
 import EmptyState from "@/components/common/EmptyState.vue";
 import Loading from "@/components/common/Loading.vue";
@@ -19,7 +19,9 @@ const list = computed(() => nodes.data.value ?? []);
 const stats = computed(() => nodeStats(list.value));
 const adding = ref(false);
 const enrollment = ref<{ title: string; data: Enrollment } | null>(null);
-const guide = dockerGuideUrl();
+// On the 节点注册地址 when one is set, else on this page's address.
+const nodeGuide = useNodeGuide();
+const guide = computed(() => nodeGuide.data.value?.url || dockerGuideUrl());
 const shown = computed({ get: () => Boolean(enrollment.value), set: (v: boolean) => !v && (enrollment.value = null) });
 </script>
 

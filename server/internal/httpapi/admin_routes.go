@@ -301,7 +301,7 @@ func (s *Server) adminSettings(ctx context.Context) (AdminSettings, error) {
 	}
 	out := AdminSettings{RegistrationOpen: p.RegistrationOpen, DefaultMaxNodes: p.DefaultMaxNodes,
 		MaxRunningThreads: p.MaxRunningThreads, DeliveryDefault: s.deliveryDefault(ctx), OfficeDefault: s.officeDefault(ctx),
-		NodeURL: p.NodeURL, NodeURLDefault: s.cfg.NodeOrigin()}
+		NodeURL: p.NodeURL, NodeURLDefault: s.nodeURLDefault(ctx)}
 	var release platform.NodeRelease
 	if found, err := s.store.Setting(ctx, "node_release", &release); err == nil && found {
 		out.NodeRelease = &release

@@ -4195,6 +4195,19 @@
         ],
         "type": "object"
       },
+      "NodeGuideOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "description": "Public Docker guide on the node registration address (node-docker.md)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
       "NodeLog": {
         "additionalProperties": false,
         "properties": {
@@ -13242,6 +13255,37 @@
           }
         },
         "summary": "Register a node; returns its one-time token and install command",
+        "tags": [
+          "nodes"
+        ]
+      }
+    },
+    "/api/nodes/guide": {
+      "get": {
+        "operationId": "node-guide",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeGuideOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Link to the public Docker guide on the node registration address",
         "tags": [
           "nodes"
         ]

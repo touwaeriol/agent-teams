@@ -104,6 +104,7 @@ p, user, /api/me/sessions, GET
 p, user, /api/me/sessions/:id, DELETE
 p, user, /api/nodes, GET
 p, user, /api/nodes, POST
+p, user, /api/nodes/guide, GET
 p, user, /api/nodes/:id, DELETE
 p, user, /api/nodes/:id, PATCH
 p, user, /api/nodes/:id/drain, POST

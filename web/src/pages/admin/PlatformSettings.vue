@@ -43,7 +43,7 @@ function saveNodeURL() {
         />
       </label>
       <p class="text-xs text-muted-foreground">
-        新节点的安装命令、Docker 命令和安装脚本都用这个地址连接后端。网站前面有 CDN 或转发节点时，这里填后端自己的域名。留空就用 {{ settings.data.value.node_url_default }}。已注册的节点不受影响。
+        新节点的安装命令、Docker 命令、安装脚本和 Docker 部署说明都用这个地址连接后端。网站前面有 CDN 或转发节点时，这里填后端自己的域名。留空就用 {{ settings.data.value.node_url_default }}（服务器环境变量没配时，就是打开页面用的域名）。已注册的节点不受影响。
       </p>
     </div>
   </section>
