@@ -106,7 +106,7 @@ func (s *Service) openSubthread(ctx context.Context, tx *core.Tx, c *call) (Resu
 	owner := c.sc.OwnerID
 	tx.AfterCommit(func(ctx context.Context) { go s.orch.StartQueued(context.WithoutCancel(ctx), owner) })
 	out := protocol.OpenSubthreadResult{No: protocol.ThreadNo(t.No), ThreadID: t.ID, Branch: t.Branch}
-	return okJSON(fmt.Sprintf("已开子讨论串 #%d（%s），分支 %s"+carried(files)+"。不用等它：继续你的工作，它需要用户、等审阅、结束或失败时你会收到 [Subthread #%d · …]。",
+	return okJSON(fmt.Sprintf("opened subthread #%d (%s), branch %s"+carried(files)+". Do not wait for it: carry on with your work; you get [Subthread #%d · …] when it needs the user, waits for review, ends or fails.",
 		t.No, t.Title, t.Branch, t.No), out), nil
 }
 
@@ -137,14 +137,14 @@ func withFiles(meta map[string]any, files []core.AttachmentRef) map[string]any {
 // subthreadAllowed: one level only, at most MaxOpenSubthreads unfinished ones.
 func subthreadAllowed(ctx context.Context, tx *core.Tx, parent core.Thread) error {
 	if parent.ParentID != nil {
-		return refuse("子讨论串不能再开子讨论串：需要时用 message_thread 请父讨论串的组长开，或自己完成")
+		return refuse("a subthread cannot open subthreads: ask the parent thread's lead with message_thread if needed, or do it yourself")
 	}
 	open, err := core.Subthreads(ctx, tx, parent.ID, true)
 	if err != nil {
 		return err
 	}
 	if len(open) >= MaxOpenSubthreads {
-		return refuse("已经有 %d 个没结束的子讨论串（%s），最多 %d 个：等它们结束，或用 close_subthread 关掉不需要的",
+		return refuse("%d subthreads are still open (%s), at most %d: wait for them to end, or close the ones you do not need with close_subthread",
 			len(open), threadNos(open), MaxOpenSubthreads)
 	}
 	return nil
@@ -155,7 +155,7 @@ func threadNos(ts []core.Thread) string {
 	for i, t := range ts {
 		parts[i] = fmt.Sprintf("#%d", t.No)
 	}
-	return strings.Join(parts, "、")
+	return strings.Join(parts, ", ")
 }
 
 // subthreadBrief heads the brief with where it comes from and how to report back.
@@ -195,7 +195,7 @@ func (s *Service) closeSubthread(ctx context.Context, tx *core.Tx, c *call) (Res
 		return Result{}, err
 	}
 	if core.ThreadEnded(t.Status) {
-		return okText(fmt.Sprintf("子讨论串 #%d 已经结束（%s）", t.No, t.Status)), nil
+		return okText(fmt.Sprintf("subthread #%d has already ended (%s)", t.No, t.Status)), nil
 	}
 	if t, err = core.LockThread(ctx, tx, t.ID); err != nil {
 		return Result{}, err
@@ -203,20 +203,20 @@ func (s *Service) closeSubthread(ctx context.Context, tx *core.Tx, c *call) (Res
 	err = s.orch.CloseByParent(ctx, tx, t, parent.No, deref(in.Reason))
 	switch {
 	case errors.Is(err, orchestrator.ErrPRAwaiting):
-		return Result{}, refuse("子讨论串 #%d 的 PR 在等用户审阅，不能关：等用户处理", t.No)
+		return Result{}, refuse("the PR of subthread #%d is waiting for the user's review, so it cannot be closed: wait for the user", t.No)
 	case errors.Is(err, orchestrator.ErrMerging):
-		return Result{}, refuse("子讨论串 #%d 正在合并，不能关：等合并结束", t.No)
+		return Result{}, refuse("subthread #%d is merging and cannot be closed: wait for the merge to end", t.No)
 	case err != nil:
 		return Result{}, err
 	}
-	return okText(fmt.Sprintf("子讨论串 #%d 已关闭（done）", t.No)), nil
+	return okText(fmt.Sprintf("subthread #%d closed (done)", t.No)), nil
 }
 
 // ownSubthread loads subthread no of parent.
 func ownSubthread(ctx context.Context, tx *core.Tx, parent core.Thread, no int) (core.Thread, error) {
 	t, err := core.ThreadByNo(ctx, tx, parent.ProjectID, no)
 	if err != nil || t.ParentID == nil || *t.ParentID != parent.ID {
-		return core.Thread{}, refuse("#%d 不是你的子讨论串", no)
+		return core.Thread{}, refuse("#%d is not your subthread", no)
 	}
 	return t, nil
 }
@@ -227,7 +227,7 @@ func openSubthreadsRefusal(ctx context.Context, tx *core.Tx, t core.Thread) erro
 	if err != nil || len(open) == 0 {
 		return err
 	}
-	return refuse("子讨论串 %s 还没结束：等它们结束，或用 close_subthread 关掉，再 finish", threadNos(open))
+	return refuse("subthreads %s have not ended: wait for them, or close them with close_subthread, then finish", threadNos(open))
 }
 
 // leadMessageThread is a lead talking to another thread's lead.
@@ -237,11 +237,11 @@ func (s *Service) leadMessageThread(ctx context.Context, tx *core.Tx, c *call, i
 		return Result{}, err
 	}
 	if int(in.No) == from.No {
-		return Result{}, refuse("不能给自己的讨论串发消息")
+		return Result{}, refuse("you cannot message your own thread")
 	}
 	t, err := core.ThreadByNo(ctx, tx, from.ProjectID, int(in.No))
 	if err != nil {
-		return Result{}, refuse("没有讨论串 #%d", in.No)
+		return Result{}, refuse("no thread #%d", in.No)
 	}
 	if err := relayBudget(ctx, tx, from, t); err != nil {
 		return Result{}, err
@@ -254,7 +254,7 @@ func (s *Service) leadMessageThread(ctx context.Context, tx *core.Tx, c *call, i
 	if err != nil {
 		return Result{}, err
 	}
-	text := fmt.Sprintf("[Message from thread #%d · %s · %s]\n%s\n（回复用 message_thread(no: %d)；不需要回复就不回。）",
+	text := fmt.Sprintf("[Message from thread #%d · %s · %s]\n%s\n(reply with message_thread(no: %d); if no reply is needed, do not reply.)",
 		from.No, from.Title, c.emp().Name, in.Text, from.No)
 	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
 	if err != nil {
@@ -272,7 +272,7 @@ func (s *Service) leadMessageThread(ctx context.Context, tx *core.Tx, c *call, i
 		withFiles(relayMeta("out", "message", threadPeer(t), nil), files)); err != nil {
 		return Result{}, err
 	}
-	return okText(fmt.Sprintf("%s已发给 #%d 的组长%s", reopened, t.No, carried(files))), nil
+	return okText(fmt.Sprintf("%ssent to the lead of #%d%s", reopened, t.No, carried(files))), nil
 }
 
 // relayBudget: two threads exchange at most MaxRelaysPerHour messages an hour (both directions).
@@ -286,7 +286,7 @@ func relayBudget(ctx context.Context, tx *core.Tx, a, b core.Thread) error {
 		return err
 	}
 	if ab+ba >= MaxRelaysPerHour {
-		return refuse("#%d 和 #%d 这一小时已经来回 %d 条消息，到上限了：把要说的攒在一起，过一会儿再发，或者先自己往下做", a.No, b.No, ab+ba)
+		return refuse("#%d and #%d exchanged %d messages this hour, the limit: gather what you have to say and send it a bit later, or carry on by yourself first", a.No, b.No, ab+ba)
 	}
 	return nil
 }
@@ -295,13 +295,13 @@ func relayBudget(ctx context.Context, tx *core.Tx, a, b core.Thread) error {
 func (s *Service) reopenForLead(ctx context.Context, tx *core.Tx, from, t core.Thread) (core.Thread, string, error) {
 	switch t.Status {
 	case "archived":
-		return t, "", refuse("讨论串 #%d 已归档，不能发消息", t.No)
+		return t, "", refuse("thread #%d is archived and cannot be messaged", t.No)
 	case "done", "failed":
 	default:
 		return t, "", nil
 	}
 	if t.ParentID == nil || *t.ParentID != from.ID {
-		return t, "", refuse("讨论串 #%d 已经结束（%s），不能发消息：需要它继续时用 message_coordinator 请统筹处理", t.No, t.Status)
+		return t, "", refuse("thread #%d has ended (%s) and cannot be messaged: to have it carry on, ask the coordinator with message_coordinator", t.No, t.Status)
 	}
 	t, err := core.LockThread(ctx, tx, t.ID)
 	if err != nil {
@@ -313,7 +313,7 @@ func (s *Service) reopenForLead(ctx context.Context, tx *core.Tx, from, t core.T
 	if t, err = core.ThreadByID(ctx, tx, t.ID); err != nil {
 		return t, "", err
 	}
-	return t, fmt.Sprintf("子讨论串 #%d 原来已经结束，已重新打开（现在 %s），", t.No, t.Status), nil
+	return t, fmt.Sprintf("subthread #%d had ended and is reopened (now %s); ", t.No, t.Status), nil
 }
 
 // messageCoordinator is a lead talking to the project coordinator (lead).
@@ -335,9 +335,9 @@ func (s *Service) messageCoordinator(ctx context.Context, tx *core.Tx, c *call) 
 		return Result{}, err
 	}
 	if n >= MaxRelaysPerHour {
-		return Result{}, refuse("这一小时已经给统筹发了 %d 条消息，到上限了：把要说的攒在一起，过一会儿再发", n)
+		return Result{}, refuse("you sent the coordinator %d messages this hour, the limit: gather what you have to say and send it a bit later", n)
 	}
-	text := fmt.Sprintf("[Message from thread #%d · %s · %s]\n%s\n（回复用 message_thread(no: %d)；不需要回复就不回。）",
+	text := fmt.Sprintf("[Message from thread #%d · %s · %s]\n%s\n(reply with message_thread(no: %d); if no reply is needed, do not reply.)",
 		from.No, from.Title, c.emp().Name, in.Text, from.No)
 	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
 	if err != nil {
@@ -355,7 +355,7 @@ func (s *Service) messageCoordinator(ctx context.Context, tx *core.Tx, c *call) 
 		withFiles(relayMeta("out", "message", coordinatorPeer, nil), files)); err != nil {
 		return Result{}, err
 	}
-	return okText("已发给统筹" + carried(files)), nil
+	return okText("sent to the coordinator" + carried(files)), nil
 }
 
 // parentNo is the parent thread's number of a subthread (nil: top level or the parent is gone).

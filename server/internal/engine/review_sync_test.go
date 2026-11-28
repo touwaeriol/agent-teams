@@ -277,7 +277,7 @@ func TestReviewPlatformErrorReport(t *testing.T) {
 		t.Fatalf("gate after two reports: %s claimed by %q", gate.Status, gate.ClaimedBy)
 	}
 	// The blocked gate is nobody's: a late verdict from the reviewer cannot turn it into a rejection.
-	if res := rev.call("complete_task", map[string]any{"task_id": "t2", "status": "failed", "summary": "缺少输入校验"}); res.Ok || !strings.Contains(text(res), "不是你的") {
+	if res := rev.call("complete_task", map[string]any{"task_id": "t2", "status": "failed", "summary": "缺少输入校验"}); res.Ok || !strings.Contains(text(res), "is not yours") {
 		t.Fatalf("verdict on a blocked gate: ok=%v %s", res.Ok, text(res))
 	}
 	noSessionSend(t, rw.n, "rejected")

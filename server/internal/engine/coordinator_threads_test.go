@@ -19,7 +19,7 @@ func TestCoordinatorThreadStatusPhase(t *testing.T) {
 	var got string
 	eventually(t, "phase line", func() bool {
 		got = text(coord.mustCall("thread_status", map[string]any{"no": 1}))
-		return strings.Contains(got, "状态说明（和页面一致）：进行中：等成员处理任务（1 个未完成）")
+		return strings.Contains(got, "Status note (as on the page): 进行中：等成员处理任务（1 个未完成）")
 	})
 	if !strings.Contains(got, "#1 Work [running]") {
 		t.Fatalf("raw status lost: %q", got)
@@ -37,7 +37,7 @@ func TestCoordinatorReopensDoneThread(t *testing.T) {
 		t.Fatalf("status %s", st)
 	}
 	res := coord.mustCall("message_thread", map[string]any{"no": 1, "text": "用户要再补一个导出按钮"})
-	if !strings.Contains(text(res), "已重新打开") || !strings.Contains(text(res), "已转给 #1 的组长") {
+	if !strings.Contains(text(res), "is reopened") || !strings.Contains(text(res), "sent to the lead of #1") {
 		t.Fatalf("message_thread result %q", text(res))
 	}
 	if st, _ := threadStatus(tm); st != "running" && st != "queued" {

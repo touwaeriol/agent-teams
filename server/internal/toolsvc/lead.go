@@ -33,7 +33,7 @@ func (s *Service) updatePlan(ctx context.Context, tx *core.Tx, c *call) (Result,
 	if err := tx.EmitMainTasks(ctx, t); err != nil {
 		return Result{}, err
 	}
-	return okText(fmt.Sprintf("计划已更新（%d 步）", len(steps))), tx.EmitThread(ctx, t.ID)
+	return okText(fmt.Sprintf("plan updated (%d steps)", len(steps))), tx.EmitThread(ctx, t.ID)
 }
 
 // assignTask creates a task for a role (pool) or a named member.
@@ -68,11 +68,11 @@ func (s *Service) assignTask(ctx context.Context, tx *core.Tx, c *call) (Result,
 		return Result{}, err
 	}
 	out := protocol.AssignTaskResult{TaskID: protocol.TaskID(task.ID), Status: protocol.TaskStatus(task.Status), Pooled: pooled}
-	where := "进了任务池，空闲的 " + task.Role + " 会领取"
+	where := "is in the task pool; an idle " + task.Role + " will claim it"
 	if !pooled {
-		where = "指派给 " + in.Assignee
+		where = "is assigned to " + in.Assignee
 	}
-	return okJSON(fmt.Sprintf("任务 %s 已创建，%s%s", task.ID, where, carried(files)), out), nil
+	return okJSON(fmt.Sprintf("task %s created and %s%s", task.ID, where, carried(files)), out), nil
 }
 
 // repoInstruction records an explicit base for the task's repository and names the repository
@@ -80,7 +80,7 @@ func (s *Service) assignTask(ctx context.Context, tx *core.Tx, c *call) (Result,
 func (s *Service) repoInstruction(ctx context.Context, tx *core.Tx, t core.Thread, text, repo, base string) (string, error) {
 	if repo == "" {
 		if base != "" {
-			return "", refuse("写 base 时请同时写 repo")
+			return "", refuse("base needs repo too")
 		}
 		return text, nil
 	}
@@ -117,11 +117,11 @@ func (s *Service) listTasks(ctx context.Context, tx *core.Tx, c *call) (Result, 
 	var lines []string
 	for _, task := range tasks {
 		out.Tasks = append(out.Tasks, summaryOf(ctx, tx, task))
-		lines = append(lines, fmt.Sprintf("%s [%s] %s → %s：%s", task.ID, task.Status, task.Role, orDash(task.ClaimedBy),
+		lines = append(lines, fmt.Sprintf("%s [%s] %s → %s: %s", task.ID, task.Status, task.Role, orDash(task.ClaimedBy),
 			clip(task.Instruction, 80)))
 	}
 	if len(lines) == 0 {
-		return okJSON("还没有任务", out), nil
+		return okJSON("no tasks yet", out), nil
 	}
 	return okJSON(strings.Join(lines, "\n"), out), nil
 }
@@ -175,7 +175,7 @@ func (s *Service) cancelTask(ctx context.Context, tx *core.Tx, c *call) (Result,
 	}
 	task, err := core.LockTask(ctx, tx, t.ID, string(in.TaskID))
 	if err != nil {
-		return Result{}, refuse("没有任务 %s", in.TaskID)
+		return Result{}, refuse("no task %s", in.TaskID)
 	}
 	reason := ""
 	if in.Reason != nil {
@@ -184,7 +184,7 @@ func (s *Service) cancelTask(ctx context.Context, tx *core.Tx, c *call) (Result,
 	if _, err := s.sched.Cancel(ctx, tx, task, reason); err != nil {
 		return Result{}, err
 	}
-	return okText("已取消 " + task.ID), nil
+	return okText("cancelled " + task.ID), nil
 }
 
 // enqueueMerge puts a member's task into the merge queue.
@@ -202,7 +202,7 @@ func (s *Service) enqueueMerge(ctx context.Context, tx *core.Tx, c *call) (Resul
 		return Result{}, err
 	}
 	if in.Base != nil && in.Repo == nil {
-		return Result{}, refuse("写 base 时请同时写 repo")
+		return Result{}, refuse("base needs repo too")
 	}
 	entries, pos, err := s.deliv.Enqueue(ctx, tx, t, task, delivery.MergeRequest{Repo: deref(in.Repo), Base: deref(in.Base)})
 	if err != nil {
@@ -210,10 +210,10 @@ func (s *Service) enqueueMerge(ctx context.Context, tx *core.Tx, c *call) (Resul
 	}
 	out := protocol.EnqueueMergeResult{EntryID: entries[0].ID, Position: pos, Entries: entryRefs(entries)}
 	if pos == 0 {
-		return okJSON(fmt.Sprintf("%s 的任务 %s 没有需要合并的提交，已记为完成（条目已是 merged，不会再有合并通知，不用等它，直接继续，例如 open_pr）",
+		return okJSON(fmt.Sprintf("%s's task %s has no commits to merge and is recorded as done (the entry is already merged and no merge notice will follow: do not wait for it, carry on, e.g. with open_pr)",
 			task.ClaimedBy, task.ID), out), nil
 	}
-	return okJSON(fmt.Sprintf("%s 的分支已进合并队列（第 %d 位%s）", task.ClaimedBy, pos, reposOf(entries)), out), nil
+	return okJSON(fmt.Sprintf("%s's branch is in the merge queue (position %d%s)", task.ClaimedBy, pos, reposOf(entries)), out), nil
 }
 
 func entryRefs(entries []core.MergeEntry) []protocol.MergeEntryRef {
@@ -234,7 +234,7 @@ func reposOf(entries []core.MergeEntry) string {
 	if len(repos) == 0 {
 		return ""
 	}
-	return "，仓库 " + strings.Join(repos, "、")
+	return ", repositories " + strings.Join(repos, ", ")
 }
 
 // refuseMerge turns the merge request's own mistakes (unknown repository, nothing pushed there,
@@ -251,18 +251,18 @@ func (s *Service) mergeTask(ctx context.Context, tx *core.Tx, t core.Thread, in 
 	if in.TaskID != nil {
 		task, err := core.LockTask(ctx, tx, t.ID, string(*in.TaskID))
 		if err != nil {
-			return task, refuse("没有任务 %s", *in.TaskID)
+			return task, refuse("no task %s", *in.TaskID)
 		}
 		return task, nil
 	}
 	if in.Member == nil {
-		return core.Task{}, refuse("请给出 task_id 或 member")
+		return core.Task{}, refuse("give task_id or member")
 	}
 	var task core.Task
 	err := tx.Gorm(ctx).Select("id").Where("thread_id = ? AND claimed_by = ? AND status IN ('review','decision','running','blocked')",
 		t.ID, *in.Member).Order("updated_at DESC").Take(&task).Error
 	if err != nil {
-		return core.Task{}, refuse("%s 没有可以合并的任务", *in.Member)
+		return core.Task{}, refuse("%s has no task to merge", *in.Member)
 	}
 	return core.LockTask(ctx, tx, t.ID, task.ID)
 }
@@ -293,9 +293,9 @@ func (s *Service) openPR(ctx context.Context, tx *core.Tx, c *call) (Result, err
 		}
 		out := protocol.OpenPRResult{PRNumber: deref0(th.PRNumber), PRURL: deref(th.PRURL), Prs: repoPRs(repos)}
 		if again {
-			return okJSON("PR 已经开过，讨论串已重新提交验收（review），检查重新评估："+prLinks(out.Prs), out)
+			return okJSON("the PR was already open; the thread is resubmitted for acceptance (review) and the checks are evaluated again: "+prLinks(out.Prs), out)
 		}
-		return okJSON("PR 已开："+prLinks(out.Prs), out)
+		return okJSON("PR opened: "+prLinks(out.Prs), out)
 	}}, nil
 }
 
@@ -375,15 +375,15 @@ func (s *Service) finish(ctx context.Context, tx *core.Tx, c *call) (Result, err
 	})
 	note := ""
 	if len(dropped) > 0 {
-		note = "\n已取消没人在做的任务：" + strings.Join(dropped, "、") + "。"
+		note = "\nCancelled the tasks nobody was working on: " + strings.Join(dropped, ", ") + "."
 	}
 	switch end {
 	case finishNow:
-		return okText(note + "总结已记录。这个讨论串没有代码改动，不需要开 PR：现在写给用户的最终汇报作为本回合的最后回复，回合结束后讨论串结束（done），成员和你的会话随即关闭。"), nil
+		return okText(note + "Summary recorded. This thread has no code changes and needs no PR: now write the final report to the user as the last reply of this turn; when the turn ends the thread ends (done) and your and the members' sessions close."), nil
 	case finishDelivered:
-		return okText(note + "总结已记录。改动在独立 Git 仓库的讨论串分支 " + t.Branch + " 上（独立仓库没有 PR，推送讨论串分支即完成）：现在写给用户的最终汇报（分支名、改了什么、测试结果），回合结束后讨论串结束（done）。"), nil
+		return okText(note + "Summary recorded. The changes are on the thread branch " + t.Branch + " of a standalone Git repository (no PRs there: pushing the thread branch delivers them): now write the final report to the user (branch name, what changed, test results); when the turn ends the thread ends (done)."), nil
 	case finishNeedsPR:
-		return okText(note + "总结已记录。讨论串有代码改动还没有开 PR：请调用 open_pr(title, body)，之后平台按项目设置收尾（PR 检查通过即结束、自动合并或等用户验收）。"), nil
+		return okText(note + "Summary recorded. The thread has code changes and no PR yet: call open_pr(title, body); the platform then wraps up as the project is set up (done when the PR checks pass, automatic merge, or the user's acceptance)."), nil
 	}
 	return okText(strings.TrimPrefix(note+"\n"+answer, "\n")), nil
 }
@@ -450,13 +450,13 @@ func finishMode(ctx context.Context, tx *core.Tx, t core.Thread) (int, error) {
 		delivered = delivered || r.Delivered(standalone)
 	}
 	if t.Status != "running" && t.Status != "waiting" {
-		return 0, refuse("讨论串现在是 %s，不能结束", t.Status)
+		return 0, refuse("the thread is %s and cannot end now", t.Status)
 	}
 	if queued, err := core.MergeQueue(ctx, tx, t.ID, true); err != nil || len(queued) > 0 {
 		if err != nil {
 			return 0, err
 		}
-		return 0, refuse("合并队列里还有分支在合并，等合并完再开 PR（open_pr）")
+		return 0, refuse("branches are still merging in the merge queue; open the PR (open_pr) once they are merged")
 	}
 	if delivered {
 		return finishDelivered, openWork(ctx, tx, t)
@@ -471,7 +471,7 @@ func questionsAnswered(ctx context.Context, tx *core.Tx, t core.Thread, tool str
 	if err != nil || n == 0 {
 		return err
 	}
-	return refuse("还有 %d 个问题在等用户回答：讨论串结束会把它们取消。先等用户回答、按回答处理完，再调用 %s", n, tool)
+	return refuse("%d questions are still waiting for the user, and ending the thread would cancel them. Wait for the answers, act on them, then call %s", n, tool)
 }
 
 // openWork refuses finishing a thread whose main tasks or small tasks are still going.
@@ -492,11 +492,11 @@ func openWork(ctx context.Context, tx *core.Tx, t core.Thread) error {
 	}
 	for _, task := range tasks {
 		if !task.Finished() {
-			open = append(open, fmt.Sprintf("%s（%s）", task.ID, task.Status))
+			open = append(open, fmt.Sprintf("%s (%s)", task.ID, task.Status))
 		}
 	}
 	if len(open) > 0 {
-		return refuse("还有没完成的工作：%s。先完成（或用 update_plan / cancel_task 收尾）再调用 finish", strings.Join(open, "、"))
+		return refuse("work is still open: %s. Finish it (or wrap it up with update_plan / cancel_task) before calling finish", strings.Join(open, ", "))
 	}
 	return nil
 }
@@ -512,10 +512,10 @@ func (s *Service) tellUser(ctx context.Context, tx *core.Tx, c *call) (Result, e
 		return Result{}, err
 	}
 	if strings.TrimSpace(in.Text) == "" {
-		return Result{}, refuse("text 不能为空")
+		return Result{}, refuse("text must not be empty")
 	}
 	if err := s.orch.RecordReply(ctx, tx, c.emp(), in.Text); err != nil {
 		return Result{}, err
 	}
-	return okText("已发给用户"), nil
+	return okText("sent to the user"), nil
 }

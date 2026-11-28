@@ -40,7 +40,7 @@ func findRelay(t *testing.T, tm *team, conv, dir, kind string, no int) bool {
 func TestSubthreads(t *testing.T) {
 	tm := startTeam(t)
 	res := tm.lead.mustCall("open_subthread", map[string]any{"title": "调研缓存", "brief": "比较两种缓存方案，给出推荐"})
-	if !strings.Contains(text(res), "已开子讨论串 #2") {
+	if !strings.Contains(text(res), "opened subthread #2") {
 		t.Fatalf("open_subthread %q", text(res))
 	}
 	sub, open := expectOpen(t, tm.w, tm.n, "lead-2")

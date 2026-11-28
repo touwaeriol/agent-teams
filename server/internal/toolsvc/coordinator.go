@@ -36,7 +36,7 @@ func (s *Service) openThread(ctx context.Context, tx *core.Tx, c *call) (Result,
 	}
 	tx.AfterCommit(func(ctx context.Context) { go s.orch.StartQueued(context.WithoutCancel(ctx), owner) })
 	out := protocol.OpenThreadResult{No: protocol.ThreadNo(t.No), ThreadID: t.ID, Branch: t.Branch}
-	return okJSON(fmt.Sprintf("已开讨论串 #%d（%s），分支 %s", t.No, t.Title, t.Branch), out), nil
+	return okJSON(fmt.Sprintf("opened thread #%d (%s), branch %s", t.No, t.Title, t.Branch), out), nil
 }
 
 // sourceMessage is the user's project-chat message open_thread is for: the one named by
@@ -52,7 +52,7 @@ func (s *Service) sourceMessage(ctx context.Context, tx *core.Tx, c *call, id *i
 	}
 	m, err := core.UserWordByID(ctx, tx, conv, int64(*id))
 	if errors.Is(err, core.ErrNotFound) {
-		return nil, refuse("message_id %d 不是用户在项目对话里发的消息（用用户消息末尾的 [message_id: N]，或不写）", *id)
+		return nil, refuse("message_id %d is not a message the user wrote in the project chat (use the [message_id: N] at the end of a user message, or leave it out)", *id)
 	}
 	if err != nil {
 		return nil, err
@@ -107,18 +107,18 @@ func (s *Service) listThreads(ctx context.Context, tx *core.Tx, c *call) (Result
 		out.Threads = append(out.Threads, protocol.ThreadSummary{No: protocol.ThreadNo(t.No), Title: t.Title,
 			Status: protocol.ThreadStatus(t.Status), PlanDone: counts.MainDone, PlanTotal: counts.MainTotal, Waiting: counts.Waiting,
 			ParentNo: parent})
-		line := fmt.Sprintf("#%d %s [%s] 计划 %d/%d，等你处理 %d", t.No, t.Title, t.Status, counts.MainDone,
+		line := fmt.Sprintf("#%d %s [%s] plan %d/%d, waiting for you %d", t.No, t.Title, t.Status, counts.MainDone,
 			counts.MainTotal, counts.Waiting)
 		if parent != nil {
-			line += fmt.Sprintf("（#%d 的子讨论串）", *parent)
+			line += fmt.Sprintf(" (subthread of #%d)", *parent)
 		}
 		if c.thread != nil && t.ID == c.thread.ID {
-			line += "（你的讨论串）"
+			line += " (your thread)"
 		}
 		lines = append(lines, line)
 	}
 	if len(lines) == 0 {
-		return okJSON("还没有讨论串", out), nil
+		return okJSON("no threads yet", out), nil
 	}
 	return okJSON(strings.Join(lines, "\n"), out), nil
 }
@@ -131,7 +131,7 @@ func (s *Service) threadStatus(ctx context.Context, tx *core.Tx, c *call) (Resul
 	}
 	t, err := core.ThreadByNo(ctx, tx, c.emp().ProjectID, int(in.No))
 	if err != nil {
-		return Result{}, refuse("没有讨论串 #%d", in.No)
+		return Result{}, refuse("no thread #%d", in.No)
 	}
 	out, phase, err := s.statusOf(ctx, tx, t)
 	if err != nil {
@@ -176,7 +176,7 @@ func (s *Service) statusOf(ctx context.Context, tx *core.Tx, t core.Thread) (pro
 		return out, core.ThreadPhase{}, err
 	}
 	for _, a := range acts {
-		out.Recent = append(out.Recent, a.Employee+"："+a.Text)
+		out.Recent = append(out.Recent, a.Employee+": "+a.Text)
 	}
 	return out, core.PhaseOf(v, len(merges)), nil
 }
@@ -184,21 +184,21 @@ func (s *Service) statusOf(ctx context.Context, tx *core.Tx, t core.Thread) (pro
 func statusText(r protocol.ThreadStatusResult, phase core.ThreadPhase) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%d %s [%s]\n", r.No, r.Title, r.Status)
-	fmt.Fprintf(&b, "状态说明（和页面一致）：%s\n", phase.Text())
+	fmt.Fprintf(&b, "Status note (as on the page): %s\n", phase.Text())
 	if r.ParentNo != nil {
-		fmt.Fprintf(&b, "父讨论串：#%d\n", *r.ParentNo)
+		fmt.Fprintf(&b, "Parent thread: #%d\n", *r.ParentNo)
 	}
 	for _, sub := range r.Subthreads {
-		fmt.Fprintf(&b, "子讨论串 #%d %s [%s]\n", sub.No, sub.Title, sub.Status)
+		fmt.Fprintf(&b, "Subthread #%d %s [%s]\n", sub.No, sub.Title, sub.Status)
 	}
 	for _, p := range r.Plan {
 		fmt.Fprintf(&b, "- [%s] %s\n", p.Status, p.Title)
 	}
 	if r.LeadLastReply != nil {
-		fmt.Fprintf(&b, "组长最近说：%s\n", *r.LeadLastReply)
+		fmt.Fprintf(&b, "The lead last said: %s\n", *r.LeadLastReply)
 	}
 	if r.PRURL != nil {
-		fmt.Fprintf(&b, "PR：%s\n", *r.PRURL)
+		fmt.Fprintf(&b, "PR: %s\n", *r.PRURL)
 	}
 	for _, line := range r.Recent {
 		fmt.Fprintf(&b, "· %s\n", line)
@@ -217,12 +217,12 @@ func (s *Service) messageThread(ctx context.Context, tx *core.Tx, c *call) (Resu
 	}
 	t, err := core.ThreadByNo(ctx, tx, c.emp().ProjectID, int(in.No))
 	if err != nil {
-		return Result{}, refuse("没有讨论串 #%d", in.No)
+		return Result{}, refuse("no thread #%d", in.No)
 	}
 	reopened := ""
 	switch t.Status {
 	case "archived":
-		return Result{}, refuse("讨论串 #%d 已归档，不能发消息：需要时请用户先在页面上取消归档", t.No)
+		return Result{}, refuse("thread #%d is archived and cannot be messaged: ask the user to unarchive it on its page first if needed", t.No)
 	case "done", "failed":
 		// As a user's message on the page does: the finished thread is reopened, then the lead gets it.
 		if t, err = core.LockThread(ctx, tx, t.ID); err != nil {
@@ -234,7 +234,7 @@ func (s *Service) messageThread(ctx context.Context, tx *core.Tx, c *call) (Resu
 		if t, err = core.ThreadByID(ctx, tx, t.ID); err != nil {
 			return Result{}, err
 		}
-		reopened = fmt.Sprintf("讨论串 #%d 原来已经结束，已重新打开（现在 %s），", t.No, t.Status)
+		reopened = fmt.Sprintf("thread #%d had ended and is reopened (now %s); ", t.No, t.Status)
 	}
 	lead, err := core.Lead(ctx, tx, t.ID)
 	if err != nil {
@@ -261,7 +261,7 @@ func (s *Service) messageThread(ctx context.Context, tx *core.Tx, c *call) (Resu
 		withFiles(relayMeta("out", "message", threadPeer(t), nil), files)); err != nil {
 		return Result{}, err
 	}
-	return okText(fmt.Sprintf("%s已转给 #%d 的组长%s", reopened, t.No, carried(files))), nil
+	return okText(fmt.Sprintf("%ssent to the lead of #%d%s", reopened, t.No, carried(files))), nil
 }
 
 // forwardToThread passes the user's own project-chat messages, word for word, to a thread's
@@ -272,7 +272,7 @@ func (s *Service) forwardToThread(ctx context.Context, tx *core.Tx, c *call) (Re
 		return Result{}, err
 	}
 	if (in.ThreadNo != nil) == (in.NewThread != nil) {
-		return Result{}, refuse("thread_no 和 new_thread 二选一")
+		return Result{}, refuse("give either thread_no or new_thread")
 	}
 	req := orchestrator.ForwardRequest{UserID: c.sc.OwnerID, ProjectID: c.emp().ProjectID, Note: deref(in.Note), By: "coordinator", Latest: 1}
 	for _, id := range in.MessageIds {
@@ -293,23 +293,23 @@ func (s *Service) forwardToThread(ctx context.Context, tx *core.Tx, c *call) (Re
 	out := protocol.ForwardToThreadResult{No: protocol.ThreadNo(res.Thread.No), ThreadID: res.Thread.ID, Count: len(res.Sources), Created: res.Created}
 	switch {
 	case res.Duplicate:
-		return okJSON(fmt.Sprintf("这些消息刚刚已经转发给 #%d 了，没有重复发送", res.Thread.No), out), nil
+		return okJSON(fmt.Sprintf("these messages were just forwarded to #%d; not sent again", res.Thread.No), out), nil
 	case res.Created:
-		return okJSON(fmt.Sprintf("已新开讨论串 #%d（%s），用户的 %d 条消息作为任务说明转给了组长", res.Thread.No, res.Thread.Title, len(res.Sources)), out), nil
+		return okJSON(fmt.Sprintf("opened thread #%d (%s); the user's %d messages went to its lead as the brief", res.Thread.No, res.Thread.Title, len(res.Sources)), out), nil
 	}
-	return okJSON(fmt.Sprintf("已把用户的 %d 条消息原样转给 #%d 的组长", len(res.Sources), res.Thread.No), out), nil
+	return okJSON(fmt.Sprintf("forwarded the user's %d messages unchanged to the lead of #%d", len(res.Sources), res.Thread.No), out), nil
 }
 
 // refuseForward explains a refused forward to the coordinator.
 func refuseForward(err error, no int) error {
 	switch {
 	case errors.Is(err, orchestrator.ErrArchived):
-		return refuse("讨论串 #%d 已归档，不能转发：请用户先在页面上取消归档，或者用 new_thread 新开一个讨论串", no)
+		return refuse("thread #%d is archived and cannot be forwarded to: ask the user to unarchive it on its page first, or open a new thread with new_thread", no)
 	case errors.Is(err, core.ErrNotFound):
-		return refuse("没有讨论串 #%d", no)
+		return refuse("no thread #%d", no)
 	case errors.Is(err, orchestrator.ErrForwardEmpty), errors.Is(err, orchestrator.ErrForwardNotUser),
 		errors.Is(err, orchestrator.ErrForwardTooMany), errors.Is(err, orchestrator.ErrForwardFiles):
-		return refuse("%s（message_ids 是用户消息末尾的 [message_id: N]）", err.Error())
+		return refuse("%s (message_ids are the [message_id: N] at the end of user messages)", err.Error())
 	}
 	return err
 }

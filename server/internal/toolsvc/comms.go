@@ -76,7 +76,7 @@ func (s *Service) askUser(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	if blocking {
 		return Result{Wait: true}, nil
 	}
-	return okJSON(fmt.Sprintf("已提问 %s，用户回答后会以 “[Answer to %s] …” 的消息发给你。", q.ID, q.ID),
+	return okJSON(fmt.Sprintf("asked %s; the user's answer reaches you as a \"[Answer to %s] …\" message.", q.ID, q.ID),
 		protocol.AskUserResult{QuestionID: protocol.QuestionID(q.ID)}), nil
 }
 
@@ -134,19 +134,19 @@ func (s *Service) replyTo(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	}
 	q, err := core.LockQuestion(ctx, tx, t.ID, string(in.QuestionID))
 	if err != nil {
-		return Result{}, refuse("没有问题 %s", in.QuestionID)
+		return Result{}, refuse("no question %s", in.QuestionID)
 	}
 	if q.Kind == "approval" {
-		return Result{}, refuse("%s 是权限请求，用 review_permission 判断", q.ID)
+		return Result{}, refuse("%s is a permission request: decide it with review_permission", q.ID)
 	}
 	if q.Status != "open" || q.Audience != "lead" {
-		return Result{}, refuse("问题 %s 不是待你回答的问题", q.ID)
+		return Result{}, refuse("question %s is not waiting for your answer", q.ID)
 	}
 	files, err := s.useAttachments(ctx, tx, c, in.Attachments)
 	if err != nil {
 		return Result{}, err
 	}
-	return okText("已回答 " + q.ID + carried(files)), s.answer(ctx, tx, q, in.Answer, "employee:"+c.emp().Name, files...)
+	return okText("answered " + q.ID + carried(files)), s.answer(ctx, tx, q, in.Answer, "employee:"+c.emp().Name, files...)
 }
 
 // reviewPermission is the lead deciding a member's permission request (approvals.LeadReview).
@@ -350,11 +350,11 @@ func (s *Service) recipient(ctx context.Context, tx *core.Tx, t core.Thread, fro
 		return core.Lead(ctx, tx, t.ID)
 	}
 	if to == from.Name {
-		return core.Employee{}, refuse("不能给自己留言")
+		return core.Employee{}, refuse("you cannot message yourself")
 	}
 	e, err := core.EmployeeByName(ctx, tx, t.ProjectID, &t.ID, to)
 	if err != nil {
-		return e, refuse("本讨论串没有 %s", to)
+		return e, refuse("this thread has no %s", to)
 	}
 	return e, nil
 }
@@ -429,10 +429,10 @@ func (s *Service) readMessages(ctx context.Context, tx *core.Tx, c *call) (Resul
 	for _, m := range mail {
 		out.Messages = append(out.Messages, protocol.Mail{ID: int(m.ID), Sender: m.Sender, Recipient: m.Recipient, Body: m.Body,
 			CreatedAt: m.CreatedAt})
-		lines = append(lines, fmt.Sprintf("%s → %s：%s", m.Sender, m.Recipient, m.Body))
+		lines = append(lines, fmt.Sprintf("%s → %s: %s", m.Sender, m.Recipient, m.Body))
 	}
 	if len(lines) == 0 {
-		lines = append(lines, "没有未读留言")
+		lines = append(lines, "no unread messages")
 	}
 	if c.emp().ProjectMember() {
 		other, err := core.UnreadElsewhere(ctx, tx, t.ProjectID, t.ID, c.emp().Name)
@@ -453,10 +453,10 @@ func elsewhereNote(other []core.ThreadCount) string {
 	}
 	parts := make([]string, len(other))
 	for i, o := range other {
-		parts[i] = fmt.Sprintf("#%d %d 条", o.No, o.N)
+		parts[i] = fmt.Sprintf("#%d: %d", o.No, o.N)
 	}
-	return "其他讨论串还有发给你的未读留言：" + strings.Join(parts, "、") +
-		"（推送到你会话时已标明讨论串；到那个讨论串干活时用 read_messages 查看）"
+	return "Unread messages to you in other threads: " + strings.Join(parts, ", ") +
+		" (they were marked with their thread when pushed to your session; read them with read_messages when you work in that thread)"
 }
 
 // setStatus updates the bubble only (§11.3).
@@ -503,5 +503,5 @@ func (s *Service) publish(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	if err := s.orch.RecordArtifact(ctx, tx, c.emp(), d, 0); err != nil {
 		return Result{}, err
 	}
-	return okJSON("已登记交付物 "+d.ID, protocol.PublishDeliverableResult{DeliverableID: d.ID}), nil
+	return okJSON("registered deliverable "+d.ID, protocol.PublishDeliverableResult{DeliverableID: d.ID}), nil
 }

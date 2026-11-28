@@ -33,7 +33,7 @@ func memoryResult(err error, ok func() Result) (Result, error) {
 	case store.IsMemoryError(err):
 		return failText("%s", err.Error()), nil
 	case errors.Is(err, store.ErrNotFound) || errors.Is(err, core.ErrNotFound):
-		return failText("没有这个记忆文件，先用 memory_list 看看有哪些"), nil
+		return failText("no such memory file; see which there are with memory_list"), nil
 	}
 	return Result{}, err
 }
@@ -75,10 +75,10 @@ func (s *Service) memoryList(ctx context.Context, tx *core.Tx, c *call) (Result,
 	for _, f := range files {
 		out.Files = append(out.Files, protocol.MemoryFileBrief{Name: f.Name, Description: f.Description, Size: f.Size,
 			UpdatedBy: f.UpdatedBy, UpdatedAt: f.UpdatedAt.Format(time.RFC3339)})
-		lines = append(lines, fmt.Sprintf("- %s（%d 字，%s 更新）%s", f.Name, f.Size, f.UpdatedBy, f.Description))
+		lines = append(lines, fmt.Sprintf("- %s (%d chars, updated by %s) %s", f.Name, f.Size, f.UpdatedBy, f.Description))
 	}
 	if len(lines) == 0 {
-		return okJSON("还没有记忆文件", out), nil
+		return okJSON("no memory files yet", out), nil
 	}
 	return okJSON(strings.Join(lines, "\n"), out), nil
 }
@@ -93,7 +93,7 @@ func (s *Service) memoryRead(ctx context.Context, tx *core.Tx, c *call) (Result,
 	return memoryResult(err, func() Result {
 		text := f.Content
 		if strings.TrimSpace(text) == "" {
-			text = "（空文件）"
+			text = "(empty file)"
 		}
 		return okJSON(text, protocol.MemoryReadResult{Name: f.Name, Description: f.Description, Content: f.Content,
 			UpdatedBy: f.UpdatedBy, UpdatedAt: f.UpdatedAt.Format(time.RFC3339)})
@@ -116,9 +116,9 @@ func (s *Service) memoryWrite(ctx context.Context, tx *core.Tx, c *call) (Result
 		err = s.changed(ctx, tx, sc, c.emp().Name, "write", f.Name)
 	}
 	return memoryResult(err, func() Result {
-		verb := "已更新"
+		verb := "updated"
 		if created {
-			verb = "已创建"
+			verb = "created"
 		}
 		return okJSON(verb+" "+f.Name, protocol.MemoryWriteResult{Name: f.Name, Created: created})
 	})
@@ -146,7 +146,7 @@ func (s *Service) memoryEdit(ctx context.Context, tx *core.Tx, c *call) (Result,
 		err = s.changed(ctx, tx, sc, c.emp().Name, "write", f.Name)
 	}
 	return memoryResult(err, func() Result {
-		return okJSON(fmt.Sprintf("已修改 %s（%d 处）", f.Name, n), protocol.MemoryEditResult{Name: f.Name, Replaced: n})
+		return okJSON(fmt.Sprintf("edited %s (%d replacements)", f.Name, n), protocol.MemoryEditResult{Name: f.Name, Replaced: n})
 	})
 }
 
@@ -155,9 +155,9 @@ func replaceIn(content, old, new string, all bool) (string, int, error) {
 	n := strings.Count(content, old)
 	switch {
 	case n == 0:
-		return "", 0, store.NewMemoryError("文件里没有 old_string（要和文件内容逐字一致，先 memory_read 看原文）")
+		return "", 0, store.NewMemoryError("old_string is not in the file (it must match the file word for word; read it with memory_read first)")
 	case n > 1 && !all:
-		return "", 0, store.NewMemoryError(fmt.Sprintf("old_string 在文件里出现了 %d 次；多带几行上下文让它唯一，或用 replace_all", n))
+		return "", 0, store.NewMemoryError(fmt.Sprintf("old_string occurs %d times in the file; add surrounding lines to make it unique, or use replace_all", n))
 	}
 	return strings.ReplaceAll(content, old, new), n, nil
 }
@@ -173,7 +173,7 @@ func (s *Service) memoryDelete(ctx context.Context, tx *core.Tx, c *call) (Resul
 	if err == nil {
 		err = s.changed(ctx, tx, sc, c.emp().Name, "delete", in.Name)
 	}
-	return memoryResult(err, func() Result { return okText("已删除 " + in.Name) })
+	return memoryResult(err, func() Result { return okText("deleted " + in.Name) })
 }
 
 // remember appends a one-line note to MEMORY.md.
@@ -190,9 +190,9 @@ func (s *Service) remember(ctx context.Context, tx *core.Tx, c *call) (Result, e
 	}
 	where := "MEMORY.md"
 	if sc.Kind == store.MemoryUser {
-		where = "用户记忆 MEMORY.md"
+		where = "the user memory's MEMORY.md"
 	}
-	return memoryResult(err, func() Result { return okText("已记入 " + where) })
+	return memoryResult(err, func() Result { return okText("written to " + where) })
 }
 
 // rememberSummary files a finished thread's summary under thread-summaries.md.

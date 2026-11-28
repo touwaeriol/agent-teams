@@ -37,7 +37,7 @@ func askSpecOf(in protocol.AskUserInput, tierBlocks bool) (askSpec, error) {
 	via := in.Via != nil
 	if len(in.Questions) == 0 {
 		if in.Question == nil || strings.TrimSpace(*in.Question) == "" {
-			return askSpec{}, refuse("ask_user 需要 question 或 questions")
+			return askSpec{}, refuse("ask_user needs question or questions")
 		}
 		return askSpec{text: *in.Question, options: in.Options, detail: map[string]any{}, blocking: tierBlocks}, nil
 	}
@@ -67,7 +67,7 @@ func checkQuestion(q protocol.AskQuestion) error {
 	recommended := 0
 	for _, o := range q.Options {
 		if seen[o.Label] {
-			return refuse("问题“%s”的选项 %s 重复了", q.Question, o.Label)
+			return refuse("question %q repeats option %s", q.Question, o.Label)
 		}
 		seen[o.Label] = true
 		if o.Recommended != nil && *o.Recommended {
@@ -75,7 +75,7 @@ func checkQuestion(q protocol.AskQuestion) error {
 		}
 	}
 	if recommended > 1 {
-		return refuse("问题“%s”最多推荐一个选项", q.Question)
+		return refuse("question %q may recommend at most one option", q.Question)
 	}
 	return nil
 }

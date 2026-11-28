@@ -291,7 +291,7 @@ func TestFinishWaitsForUserQuestions(t *testing.T) {
 func TestReadOnlyFinish(t *testing.T) {
 	tm := startTeam(t)
 	res := tm.lead.call("finish", map[string]string{"summary": "调研结论"})
-	if res.Ok || !strings.Contains(text(res), "还有没完成的工作") {
+	if res.Ok || !strings.Contains(text(res), "work is still open") {
 		t.Fatalf("finish with open work: %+v", res)
 	}
 	tm.dev.mustCall("complete_task", map[string]any{"task_id": "t1", "summary": "查完了"})
