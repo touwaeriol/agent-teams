@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // One machine: name, online pill, meta, actions (重新检测 / 设置 / 更新 / 重新生成令牌 / 移除), the update line, the slot bar,
 // runtime boxes (install and login state as the daemon reported, subscription quota under each) and the sessions running there.
+import { $t } from "@/i18n";
 import { useQueryClient } from "@tanstack/vue-query";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { nodes as nodeActions } from "@/api/actions";
@@ -59,8 +60,8 @@ const recheck = useAction(() => nodeActions.recheck(props.node.id), {
   invalidate: [keys.nodes],
   onSuccess: (r: NodeRecheck) => {
     queryClient.setQueryData<NodeView[]>(keys.nodes, (list) => withNode(list, r.node));
-    if (r.stale) toast.warning("节点没有及时回应，显示的是上次的检测结果");
-    else toast.success("检测完成");
+    if (r.stale) toast.warning($t("节点没有及时回应，显示的是上次的检测结果"));
+    else toast.success($t("检测完成"));
   },
 });
 function startRecheck() {
@@ -70,7 +71,7 @@ function startRecheck() {
 }
 onBeforeUnmount(hover.leave);
 const rotate = useAction(() => nodeActions.rotate(props.node.id), { invalidate: [keys.nodes], onSuccess: (e) => emit("token", e) });
-const remove = useAction(() => nodeActions.remove(props.node.id), { invalidate: [keys.nodes], success: "节点已移除" });
+const remove = useAction(() => nodeActions.remove(props.node.id), { invalidate: [keys.nodes], success: $t("节点已移除") });
 const update = computed(() => updateView(props.node));
 const fsLine = computed(() => sharedFolderLine(props.node));
 const UPDATE_TONE = { muted: "text-muted-foreground", ok: "text-[hsl(var(--ok))]", warn: "text-[hsl(var(--warn))]", error: "text-destructive" } as const;
@@ -82,18 +83,18 @@ const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.
     <div class="flex flex-wrap items-center justify-between gap-2.5">
       <span class="flex flex-wrap items-center gap-2.5">
         <span class="font-mono text-[17px] font-semibold">{{ node.name }}</span>
-        <StatusPill :tone="node.online ? '#2E7D4F' : '#8A877F'" :label="node.online ? '在线' : '离线'" />
+        <StatusPill :tone="node.online ? '#2E7D4F' : '#8A877F'" :label="node.online ? $t('在线') : $t('离线')" />
         <span class="text-[13px] text-muted-foreground">{{ nodeMeta(node) }}</span>
       </span>
       <span class="flex flex-wrap gap-2 [&>.el-button]:!ml-0">
         <el-tooltip :content="recheckable.hint" placement="top" :show-after="200">
           <span class="inline-flex" data-recheck-wrap>
             <el-button size="small" :loading="recheck.isPending.value" :disabled="!recheckable.enabled || recheck.isPending.value" data-recheck @click="startRecheck">
-              {{ recheck.isPending.value ? "检测中" : "重新检测" }}
+              {{ recheck.isPending.value ? $t("检测中") : $t("重新检测") }}
             </el-button>
           </span>
         </el-tooltip>
-        <el-button size="small" @click="configuring = true">设置</el-button>
+        <el-button size="small" @click="configuring = true">{{ $t("设置") }}</el-button>
         <el-dropdown
           v-if="node.online && update.offer"
           split-button
@@ -104,25 +105,25 @@ const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.
           @click="upgrade.mutate('wait_idle')"
           @command="(m: 'wait_idle' | 'now') => upgrade.mutate(m)"
         >
-          更新
+          {{ $t("更新") }}
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="wait_idle">等正在跑的回合结束后更新</el-dropdown-item>
-              <el-dropdown-item command="now">立即更新（中断正在跑的回合）</el-dropdown-item>
+              <el-dropdown-item command="wait_idle">{{ $t("等正在跑的回合结束后更新") }}</el-dropdown-item>
+              <el-dropdown-item command="now">{{ $t("立即更新（中断正在跑的回合）") }}</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <ConfirmAction title="重新生成令牌？" description="旧令牌立即失效，节点会断开。宿主机用新命令重新安装；容器改 AGENT_TEAMS_NODE_TOKEN 后重建，卷不用动。" confirm-label="重新生成" variant="default" size="small" @confirm="rotate.mutate()">
-          重新生成令牌
+        <ConfirmAction :title="$t('重新生成令牌？')" :description="$t('旧令牌立即失效，节点会断开。宿主机用新命令重新安装；容器改 AGENT_TEAMS_NODE_TOKEN 后重建，卷不用动。')" :confirm-label="$t('重新生成')" variant="default" size="small" @confirm="rotate.mutate()">
+          {{ $t("重新生成令牌") }}
         </ConfirmAction>
-        <ConfirmAction :title="`移除节点 ${node.name}？`" description="会断开连接；在它上面的员工改派到其他节点继续。" confirm-label="移除" size="small" @confirm="remove.mutate()">移除</ConfirmAction>
+        <ConfirmAction :title="$t('移除节点 {name}？', { name: node.name })" :description="$t('会断开连接；在它上面的员工改派到其他节点继续。')" :confirm-label="$t('移除')" size="small" @confirm="remove.mutate()">{{ $t("移除") }}</ConfirmAction>
       </span>
     </div>
     <div v-if="update.line" class="flex flex-wrap items-center gap-2 text-[13px]" data-update-line>
       <Spinner v-if="update.busy" class="size-3 border" />
       <span :class="UPDATE_TONE[update.tone]">{{ update.line }}</span>
-      <el-button v-if="update.canNow" size="small" link type="primary" :disabled="upgrade.isPending.value" @click="upgrade.mutate('now')">立即更新</el-button>
-      <el-button v-if="update.canCancel" size="small" link :disabled="upgrade.isPending.value" @click="upgrade.mutate('cancel')">取消</el-button>
+      <el-button v-if="update.canNow" size="small" link type="primary" :disabled="upgrade.isPending.value" @click="upgrade.mutate('now')">{{ $t("立即更新") }}</el-button>
+      <el-button v-if="update.canCancel" size="small" link :disabled="upgrade.isPending.value" @click="upgrade.mutate('cancel')">{{ $t("取消") }}</el-button>
     </div>
     <div v-if="fsLine" class="text-[13px]" data-fs-line>
       <el-tooltip v-if="fsLine.error" :content="fsLine.error" placement="bottom-start" :show-after="200">
@@ -132,8 +133,8 @@ const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.
     </div>
     <div class="flex flex-col gap-1.5">
       <span class="flex justify-between text-xs text-muted-foreground">
-        <span>槽位（同时运行的会话）</span>
-        <span>{{ node.active_sessions }} / {{ slots || "—" }}{{ node.queued ? ` · 排队 ${node.queued}` : "" }}</span>
+        <span>{{ $t("槽位（同时运行的会话）") }}</span>
+        <span>{{ node.active_sessions }} / {{ slots || "—" }}{{ node.queued ? $t(" · 排队 {queued}", { queued: node.queued }) : "" }}</span>
       </span>
       <span class="flex"><ProgressBar :pct="slotPct(node)" tone="#2F6FDB" :height="6" /></span>
     </div>
@@ -146,7 +147,7 @@ const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.
             <span class="cursor-help text-xs underline decoration-dotted" :style="{ color: CLI_TONE[row.tone] }" data-login>{{ row.login }}</span>
           </el-tooltip>
           <span v-else class="text-xs" :style="{ color: CLI_TONE[row.tone] }" data-login>{{ row.login }}</span>
-          <span v-if="recheck.isPending.value" class="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground" data-checking><Spinner class="size-2.5 border" />检测中…</span>
+          <span v-if="recheck.isPending.value" class="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground" data-checking><Spinner class="size-2.5 border" />{{ $t("检测中…") }}</span>
           <el-tooltip v-else-if="row.checked" :content="row.checkedTitle" placement="top" :show-after="200">
             <span class="ml-auto cursor-default text-[11px] text-muted-foreground" data-checked>{{ row.checked }}</span>
           </el-tooltip>
@@ -164,13 +165,13 @@ const upgrade = useAction((mode: "wait_idle" | "now" | "cancel") => nodeActions.
               <span class="whitespace-nowrap text-[11px] text-muted-foreground">{{ win.reset }}</span>
             </template>
           </div>
-          <span v-if="refreshing" class="flex items-center gap-1 text-[11px] text-muted-foreground" data-refreshing><Spinner class="size-2.5 border" />刷新中…</span>
+          <span v-if="refreshing" class="flex items-center gap-1 text-[11px] text-muted-foreground" data-refreshing><Spinner class="size-2.5 border" />{{ $t("刷新中…") }}</span>
           <span v-else class="text-[11px] text-muted-foreground">{{ usageUpdated(row.key) }}</span>
         </template>
         <el-tooltip v-else-if="usage[row.key]?.kind === 'error'" :content="usageError(row.key)" placement="bottom-start" :show-after="200">
-          <span class="flex w-fit cursor-help items-center gap-1.5 text-xs text-destructive">获取失败<Spinner v-if="refreshing" class="size-2.5 border text-muted-foreground" /></span>
+          <span class="flex w-fit cursor-help items-center gap-1.5 text-xs text-destructive">{{ $t("获取失败") }}<Spinner v-if="refreshing" class="size-2.5 border text-muted-foreground" /></span>
         </el-tooltip>
-        <span v-else-if="usage[row.key]?.kind === 'pending'" class="text-[11px] text-muted-foreground">余量获取中…</span>
+        <span v-else-if="usage[row.key]?.kind === 'pending'" class="text-[11px] text-muted-foreground">{{ $t("余量获取中…") }}</span>
       </div>
     </div>
     <NodeSessions v-if="node.online" :node-id="node.id" />

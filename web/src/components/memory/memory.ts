@@ -1,5 +1,6 @@
 // Memory files: a project's (pid) or my own (pid null, every project reads it). memorySource is
 // the one place that picks the endpoints for either; the helpers are pure.
+import { $t } from "@/i18n";
 import { projects, userMemory } from "@/api/actions";
 import { keys, useMemory, useMemoryFile, useUserMemory, useUserMemoryFile } from "@/api/queries";
 import type { components } from "@/api/schema";
@@ -35,7 +36,7 @@ export function splitMemory(list: MemoryBrief[] | null | undefined): { index?: M
   return { index: all.find((f) => f.name === MEMORY_INDEX), files: all.filter((f) => f.name !== MEMORY_INDEX) };
 }
 
-const WRITERS: Record<string, string> = { user: "你", platform: "平台", coordinator: "统筹" };
+const WRITERS: Record<string, string> = { user: $t("你"), platform: $t("平台"), coordinator: $t("统筹") };
 
 /** Who last wrote a memory file: 你 / 平台 / 统筹 / lead-1 · #3. */
 export function memoryWriter(by: string): string {

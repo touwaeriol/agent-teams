@@ -4,6 +4,7 @@
 // sends, Shift+Enter breaks; IME composition is respected. With `draftKey` the unsent text survives
 // reloads (localStorage). Slots: `hint` (left of the action row), `controls` (in place of the
 // model tag: a session's model / mode chips), `extra`.
+import { $t } from "@/i18n";
 import { computed, ref, watch } from "vue";
 import { useDraft } from "@/lib/persist";
 import { toast } from "@/lib/toast";
@@ -90,7 +91,7 @@ async function sendOnce(): Promise<{ done: Promise<void> } | undefined> {
   if (assist.intercept(value)) return void (text.value = "");
   if (empty.value || props.busy) return;
   const images = props.attachments ? props.attachments.ids() : [];
-  if (images === null) return void toast.info("图片还在上传，稍等一下");
+  if (images === null) return void toast.info($t("图片还在上传，稍等一下"));
   // The box empties at once (text, images, references); what is typed or attached meanwhile is new.
   const refs = assist.takeRefs(value);
   const picked = assist.picked.value;
@@ -190,7 +191,7 @@ function onKey(e: KeyboardEvent) {
         <AttachButton v-if="attachments && !assist.enabled.value" :a="attachments" />
         <slot name="extra" />
         <VoiceButton v-if="voice.enabled.value" :v="voice" />
-        <SendButton label="发送" :busy="uploading" :disabled="empty" />
+        <SendButton :label="$t('发送')" :busy="uploading" :disabled="empty" />
       </span>
     </div>
   </form>

@@ -2,6 +2,7 @@
 // (WebRTC): the microphone track goes up, transcript events come back on the "oai-events" data
 // channel, authenticated with the short-lived client secret from POST /api/voice/session. It
 // needs the browser to reach api.openai.com; the default is the server relay (relay.ts).
+import { $t } from "@/i18n";
 
 export interface VoiceSessionInfo {
   provider: string;
@@ -71,8 +72,8 @@ export const CONNECT_TIMEOUT = 10_000;
 
 /** Why fetch failed, for "连不上语音服务：…". */
 export function networkReason(e: unknown, timedOut: boolean): string {
-  if (timedOut) return `${CONNECT_TIMEOUT / 1000} 秒内没有响应`;
-  return e instanceof Error && e.message ? `网络不通（${e.message}）` : "网络不通";
+  if (timedOut) return $t("{n} 秒内没有响应", { n: CONNECT_TIMEOUT / 1000 });
+  return e instanceof Error && e.message ? $t("网络不通（{message}）", { message: e.message }) : $t("网络不通");
 }
 
 export const connectOpenAI: Connect = async (session, micStream, h) => {
@@ -120,9 +121,9 @@ export const connectOpenAI: Connect = async (session, micStream, h) => {
       headers: { Authorization: `Bearer ${session.client_secret}`, "Content-Type": "application/sdp" },
       signal: abort.signal,
     }).catch((e) => {
-      throw new ConnectError(0, `连不上语音服务：${networkReason(e, timedOut)}`);
+      throw new ConnectError(0, $t("连不上语音服务：{networkReason}", { networkReason: networkReason(e, timedOut) }));
     });
-    if (!res.ok) throw new ConnectError(res.status, `连不上语音服务：OpenAI 拒绝了连接（${res.status}）`);
+    if (!res.ok) throw new ConnectError(res.status, $t("连不上语音服务：OpenAI 拒绝了连接（{status}）", { status: res.status }));
     await pc.setRemoteDescription({ type: "answer", sdp: await res.text() });
     await opened(dc, Math.max(0, deadline - Date.now()));
   } catch (e) {
@@ -138,7 +139,7 @@ export const connectOpenAI: Connect = async (session, micStream, h) => {
 function opened(dc: RTCDataChannel, ms: number): Promise<void> {
   if (dc.readyState === "open") return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new ConnectError(0, "连不上语音服务：浏览器和 OpenAI 之间的 WebRTC 连接没有建立（可能被网络或代理拦截）")), ms);
+    const timer = setTimeout(() => reject(new ConnectError(0, $t("连不上语音服务：浏览器和 OpenAI 之间的 WebRTC 连接没有建立（可能被网络或代理拦截）"))), ms);
     dc.addEventListener("open", () => (clearTimeout(timer), resolve()), { once: true });
   });
 }

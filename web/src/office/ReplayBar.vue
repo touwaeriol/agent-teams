@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // Replay controls: play/pause, 1× / 4× / 16× and a time scrubber.
+import { $t } from "@/i18n";
 import type { CSSProperties } from "vue";
 import { REPLAY_SPEEDS, type ReplayState } from "./replay";
 
@@ -32,17 +33,17 @@ const mono = "'JetBrains Mono', monospace";
       <button
         type="button"
         :style="{ ...btn(true), background: '#C8622A', color: '#FFFFFF' }"
-        :aria-label="replay.playing.value ? '暂停' : '播放'"
+        :aria-label="replay.playing.value ? $t('暂停') : $t('播放')"
         @click="replay.playing.value ? replay.pause() : replay.play()"
       >
-        {{ replay.playing.value ? "❚❚ 暂停" : "▶ 播放" }}
+        {{ replay.playing.value ? $t("❚❚ 暂停") : $t("▶ 播放") }}
       </button>
       <button v-for="s in REPLAY_SPEEDS" :key="s" type="button" :style="btn(replay.speed.value === s)" :aria-pressed="replay.speed.value === s" @click="replay.setSpeed(s)">{{ s }}×</button>
       <span :style="{ marginLeft: 'auto', fontFamily: mono, color: '#A8A49B' }">{{ clock(replay.time.value) }}</span>
     </div>
     <input
       type="range"
-      aria-label="回放进度"
+      :aria-label="$t('回放进度')"
       :min="replay.start.value"
       :max="replay.end.value"
       step="100"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Drag handle between the chat and the right panel: drag to resize, arrow keys nudge,
 // double-click / Home / Enter reset. The parent clamps and remembers the width (lib/panelWidth.ts).
+import { $t } from "@/i18n";
 import { ref } from "vue";
 import { dragWidth } from "@/lib/panelWidth";
 import { cn } from "@/lib/utils";
@@ -48,7 +49,7 @@ function key(e: KeyboardEvent) {
     :aria-valuemin="min"
     :aria-valuemax="max"
     tabindex="0"
-    title="拖动调整宽度，双击恢复默认"
+    :title="$t('拖动调整宽度，双击恢复默认')"
     class="group relative z-10 -mr-[3px] hidden w-[6px] shrink-0 cursor-col-resize touch-none outline-none lg:block"
     @pointerdown="down"
     @pointermove="move"

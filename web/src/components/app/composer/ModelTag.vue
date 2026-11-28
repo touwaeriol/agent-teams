@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * The model the box's employee (project coordinator or thread lead) runs with, read-only: they
  * have no /model; their model is set in the role or the project settings (the server works out
@@ -12,7 +13,7 @@ const props = defineProps<{ cid: string }>();
 const state = useConversationModel(() => props.cid);
 const id = computed(() => state.data.value?.model ?? "");
 const name = computed(() => (id.value ? modelName(id.value) : ""));
-const tip = computed(() => `当前模型：${id.value}。统筹和组长不能用 /model 切换，请在岗位配置或项目设置里改`);
+const tip = computed(() => $t("当前模型：{id}。统筹和组长不能用 /model 切换，请在岗位配置或项目设置里改", { id: id.value }));
 </script>
 
 <template>

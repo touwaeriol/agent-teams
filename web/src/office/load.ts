@@ -1,6 +1,7 @@
 // Layout loading (office-layout.md §5, §6): fetch with ETag, resolve
 // `extends`, validate against the shared JSON Schema (ajv) and the semantic
 // checks, and fall back to the built-in layout on an unknown format.
+import { $t } from "@/i18n";
 import Ajv2020, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020";
 import schemaText from "./office-layout.schema.json?raw";
 import { validateSemantics } from "./validate";
@@ -44,7 +45,7 @@ export interface ValidatedLayout {
 /** Schema + semantic validation; throws LayoutError with all problems. */
 export function validateLayout(doc: unknown): ValidatedLayout {
   const format = (doc as { format?: unknown } | null)?.format;
-  if (format !== undefined && format !== SUPPORTED_FORMAT) throw new LayoutError(`布局格式需要更新的前端 (format ${String(format)})`);
+  if (format !== undefined && format !== SUPPORTED_FORMAT) throw new LayoutError($t("布局格式需要更新的前端 (format {format})", { format: String(format) }));
   const problems = schemaProblems(doc);
   if (problems.length) throw new LayoutError("layout does not match the schema", problems);
   const layout = doc as OfficeLayout;

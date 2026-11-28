@@ -2,6 +2,7 @@
 // A thread on its own page: the same chat-only view as the right panel (header, conversation
 // with you and the lead, message box), at reading width. Phones and narrow screens get it for
 // /projects/:pid/threads/:no; wide screens open the panel there and this page at /full.
+import { $t } from "@/i18n";
 import { computed, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { useMe, useProject, useThreadByNo, useThreads, useWaiting } from "@/api/queries";
@@ -38,15 +39,15 @@ const nav = computed(() => {
   return threadNav(order, no.value, (n) => `${threadPath(pid.value, n)}${full.value ? "/full" : ""}`);
 });
 useReminderAlerts(() => threads.data.value ?? [], (n) => void router.push(threadPath(pid.value, n)));
-const expand = computed(() => (wide.value && thread.value ? { to: threadPath(pid.value, thread.value.no), label: "退出全屏", collapse: true } : undefined));
+const expand = computed(() => (wide.value && thread.value ? { to: threadPath(pid.value, thread.value.no), label: $t("退出全屏"), collapse: true } : undefined));
 </script>
 
 <template>
   <Loading v-if="isLoading || !project.data.value" class="h-full" />
-  <EmptyState v-else-if="!thread" :title="`找不到讨论串 #${route.params.no}`" description="它可能已被归档或删除。">
+  <EmptyState v-else-if="!thread" :title="$t('找不到讨论串 #{no}', { no: route.params.no })" :description="$t('它可能已被归档或删除。')">
     <template #action>
       <RouterLink v-slot="{ href, navigate }" :to="`/projects/${pid}`" custom>
-        <el-button tag="a" :href="href" type="primary" @click="navigate">回到项目</el-button>
+        <el-button tag="a" :href="href" type="primary" @click="navigate">{{ $t("回到项目") }}</el-button>
       </RouterLink>
     </template>
   </EmptyState>

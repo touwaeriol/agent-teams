@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * A message between threads or with the coordinator (meta.relay), folded to one line like the
  * Claude app: "已向 #7 标题 发送 1 条消息 ⌄" on the sender's side, "来自 #3 标题 的 1 条消息 ⌄" on the
@@ -21,7 +22,7 @@ const open = ref(false);
 </script>
 
 <template>
-  <section aria-label="讨论串之间的消息" class="flex flex-col gap-1.5 text-[13px]" :data-relay="relay.dir">
+  <section :aria-label="$t('讨论串之间的消息')" class="flex flex-col gap-1.5 text-[13px]" :data-relay="relay.dir">
     <button v-if="body" type="button" :aria-expanded="open" class="flex items-center gap-1.5 self-start text-left text-muted-foreground hover:text-foreground" @click="open = !open">
       <MessageSquareShare aria-hidden="true" class="size-3.5 shrink-0" :stroke-width="1.8" />
       <span>{{ header }}</span>
@@ -35,6 +36,6 @@ const open = ref(false);
     <div v-if="body && open" class="ml-5 border-l-2 border-[#E7E4DD] pl-3 dark:border-border">
       <Markdown :source="message.content" class="text-sm leading-6" />
     </div>
-    <RouterLink v-if="no != null && (open || !body)" :to="`/projects/${pid}/threads/${no}`" class="ml-5 self-start text-xs text-primary hover:underline">查看讨论串</RouterLink>
+    <RouterLink v-if="no != null && (open || !body)" :to="`/projects/${pid}/threads/${no}`" class="ml-5 self-start text-xs text-primary hover:underline">{{ $t("查看讨论串") }}</RouterLink>
   </section>
 </template>

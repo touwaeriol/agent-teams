@@ -4,6 +4,7 @@
 // 进行中 rows are rich (progress line, node, tags); 已暂停 / 已完成 / 已归档 are compact single lines.
 // Subthreads sit indented under their parent when it is in the same group (the parent's
 // "n 个子讨论串" toggle folds them); elsewhere they carry "#n 的子讨论串".
+import { $t } from "@/i18n";
 import { ChevronDown } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 import type { QuestionView, ThreadView } from "@/api/views";
@@ -32,8 +33,8 @@ onBeforeUnmount(() => clearInterval(tick));
 </script>
 
 <template>
-  <p v-if="threads.length === 0" class="text-[13px] leading-6 text-muted-foreground">还没有讨论串。和项目统筹说需求，它会开讨论串去做。</p>
-  <p v-else-if="groups.length === 0" class="text-[13px] leading-6 text-muted-foreground">没有符合条件的讨论串。</p>
+  <p v-if="threads.length === 0" class="text-[13px] leading-6 text-muted-foreground">{{ $t("还没有讨论串。和项目统筹说需求，它会开讨论串去做。") }}</p>
+  <p v-else-if="groups.length === 0" class="text-[13px] leading-6 text-muted-foreground">{{ $t("没有符合条件的讨论串。") }}</p>
   <div v-else class="flex flex-col gap-4">
     <section v-for="g in groups" :key="g.id" :class="['flex flex-col', isCompactGroup(g.id) ? 'gap-0' : 'gap-0.5']" :data-group="g.id">
       <button

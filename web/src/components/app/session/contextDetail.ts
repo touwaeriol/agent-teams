@@ -1,6 +1,7 @@
 // 上下文 breakdown of a session (GET /api/conversations/{cid}/context/detail, Claude only): the
 // window's categories in the panel's order, the coloured segments of the bar and the MCP tools
 // grouped by server. Rows are classified on the SDK's id and kind, never on the English name.
+import { $t } from "@/i18n";
 import type { components } from "@/api/schema";
 import { zhTokens } from "./session";
 
@@ -10,19 +11,19 @@ export type ContextMcpTool = components["schemas"]["ContextMcpToolView"];
 
 /** Chinese names by SDK category id; an id we do not know keeps the runtime's own name. */
 export const CATEGORY_LABEL: Record<string, string> = {
-  mcp_tools: "MCP 工具",
-  system_tools: "系统工具",
-  messages: "消息",
+  mcp_tools: $t("MCP 工具"),
+  system_tools: $t("系统工具"),
+  messages: $t("消息"),
   skills: "Skills",
-  memory_files: "记忆文件",
-  system_prompt: "系统提示词",
-  mcp_instructions: "MCP 服务器指令",
-  custom_agents: "自定义子代理",
-  autocompact_buffer: "自动压缩缓冲区",
-  compact_buffer: "压缩缓冲区",
-  free_space: "可用空间",
-  mcp_tools_deferred: "延迟加载的 MCP 工具",
-  system_tools_deferred: "延迟加载的系统工具",
+  memory_files: $t("记忆文件"),
+  system_prompt: $t("系统提示词"),
+  mcp_instructions: $t("MCP 服务器指令"),
+  custom_agents: $t("自定义子代理"),
+  autocompact_buffer: $t("自动压缩缓冲区"),
+  compact_buffer: $t("压缩缓冲区"),
+  free_space: $t("可用空间"),
+  mcp_tools_deferred: $t("延迟加载的 MCP 工具"),
+  system_tools_deferred: $t("延迟加载的系统工具"),
 };
 
 /** Colours of the rows that fill the window (the bar's segments). Ink-like rows use theme variables (dark mode). */
@@ -54,12 +55,12 @@ export function swatchStyle(kind: ContextCategory["kind"], color: string): Recor
 export function refreshErrorText(error: string | undefined | null): string | null {
   if (!error) return null;
   const e = error.toLowerCase();
-  if (e.includes("no live process") || e.includes("not running") || e.includes("parked")) return "会话现在没有在运行（已停放），发一条消息后再刷新";
-  if (e.includes("no such session") || e.includes("unknown session")) return "节点上找不到这个会话（节点可能重启过），发一条消息后再刷新";
-  if (e.includes("offline") || e.includes("not online") || e.includes("disconnected")) return "节点不在线，稍后再试";
-  if (e.includes("timed out") || e.includes("timeout") || e.includes("did not report")) return "节点没能及时统计完，稍后再试";
-  if (e.includes("no context breakdown") || e.includes("unsupported")) return "这个运行时不提供上下文细分";
-  return "节点没能统计上下文，稍后再试";
+  if (e.includes("no live process") || e.includes("not running") || e.includes("parked")) return $t("会话现在没有在运行（已停放），发一条消息后再刷新");
+  if (e.includes("no such session") || e.includes("unknown session")) return $t("节点上找不到这个会话（节点可能重启过），发一条消息后再刷新");
+  if (e.includes("offline") || e.includes("not online") || e.includes("disconnected")) return $t("节点不在线，稍后再试");
+  if (e.includes("timed out") || e.includes("timeout") || e.includes("did not report")) return $t("节点没能及时统计完，稍后再试");
+  if (e.includes("no context breakdown") || e.includes("unsupported")) return $t("这个运行时不提供上下文细分");
+  return $t("节点没能统计上下文，稍后再试");
 }
 
 /** The order rows are listed in (others follow in the runtime's order). */
@@ -104,7 +105,7 @@ function rowOf(c: ContextCategory, i: number, d: ContextDetail): CategoryRow {
     label: CATEGORY_LABEL[id] ?? c.name,
     tokens: c.tokens,
     tokensText: zhTokens(c.tokens),
-    pctText: c.kind === "deferred" ? "不计入" : pctText(c.tokens, d.max_tokens),
+    pctText: c.kind === "deferred" ? $t("不计入") : pctText(c.tokens, d.max_tokens),
     kind: c.kind,
     color: CATEGORY_COLOR[id] ?? OTHER_COLOR,
     tools: id === "mcp_tools" ? tools.filter((t) => t.loaded) : id === "mcp_tools_deferred" ? tools.filter((t) => !t.loaded) : [],
@@ -175,6 +176,6 @@ export function shortTool(name: string, server: string): string {
 /** "更新于 3 分钟前 · 估算" (summary after a turn) / "· 精确" (a refresh); null before the first report. */
 export function updatedText(d: Pick<ContextDetail, "updated_at" | "detail">, ago: (iso: string) => string): string | null {
   if (!d.updated_at) return null;
-  const how = d.detail === "full" ? "精确" : "估算";
-  return `更新于 ${ago(d.updated_at)} · ${how}`;
+  const how = d.detail === "full" ? $t("精确") : $t("估算");
+  return $t("更新于 {updated_at} · {how}", { updated_at: ago(d.updated_at), how });
 }

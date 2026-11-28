@@ -1,13 +1,14 @@
 // Role template helpers for the Team page (pure, unit-tested).
+import { $t } from "@/i18n";
 import { MODEL_FORMAT_HINT, validModel } from "./models";
 import { unfit } from "./commands";
 import type { RoleView } from "@/api/views";
 import { roleRuntimes, runtimeLabel, runtimeSpec, type Runtime } from "./runtimes";
 
 export const LEVEL: Record<RoleView["tier"], { label: string; bg: string; fg: string }> = {
-  coordinator: { label: "项目级", bg: "#F4E3D7", fg: "#8A3D14" },
-  lead: { label: "讨论串级", bg: "#E3ECFA", fg: "#1F4E9E" },
-  member: { label: "成员", bg: "#E6F2EA", fg: "#1F5E3A" },
+  coordinator: { label: $t("项目级"), bg: "#F4E3D7", fg: "#8A3D14" },
+  lead: { label: $t("讨论串级"), bg: "#E3ECFA", fg: "#1F4E9E" },
+  member: { label: $t("成员"), bg: "#E6F2EA", fg: "#1F5E3A" },
 };
 
 const TIER_ORDER = { coordinator: 0, lead: 1, member: 2 } as const;
@@ -17,15 +18,15 @@ export function sortRoles(list: RoleView[]): RoleView[] {
 }
 
 export function roleName(r: Pick<RoleView, "tier" | "title" | "role">): string {
-  if (r.tier === "coordinator") return r.title || "项目统筹";
-  if (r.tier === "lead") return r.title || "组长";
+  if (r.tier === "coordinator") return r.title || $t("项目统筹");
+  if (r.tier === "lead") return r.title || $t("组长");
   return r.title || r.role;
 }
 
 export function countText(r: Pick<RoleView, "tier" | "count" | "gate">): string {
-  if (r.tier === "coordinator") return "每个项目 1 个";
-  if (r.tier === "lead") return "每个讨论串 1 个";
-  return `项目编制 ${r.count} 个${r.gate ? "（可选）" : ""}`;
+  if (r.tier === "coordinator") return $t("每个项目 1 个");
+  if (r.tier === "lead") return $t("每个讨论串 1 个");
+  return $t("项目编制 {count} 个{n}", { count: r.count, n: r.gate ? $t("（可选）") : "" });
 }
 
 /** read_only defaults by gate (api.md §2 RoleView). */
@@ -34,11 +35,11 @@ export function isReadOnly(r: Pick<RoleView, "read_only" | "gate">): boolean {
 }
 
 export function ruleText(r: Pick<RoleView, "tier" | "runtime" | "sandbox" | "read_only" | "gate"> & Partial<Pick<RoleView, "runtimes">>): string {
-  if (r.tier === "coordinator") return "只能用：开讨论串、看讨论串、给讨论串发话、问你。没有仓库、不能读写文件或执行命令（平台强制）。";
-  if (r.tier === "lead") return "可以只读查看代码来拆任务，不能修改文件；合并成员分支、开 PR 由平台代为执行。";
-  if (isReadOnly(r)) return "只读：git diff / log / show、gh pr view，不改代码。";
-  if (roleRuntimes(r).includes("codex")) return `${roleRuntimes(r).length > 1 ? "Codex " : ""}沙箱：${r.sandbox || "workspace-write"}；权限设成“直接执行”时沙箱完全放开。`;
-  return "可以给其他成员发消息、问组长、问你；不能直接推送基准分支。";
+  if (r.tier === "coordinator") return $t("只能用：开讨论串、看讨论串、给讨论串发话、问你。没有仓库、不能读写文件或执行命令（平台强制）。");
+  if (r.tier === "lead") return $t("可以只读查看代码来拆任务，不能修改文件；合并成员分支、开 PR 由平台代为执行。");
+  if (isReadOnly(r)) return $t("只读：git diff / log / show、gh pr view，不改代码。");
+  if (roleRuntimes(r).includes("codex")) return $t("{n}沙箱：{n2}；权限设成“直接执行”时沙箱完全放开。", { n: roleRuntimes(r).length > 1 ? "Codex " : "", n2: r.sandbox || "workspace-write" });
+  return $t("可以给其他成员发消息、问组长、问你；不能直接推送基准分支。");
 }
 
 /** The caveat of a read-only member whose runtime's read-only is no sandbox (Antigravity), "" otherwise. */
@@ -50,8 +51,8 @@ export function readOnlyCaveat(r: Pick<RoleView, "tier" | "runtime" | "read_only
 export type PermissionMode = "bypass" | "ask";
 
 export const PERMISSION_MODES: { id: PermissionMode; label: string }[] = [
-  { id: "bypass", label: "直接执行（默认）" },
-  { id: "ask", label: "逐条问" },
+  { id: "bypass", label: $t("直接执行（默认）") },
+  { id: "ask", label: $t("逐条问") },
 ];
 
 /** The role's mode; anything but ask (including the old auto) is bypass. */
@@ -61,16 +62,16 @@ export function permissionMode(r: Pick<RoleView, "permission_mode">): Permission
 
 const MODE_HINT: Record<Runtime, Record<PermissionMode, string>> = {
   claude: {
-    bypass: "员工直接执行，不弹权限确认。",
-    ask: "除了读文件，每个操作都先问（组长或你，看项目的审批方式）。",
+    bypass: $t("员工直接执行，不弹权限确认。"),
+    ask: $t("除了读文件，每个操作都先问（组长或你，看项目的审批方式）。"),
   },
   codex: {
-    bypass: "员工直接执行，不弹权限确认（沙箱完全放开）。",
-    ask: "除了它信任的只读命令，每个命令都先申请（untrusted）。",
+    bypass: $t("员工直接执行，不弹权限确认（沙箱完全放开）。"),
+    ask: $t("除了它信任的只读命令，每个命令都先申请（untrusted）。"),
   },
   antigravity: {
-    bypass: "员工直接执行，Antigravity 的权限请求由节点自动放行。",
-    ask: "Antigravity 每次申请权限都先问（组长或你，看项目的审批方式）。",
+    bypass: $t("员工直接执行，Antigravity 的权限请求由节点自动放行。"),
+    ask: $t("Antigravity 每次申请权限都先问（组长或你，看项目的审批方式）。"),
   },
 };
 
@@ -104,7 +105,7 @@ export function nextRoleKey(list: Pick<RoleView, "role">[]): string {
 export const ROLE_KEY = /^[a-z][a-z0-9-]{0,23}$/;
 
 /** What a writing member's compaction keeps by default (server roles.DevFocus). */
-export const DEV_FOCUS = "保留当前任务 id、分支、改过的文件、做过的决定、还没做完的事和已知的坑";
+export const DEV_FOCUS = $t("保留当前任务 id、分支、改过的文件、做过的决定、还没做完的事和已知的坑");
 
 export type ContextFields = Pick<RoleView, "context_limit" | "compact_between_pct" | "compact_in_task_pct" | "clear_after_tasks" | "compact_focus">;
 
@@ -154,8 +155,8 @@ export function inTaskThreshold(r: Pick<RoleView, "runtime" | "context_limit" | 
 /** One line on a threshold: "，即 480K" or the capped value with why. */
 export function thresholdText(t: Threshold | null): string {
   if (!t) return "";
-  if (t.cappedAt) return `，即 ${kTokens(t.tokens)}（Claude 最晚在窗口 − 33K 时压缩，按 ${kTokens(t.cappedAt)} 封顶）`;
-  return `，即 ${kTokens(t.tokens)}`;
+  if (t.cappedAt) return $t("，即 {tokens}（Claude 最晚在窗口 − 33K 时压缩，按 {cappedAt} 封顶）", { tokens: kTokens(t.tokens), cappedAt: kTokens(t.cappedAt) });
+  return $t("，即 {tokens}", { tokens: kTokens(t.tokens) });
 }
 
 const CONTEXT_KEYS = ["context_limit", "compact_between_pct", "compact_in_task_pct", "clear_after_tasks", "compact_focus"] as const;
@@ -171,10 +172,10 @@ export function contextProblems(r: RoleView): string[] {
   const out: string[] = [];
   const whole = (v: number | null | undefined) => v == null || Number.isInteger(v);
   const pct = (v: number | null | undefined) => v != null && (v < 1 || v > 100 || !Number.isInteger(v));
-  if (!whole(r.context_limit) || !whole(r.clear_after_tasks)) out.push(`${roleName(r)} 的上下文上限和连续任务数要填整数`);
-  if (r.context_limit != null && r.context_limit < MIN_CONTEXT_LIMIT) out.push(`${roleName(r)} 的上下文上限至少 100000 token`);
-  if (pct(r.compact_between_pct) || pct(r.compact_in_task_pct)) out.push(`${roleName(r)} 的压缩比例要是 1–100 之间的整数`);
-  if (r.clear_after_tasks != null && r.clear_after_tasks < 0) out.push(`${roleName(r)} 的连续任务数不能是负数`);
+  if (!whole(r.context_limit) || !whole(r.clear_after_tasks)) out.push($t("{r} 的上下文上限和连续任务数要填整数", { r: roleName(r) }));
+  if (r.context_limit != null && r.context_limit < MIN_CONTEXT_LIMIT) out.push($t("{r} 的上下文上限至少 100000 token", { r: roleName(r) }));
+  if (pct(r.compact_between_pct) || pct(r.compact_in_task_pct)) out.push($t("{r} 的压缩比例要是 1–100 之间的整数", { r: roleName(r) }));
+  if (r.clear_after_tasks != null && r.clear_after_tasks < 0) out.push($t("{r} 的连续任务数不能是负数", { r: roleName(r) }));
   return out;
 }
 
@@ -184,7 +185,7 @@ export function newRole(list: RoleView[], color: string): RoleView {
     id: "",
     tier: "member",
     role: nextRoleKey(list),
-    title: "新岗位",
+    title: $t("新岗位"),
     runtime: "claude",
     runtimes: ["claude"],
     models: {},
@@ -234,20 +235,20 @@ export function fromPreset(list: RoleView[], preset: RoleView): RoleView {
 /** Local validation mirroring PUT /api/roles (the server is the authority). */
 export function roleProblems(list: RoleView[]): string[] {
   const problems: string[] = [];
-  if (list.filter((r) => r.tier === "coordinator").length !== 1) problems.push("需要恰好一个项目统筹");
-  if (list.filter((r) => r.tier === "lead").length !== 1) problems.push("需要恰好一个组长");
+  if (list.filter((r) => r.tier === "coordinator").length !== 1) problems.push($t("需要恰好一个项目统筹"));
+  if (list.filter((r) => r.tier === "lead").length !== 1) problems.push($t("需要恰好一个组长"));
   const keys = list.map((r) => r.role);
   keys.forEach((k, i) => {
-    if (!ROLE_KEY.test(k)) problems.push(`岗位键“${k}”只能用小写字母、数字和 -，以字母开头`);
-    if (keys.indexOf(k) !== i) problems.push(`岗位键“${k}”重复了`);
+    if (!ROLE_KEY.test(k)) problems.push($t("岗位键“{k}”只能用小写字母、数字和 -，以字母开头", { k }));
+    if (keys.indexOf(k) !== i) problems.push($t("岗位键“{k}”重复了", { k }));
   });
-  list.filter((r) => r.tier === "member" && (r.count < 1 || r.count > 8)).forEach((r) => problems.push(`${roleName(r)} 的数量要在 1–8 之间`));
-  list.filter((r) => !canHaveSkills(r) && (r.skills ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载技能`));
-  list.filter((r) => !canHaveSkills(r) && (r.plugins ?? []).length > 0).forEach((r) => problems.push(`${roleName(r)} 不能加载插件`));
+  list.filter((r) => r.tier === "member" && (r.count < 1 || r.count > 8)).forEach((r) => problems.push($t("{r} 的数量要在 1–8 之间", { r: roleName(r) })));
+  list.filter((r) => !canHaveSkills(r) && (r.skills ?? []).length > 0).forEach((r) => problems.push($t("{r} 不能加载技能", { r: roleName(r) })));
+  list.filter((r) => !canHaveSkills(r) && (r.plugins ?? []).length > 0).forEach((r) => problems.push($t("{r} 不能加载插件", { r: roleName(r) })));
   list.filter((r) => r.tier !== "member").forEach((r) =>
-    roleRuntimes(r).filter((rt) => !runtimeSpec(rt).canLead).forEach((rt) => problems.push(`${roleName(r)} 不能用 ${runtimeLabel(rt)}`)));
-  list.filter((r) => unfit(r).length > 0).forEach((r) => problems.push(`${roleName(r)} 只能用提示词模板命令`));
+    roleRuntimes(r).filter((rt) => !runtimeSpec(rt).canLead).forEach((rt) => problems.push($t("{r} 不能用 {rt}", { r: roleName(r), rt: runtimeLabel(rt) }))));
+  list.filter((r) => unfit(r).length > 0).forEach((r) => problems.push($t("{r} 只能用提示词模板命令", { r: roleName(r) })));
   list.forEach((r) => problems.push(...contextProblems(r)));
-  list.filter((r) => !validModel(r.model ?? "")).forEach((r) => problems.push(`${roleName(r)} 的${MODEL_FORMAT_HINT}`));
+  list.filter((r) => !validModel(r.model ?? "")).forEach((r) => problems.push($t("{r} 的{MODEL_FORMAT_HINT}", { r: roleName(r), MODEL_FORMAT_HINT })));
   return problems;
 }

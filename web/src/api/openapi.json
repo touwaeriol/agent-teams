@@ -203,6 +203,17 @@
               "null"
             ]
           },
+          "locale": {
+            "description": "Interface language; empty = follow the browser",
+            "enum": [
+              "",
+              "zh-CN",
+              "en",
+              "ko",
+              "ja"
+            ],
+            "type": "string"
+          },
           "max_nodes": {
             "format": "int64",
             "type": [
@@ -248,7 +259,8 @@
           "active",
           "max_nodes",
           "must_change_password",
-          "created_at"
+          "created_at",
+          "locale"
         ],
         "type": "object"
       },
@@ -3269,6 +3281,19 @@
         "required": [
           "text",
           "at"
+        ],
+        "type": "object"
+      },
+      "LocaleInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "locale": {
+            "description": "zh-CN, en, ko, ja, or empty to follow the browser",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locale"
         ],
         "type": "object"
       },
@@ -9194,6 +9219,17 @@
           "id": {
             "type": "string"
           },
+          "locale": {
+            "description": "Interface language; empty = follow the browser",
+            "enum": [
+              "",
+              "zh-CN",
+              "en",
+              "ko",
+              "ja"
+            ],
+            "type": "string"
+          },
           "max_nodes": {
             "format": "int64",
             "type": [
@@ -9220,7 +9256,8 @@
           "active",
           "max_nodes",
           "must_change_password",
-          "created_at"
+          "created_at",
+          "locale"
         ],
         "type": "object"
       },
@@ -12839,6 +12876,47 @@
           }
         },
         "summary": "The signed-in user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/me/locale": {
+      "put": {
+        "operationId": "put-my-locale",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocaleInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Set my interface language (empty = follow the browser)",
         "tags": [
           "auth"
         ]

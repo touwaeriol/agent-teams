@@ -1,4 +1,5 @@
 // Browser audio: the microphone stream, the device list and a level meter.
+import { $t } from "@/i18n";
 
 export interface MicDevice {
   deviceId: string;
@@ -10,11 +11,11 @@ export interface MicDevice {
 /** Why the microphone could not be opened, in words for the user. */
 export function micErrorText(e: unknown): string {
   const name = (e as { name?: string })?.name ?? "";
-  if (name === "NotAllowedError" || name === "SecurityError") return "浏览器没有允许使用麦克风，请在地址栏的权限设置里允许";
-  if (name === "NotFoundError" || name === "OverconstrainedError") return "没有找到麦克风";
-  if (name === "NotReadableError") return "麦克风被别的程序占用了";
-  if (!globalThis.navigator?.mediaDevices?.getUserMedia) return "这个浏览器不支持录音（需要 HTTPS）";
-  return "打不开麦克风";
+  if (name === "NotAllowedError" || name === "SecurityError") return $t("浏览器没有允许使用麦克风，请在地址栏的权限设置里允许");
+  if (name === "NotFoundError" || name === "OverconstrainedError") return $t("没有找到麦克风");
+  if (name === "NotReadableError") return $t("麦克风被别的程序占用了");
+  if (!globalThis.navigator?.mediaDevices?.getUserMedia) return $t("这个浏览器不支持录音（需要 HTTPS）");
+  return $t("打不开麦克风");
 }
 
 export async function openMic(deviceId: string): Promise<MediaStream> {
@@ -58,7 +59,7 @@ export function normalizeMics(all: DeviceLike[]): MicList {
   const labelled = inputs.some((d) => d.label);
   const def = inputs.find((d) => d.deviceId === "default");
   const defName = def?.label.replace(DEFAULT_PREFIX, "").trim() ?? "";
-  const devices: MicDevice[] = [{ deviceId: "", label: defName ? `系统默认（${defName}）` : "系统默认" }];
+  const devices: MicDevice[] = [{ deviceId: "", label: defName ? $t("系统默认（{defName}）", { defName }) : $t("系统默认") }];
   const seen = new Set<string>();
   for (const d of inputs) {
     if (d.deviceId === "default" || d.deviceId === "communications") continue;
@@ -66,7 +67,7 @@ export function normalizeMics(all: DeviceLike[]): MicList {
     if (key && seen.has(key)) continue;
     seen.add(key);
     const n = devices.length;
-    devices.push(d.deviceId && d.label ? { deviceId: d.deviceId, label: d.label } : { deviceId: `placeholder:${n}`, label: d.label || `麦克风 ${n}`, placeholder: true });
+    devices.push(d.deviceId && d.label ? { deviceId: d.deviceId, label: d.label } : { deviceId: `placeholder:${n}`, label: d.label || $t("麦克风 {n}", { n }), placeholder: true });
   }
   return { devices, labelled };
 }
@@ -79,7 +80,7 @@ export function selectedMic(list: MicDevice[], deviceId: string): string {
 /** Audio inputs as rows for the mic menu (see normalizeMics). */
 export async function listMics(): Promise<MicList> {
   const md = globalThis.navigator?.mediaDevices;
-  if (!md?.enumerateDevices) return { devices: [{ deviceId: "", label: "系统默认" }], labelled: false };
+  if (!md?.enumerateDevices) return { devices: [{ deviceId: "", label: $t("系统默认") }], labelled: false };
   return normalizeMics(await md.enumerateDevices());
 }
 

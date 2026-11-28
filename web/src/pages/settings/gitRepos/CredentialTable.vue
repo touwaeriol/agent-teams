@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** The credentials shared by repositories on the same host: copy a generated public key, replace, delete. */
 import { gitCredentials } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -10,13 +11,13 @@ import { toast } from "@/lib/toast";
 
 defineProps<{ credentials: GitCredentialView[] }>();
 const emit = defineEmits<{ replace: [credential: GitCredentialView] }>();
-const remove = useAction((id: string) => gitCredentials.remove(id), { invalidate: [keys.gitCredentials], success: "凭据已删除" });
+const remove = useAction((id: string) => gitCredentials.remove(id), { invalidate: [keys.gitCredentials], success: $t("凭据已删除") });
 async function copy(text: string) {
   try {
     await navigator.clipboard.writeText(text);
-    toast.success("公钥已复制");
+    toast.success($t("公钥已复制"));
   } catch {
-    toast.error("复制失败，请手动选中复制");
+    toast.error($t("复制失败，请手动选中复制"));
   }
 }
 const soon = (c: GitCredentialView) => {
@@ -31,22 +32,22 @@ const soon = (c: GitCredentialView) => {
       <span class="flex min-w-[180px] flex-1 flex-col">
         <span class="font-medium">{{ c.name }}</span>
         <span class="text-xs text-muted-foreground">
-          {{ CRED_KIND_LABEL[c.kind] }} · <span class="font-mono">{{ c.host }}</span> · 用户 <span class="font-mono">{{ c.username }}</span>
-          <template v-if="c.generated"> · 平台生成</template>
+          {{ CRED_KIND_LABEL[c.kind] }} · <span class="font-mono">{{ c.host }}</span> {{ $t("· 用户") }} <span class="font-mono">{{ c.username }}</span>
+          <template v-if="c.generated"> {{ $t("· 平台生成") }}</template>
           <template v-if="c.key_fingerprint"> · <span class="font-mono">{{ c.key_fingerprint }}</span></template>
         </span>
       </span>
-      <span class="min-w-[90px] text-xs text-muted-foreground">{{ c.repos }} 个仓库在用</span>
+      <span class="min-w-[90px] text-xs text-muted-foreground">{{ $t("{repos} 个仓库在用", { repos: c.repos }) }}</span>
       <span :class="['min-w-[90px] text-xs', soon(c) ? 'text-warn' : 'text-muted-foreground']">{{ expiryText(c) }}</span>
       <span class="flex gap-2 [&>.el-button]:!ml-0">
-        <el-button v-if="c.public_key" size="small" text @click="copy(c.public_key)">复制公钥</el-button>
-        <el-button size="small" text @click="emit('replace', c)">替换</el-button>
+        <el-button v-if="c.public_key" size="small" text @click="copy(c.public_key)">{{ $t("复制公钥") }}</el-button>
+        <el-button size="small" text @click="emit('replace', c)">{{ $t("替换") }}</el-button>
         <ConfirmAction
-          :title="`删除凭据 ${c.name}？`"
-          :description="c.repos > 0 ? '还有仓库在用它：先给那些仓库换一条凭据。' : '删除后无法恢复，上游的令牌或部署密钥请到对应平台吊销。'"
+          :title="$t('删除凭据 {name}？', { name: c.name })"
+          :description="c.repos > 0 ? $t('还有仓库在用它：先给那些仓库换一条凭据。') : $t('删除后无法恢复，上游的令牌或部署密钥请到对应平台吊销。')"
           size="small"
           @confirm="remove.mutate(c.id)"
-        >删除</ConfirmAction>
+        >{{ $t("删除") }}</ConfirmAction>
       </span>
     </div>
   </div>

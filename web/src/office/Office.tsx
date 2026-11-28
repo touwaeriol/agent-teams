@@ -2,6 +2,7 @@
 // web/src/office/Office.tsx. Props are documented on OfficeProps; see README.md in this folder.
 // Callbacks are props (onSelect, onFocusThread, onAction), so `@select="…"` binds them and the
 // overlay can tell whether anyone listens (click targets are only drawn then).
+import { $t } from "@/i18n";
 import {
   computed,
   defineComponent,
@@ -434,9 +435,9 @@ const Stage = defineComponent({
 export function listGroups(scene: Scene, actors: ActorView[]): { key: string; title: string; list: ActorView[] }[] {
   const shown = new Set(scene.visible.map((t) => t.no));
   return [
-    { key: "coord", title: "项目统筹", list: actors.filter((a) => a.employee.tier === "coordinator") },
+    { key: "coord", title: $t("项目统筹"), list: actors.filter((a) => a.employee.tier === "coordinator") },
     ...scene.visible.map((t) => ({ key: String(t.no), title: `#${t.no} ${t.title}`, list: actors.filter((a) => a.thread === t.no) })),
-    { key: "free", title: "空闲成员", list: actors.filter((a) => a.employee.tier === "member" && (a.thread === null || !shown.has(a.thread))) },
+    { key: "free", title: $t("空闲成员"), list: actors.filter((a) => a.employee.tier === "member" && (a.thread === null || !shown.has(a.thread))) },
   ].filter((g) => g.list.length);
 }
 

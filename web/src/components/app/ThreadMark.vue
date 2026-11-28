@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * The round mark before a thread in lists. Without `mark`: a spinner while in progress, outlined
  * in the state colour otherwise, filled with ✓ when done. With `mark` (the panel list, the thread
@@ -36,7 +37,7 @@ const label = computed(() => {
       <span v-else class="size-[13px] rounded-full border-[1.5px]" :style="{ borderColor: INK.idle }" />
     </span>
   </template>
-  <Spin v-else-if="threadLook(thread).spin" :color="tone" :size="16" class="mt-0.5" label="进行中" />
+  <Spin v-else-if="threadLook(thread).spin" :color="tone" :size="16" class="mt-0.5" :label="$t('进行中')" />
   <span
     v-else
     aria-hidden="true"

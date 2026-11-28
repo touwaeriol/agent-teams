@@ -3,6 +3,7 @@
 // detail) in the resizable right panel. Phones get thread chips and the project overview
 // (?sheet=threads|library|schedules).
 // /projects/:pid/settings[/:section] opens the project settings dialog over the board.
+import { $t } from "@/i18n";
 import { computed, nextTick, ref, watch, watchEffect } from "vue";
 import { MessagesSquare } from "lucide-vue-next";
 import { useRoute, useRouter } from "vue-router";
@@ -73,7 +74,7 @@ const backToChat = () => {
 const mainEl = ref<HTMLElement | null>(null);
 watch(peek, (on) => {
   if (!on || !mainEl.value?.contains(document.activeElement)) return;
-  void nextTick(() => boardEl.value?.querySelector<HTMLElement>("aside[aria-label=讨论串]")?.focus({ preventScroll: true }));
+  void nextTick(() => boardEl.value?.querySelector<HTMLElement>(`aside[aria-label="${$t("讨论串")}"]`)?.focus({ preventScroll: true }));
 });
 /** The panel is expanded (the list's expand button then shrinks it back to the default). */
 const isWide = computed(() => panelWidth.width.value >= Math.min(PANEL_WIDE, panelWidth.max.value) && panelWidth.width.value > PANEL_DEFAULT);
@@ -98,7 +99,7 @@ watchEffect(() => {
 </script>
 
 <template>
-  <EmptyState v-if="project.error.value" title="找不到这个项目" :description="errorText(project.error.value)" />
+  <EmptyState v-if="project.error.value" :title="$t('找不到这个项目')" :description="errorText(project.error.value)" />
   <Loading v-else-if="!project.data.value" class="h-full" />
   <div v-else ref="boardEl" class="flex h-full min-h-0 min-w-0 flex-1">
     <main ref="mainEl" :class="['relative flex min-h-0 min-w-0 flex-1', peek && 'overflow-clip']" :data-peek="peek ? '' : undefined">
@@ -117,15 +118,15 @@ watchEffect(() => {
       <button
         v-if="peek"
         type="button"
-        title="回到项目统筹会话"
-        aria-label="回到项目统筹会话"
+        :title="$t('回到项目统筹会话')"
+        :aria-label="$t('回到项目统筹会话')"
         class="group absolute inset-0 z-[1] flex h-full w-full cursor-pointer flex-col items-center bg-background/70 pt-16 text-muted-foreground transition-colors hover:bg-background/45 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#2F6FDB]"
         data-testid="coordinator-peek"
         @click="backToChat"
       >
         <span class="flex flex-col items-center gap-2 rounded-full border bg-panel px-1.5 py-2.5 shadow-sm transition-colors group-hover:border-[#2F6FDB]/50 group-hover:text-[#2F6FDB]">
           <MessagesSquare :size="16" :stroke-width="1.8" />
-          <span class="text-[12px] leading-4 tracking-[2px] [writing-mode:vertical-rl]">项目统筹</span>
+          <span class="text-[12px] leading-4 tracking-[2px] [writing-mode:vertical-rl]">{{ $t("项目统筹") }}</span>
         </span>
       </button>
     </main>
@@ -134,8 +135,8 @@ watchEffect(() => {
       :width="panelWidth.width.value"
       :min="PANEL_MIN"
       :max="panelWidth.max.value"
-      label="讨论串"
-      handle-label="调整讨论串宽度"
+      :label="$t('讨论串')"
+      :handle-label="$t('调整讨论串宽度')"
       @change="panelWidth.set"
       @reset="panelWidth.reset"
     >
@@ -164,7 +165,7 @@ watchEffect(() => {
     </SidePanel>
     <aside
       v-if="panel === 'library'"
-      aria-label="资料库"
+      :aria-label="$t('资料库')"
       class="fixed inset-0 z-30 flex flex-col bg-panel lg:static lg:z-auto lg:h-full lg:w-[min(820px,56vw)] lg:min-w-[420px] lg:shrink-0 lg:border-l"
     >
       <LibraryBrowser :pid="pid" variant="panel" @close="setPanel('threads')" />

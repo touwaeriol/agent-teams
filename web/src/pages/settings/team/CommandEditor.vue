@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 命令 on a role card: which platform commands the role's chat lists (coordinator and lead),
 // and the role's own custom commands (prompt templates; passthrough for Claude Code chats).
+import { $t } from "@/i18n";
 import { Check, Pencil, Plus, X } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import type { RoleView } from "@/api/views";
@@ -36,7 +37,7 @@ const remove = (i: number) => emit("change", { commands: list.value.filter((_, j
 <template>
   <div class="flex flex-col gap-2 border-t border-[#F1EFEA] pt-2.5 text-[13px]" data-testid="command-editor">
     <div v-if="platform.length" class="flex flex-wrap items-center gap-1.5">
-      <span class="mr-1 text-xs text-muted-foreground">平台命令</span>
+      <span class="mr-1 text-xs text-muted-foreground">{{ $t("平台命令") }}</span>
       <span v-for="c in platform" :key="c.name" :title="c.desc">
         <ToggleChip :on="!hidden.includes(c.name)" @click="emit('change', { hidden_commands: toggleHidden(hidden, c.name) })">
           <Check v-if="!hidden.includes(c.name)" class="mr-0.5 inline size-3" /><span :class="hidden.includes(c.name) && 'text-muted-foreground line-through'">/{{ c.name }}</span>
@@ -44,23 +45,23 @@ const remove = (i: number) => emit("change", { commands: list.value.filter((_, j
       </span>
     </div>
     <div class="flex flex-wrap items-center gap-1.5">
-      <span class="mr-1 text-xs text-muted-foreground">自定义命令</span>
+      <span class="mr-1 text-xs text-muted-foreground">{{ $t("自定义命令") }}</span>
       <span v-for="(c, i) in list" :key="c.name" class="inline-flex h-6 items-center gap-1 rounded-md border border-input bg-white pl-2 pr-0.5 text-xs" :title="c.description || c.prompt">
         <span class="font-mono">/{{ c.name }}</span>
         <span class="text-muted-foreground">{{ modeLabel(c) }}</span>
-        <button type="button" :aria-label="`编辑 /${c.name}`" class="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-raised" @click="edit(i)">
+        <button type="button" :aria-label="$t('编辑 /{name}', { name: c.name })" class="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-raised" @click="edit(i)">
           <Pencil class="size-3" />
         </button>
-        <button type="button" :aria-label="`删除 /${c.name}`" class="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-raised" @click="remove(i)">
+        <button type="button" :aria-label="$t('删除 /{name}', { name: c.name })" class="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-raised" @click="remove(i)">
           <X class="size-3" />
         </button>
       </span>
       <button type="button" class="inline-flex h-6 items-center gap-0.5 rounded-md border border-dashed border-input px-2 text-xs text-muted-foreground hover:bg-raised" @click="edit(null)">
-        <Plus class="size-3" />添加命令
+        <Plus class="size-3" />{{ $t("添加命令") }}
       </button>
     </div>
     <p class="text-xs leading-[19px] text-muted-foreground">{{ commandsHint(role) }}</p>
-    <p v-if="bad.length" class="text-xs text-destructive">{{ bad.join("、") }} 是透传命令，这个岗位只能用提示词模板，请编辑或删除。</p>
+    <p v-if="bad.length" class="text-xs text-destructive">{{ $t("{bad} 是透传命令，这个岗位只能用提示词模板，请编辑或删除。", { bad: bad.join("、") }) }}</p>
     <CommandDialog v-model:open="open" :command="current" :taken="taken" :prompt-only="onlyPrompt" :no-slash="promptRuntime(role) ? runtimeLabel(promptRuntime(role)) : ''" @save="save" />
   </div>
 </template>

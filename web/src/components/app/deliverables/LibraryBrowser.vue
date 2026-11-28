@@ -3,6 +3,7 @@
 // type, searchable (hosted images are not deliverables and are left out), with "+ 添加" to upload a file the team can read. Used as the right-hand
 // panel of the main board, on the full Deliverables page and as the phone overview's 资料库 tab
 // (`sheet`: no header of its own, the search box follows `search`).
+import { $t } from "@/i18n";
 import { Maximize2, Search, X } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { useDeliverables } from "@/api/queries";
@@ -41,16 +42,16 @@ const vFocus = { mounted: (el: HTMLInputElement) => panel.value && el.focus() };
 <template>
   <div class="flex min-h-0 flex-1 flex-col">
     <div v-if="variant === 'panel'" class="flex h-14 shrink-0 items-center gap-1 border-b px-4">
-      <span class="flex-1 font-semibold">资料库</span>
-      <IconButton label="搜索" :active="searching" @click="searching = !searching"><Search :stroke-width="1.8" /></IconButton>
-      <IconButton label="全屏打开" :to="`/projects/${pid}/deliverables`"><Maximize2 :stroke-width="1.8" /></IconButton>
-      <IconButton label="关闭资料库" @click="emit('close')"><X :stroke-width="1.8" /></IconButton>
+      <span class="flex-1 font-semibold">{{ $t("资料库") }}</span>
+      <IconButton :label="$t('搜索')" :active="searching" @click="searching = !searching"><Search :stroke-width="1.8" /></IconButton>
+      <IconButton :label="$t('全屏打开')" :to="`/projects/${pid}/deliverables`"><Maximize2 :stroke-width="1.8" /></IconButton>
+      <IconButton :label="$t('关闭资料库')" @click="emit('close')"><X :stroke-width="1.8" /></IconButton>
     </div>
     <div :class="cn('flex shrink-0 flex-wrap items-center gap-2', panel ? 'px-4 pt-3' : '')">
       <TypeFilter :value="kind" @change="(v) => (kind = v)" />
       <label v-if="searching" class="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-lg border border-input bg-panel px-2.5 text-muted-foreground sm:max-w-60">
         <Search class="size-3.5 shrink-0" :stroke-width="1.8" />
-        <input v-focus v-model="q" placeholder="搜索资料库" class="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none" />
+        <input v-focus v-model="q" :placeholder="$t('搜索资料库')" class="min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none" />
       </label>
       <span class="ml-auto flex items-center gap-2">
         <slot name="extra" />
@@ -61,14 +62,14 @@ const vFocus = { mounted: (el: HTMLInputElement) => panel.value && el.focus() };
     <div :class="cn('scroll-thin min-h-0 flex-1 overflow-y-auto', panel ? 'px-4 pb-3 pt-2' : 'pt-3')">
       <Loading v-if="list.isLoading.value" />
       <p v-if="list.data.value && items.length === 0" class="rounded-xl border border-dashed p-8 text-center text-[13px] text-muted-foreground">
-        {{ q || kind ? "没有匹配的内容。" : "资料库还是空的。员工发布的设计稿、文档、PR 会出现在这里，你也可以点“添加”上传文件。" }}
+        {{ q || kind ? $t("没有匹配的内容。") : $t("资料库还是空的。员工发布的设计稿、文档、PR 会出现在这里，你也可以点“添加”上传文件。") }}
       </p>
       <LibraryTable v-if="items.length > 0 && view === 'list'" :pid="pid" :items="items" :sort="sort" @sort="(k) => (sort = nextSort(sort, k))" />
       <LibraryGrid v-if="items.length > 0 && view === 'grid'" :pid="pid" :items="items" />
     </div>
     <div :class="cn('flex shrink-0 items-center border-t py-2.5 text-xs text-muted-foreground', panel ? 'px-4' : '')">
-      已使用 {{ formatBytes(list.data.value?.storage_bytes ?? 0, "decimal") }}
-      <span class="ml-auto">{{ items.length }} 项</span>
+      {{ $t("已使用 {formatBytes}", { formatBytes: formatBytes(list.data.value?.storage_bytes ?? 0, "decimal") }) }}
+      <span class="ml-auto">{{ $t("{itemsCount} 项", { itemsCount: items.length }) }}</span>
     </div>
   </div>
 </template>

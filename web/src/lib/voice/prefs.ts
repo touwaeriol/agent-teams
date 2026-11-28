@@ -1,4 +1,5 @@
 // Per-user voice preferences in this browser: microphone, language, push-to-talk.
+import { $t } from "@/i18n";
 import { readLocal, writeLocal } from "@/lib/persist";
 
 export interface VoicePrefs {
@@ -92,6 +93,6 @@ export function filterLanguages(list: LanguageOption[], query: string): Language
 }
 
 export function languageLabel(list: LanguageOption[], code: string): string {
-  if (code === "auto") return "自动";
-  return list.find((l) => l.code === code)?.name ?? "自动";
+  if (code === "auto") return $t("自动");
+  return list.find((l) => l.code === code)?.name ?? $t("自动");
 }

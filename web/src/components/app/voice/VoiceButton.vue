@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * Mic button beside send, in one of two modes (VoicePrefs.pushToTalk, the 按住录音 switch):
  * - click mode (default): click to start, click again to stop. While connecting a click cancels,
@@ -24,10 +25,10 @@ const phase = computed(() => props.v.state.phase);
 const ptt = computed(() => props.v.prefs.pushToTalk);
 const active = computed(() => phase.value === "connecting" || phase.value === "recording" || phase.value === "stopping");
 const label = computed(() => {
-  if (phase.value === "connecting") return ptt.value ? "正在连接…连上后开始录音，松开结束" : "正在连接…点击取消";
-  if (phase.value === "stopping") return ptt.value ? "正在整理文字…" : "正在整理文字…点击立即结束";
-  if (phase.value === "recording") return ptt.value ? "正在录音，松开结束" : "正在录音，点击结束（Esc）";
-  return ptt.value ? `按住说话，松开结束（${shortcut}）` : `语音输入：点击开始，再点击结束（${shortcut}）`;
+  if (phase.value === "connecting") return ptt.value ? $t("正在连接…连上后开始录音，松开结束") : $t("正在连接…点击取消");
+  if (phase.value === "stopping") return ptt.value ? $t("正在整理文字…") : $t("正在整理文字…点击立即结束");
+  if (phase.value === "recording") return ptt.value ? $t("正在录音，松开结束") : $t("正在录音，点击结束（Esc）");
+  return ptt.value ? $t("按住说话，松开结束（{shortcut}）", { shortcut }) : $t("语音输入：点击开始，再点击结束（{shortcut}）", { shortcut });
 });
 const wave = computed(() => phase.value === "connecting" || phase.value === "recording");
 /** The inline composer is short on room: fewer, shorter bars. */
@@ -157,8 +158,8 @@ onBeforeUnmount(() => listen(false));
       <template #reference>
         <button
           type="button"
-          aria-label="语音设置"
-          title="麦克风、语言、按住录音"
+          :aria-label="$t('语音设置')"
+          :title="$t('麦克风、语言、按住录音')"
           class="-ml-1 flex h-6 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-raised hover:text-foreground"
           data-testid="voice-settings"
         >

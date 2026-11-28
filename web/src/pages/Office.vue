@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Office board: the pixel office (src/office) for one project. It lives outside the project
 // shell (full-bleed dark page), so it opens its own event stream and paints the body dark.
+import { $t } from "@/i18n";
 import { computed, onBeforeUnmount, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import { errorText } from "@/api/mutations";
@@ -25,7 +26,7 @@ onBeforeUnmount(() => (document.body.style.background = previous));
 </script>
 
 <template>
-  <EmptyState v-if="snapshot.error.value" title="办公室打不开" :description="errorText(snapshot.error.value)" />
+  <EmptyState v-if="snapshot.error.value" :title="$t('办公室打不开')" :description="errorText(snapshot.error.value)" />
   <div v-else-if="!snapshot.data.value || !project.data.value" class="h-full" :style="{ background: DARK.page }"><Loading class="h-full" /></div>
   <OfficeView
     v-else

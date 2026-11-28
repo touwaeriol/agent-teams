@@ -21,6 +21,7 @@ type User struct {
 	MaxRunningThreads  *int
 	MustChangePassword bool
 	LastLoginAt        *time.Time
+	Locale             string
 }
 
 // TableName maps User to at_users.
@@ -34,7 +35,7 @@ type UserSummary struct {
 }
 
 const userCols = `u.id, u.email, u.active, u.max_nodes, u.created_at,
-	u.display_name, u.max_running_threads, u.must_change_password, u.last_login_at`
+	u.display_name, u.max_running_threads, u.must_change_password, u.last_login_at, u.locale`
 
 func (s *Store) users(ctx context.Context) *gorm.DB {
 	return s.g(ctx).Table("at_users u").Select(userCols)

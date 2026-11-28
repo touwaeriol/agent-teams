@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** "存到项目文件": the target path (default the file name) and, after a 409 file_exists, an overwrite choice. */
 import { ref, watch } from "vue";
 import { ApiError } from "@/api/client";
@@ -34,17 +35,17 @@ async function submit() {
   error.value = "";
   try {
     const f = await saveAttachmentShared(a.id, path.value, overwrite.value);
-    toast.success(`已存到项目文件 ${f.path}`);
+    toast.success($t("已存到项目文件 {path}", { path: f.path }));
     emit("saved", f.path);
     open.value = false;
   } catch (e) {
     if (e instanceof ApiError && e.code === "file_exists") {
       exists.value = true;
-      error.value = `项目文件里已经有 ${path.value}。勾选“覆盖”后再保存，或者换一个路径。`;
+      error.value = $t("项目文件里已经有 {path}。勾选“覆盖”后再保存，或者换一个路径。", { path: path.value });
     } else if (e instanceof ApiError && e.status === 410) {
       markExpired(a.id);
       emit("expired", a.id);
-      error.value = e.message || "附件已过期，不能再保存";
+      error.value = e.message || $t("附件已过期，不能再保存");
     } else {
       error.value = e instanceof Error ? e.message : String(e);
     }
@@ -57,19 +58,19 @@ async function submit() {
 <template>
   <FormDialog
     v-model:open="open"
-    title="存到项目文件"
-    description="存进项目文件（你的共享文件夹）后会一直保留（附件本身最后一次使用 24 小时后会过期），员工在工作目录的 .project-files/ 里就能读到。"
-    submit-label="保存"
+    :title="$t('存到项目文件')"
+    :description="$t('存进项目文件（你的共享文件夹）后会一直保留（附件本身最后一次使用 24 小时后会过期），员工在工作目录的 .project-files/ 里就能读到。')"
+    :submit-label="$t('保存')"
     :busy="busy"
     :disabled="!path.trim()"
     width="28rem"
     @submit="submit"
   >
     <label class="flex flex-col gap-1.5 text-sm">
-      <span class="font-medium">路径</span>
-      <el-input v-model="path" placeholder="例如 inputs/需求.pdf" aria-label="项目文件路径" />
+      <span class="font-medium">{{ $t("路径") }}</span>
+      <el-input v-model="path" :placeholder="$t('例如 inputs/需求.pdf')" :aria-label="$t('项目文件路径')" />
     </label>
-    <el-checkbox v-if="exists" v-model="overwrite">覆盖已有的同名文件</el-checkbox>
+    <el-checkbox v-if="exists" v-model="overwrite">{{ $t("覆盖已有的同名文件") }}</el-checkbox>
     <p v-if="error" class="text-[13px] text-destructive" role="alert">{{ error }}</p>
   </FormDialog>
 </template>

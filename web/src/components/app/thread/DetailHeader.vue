@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * The open thread's top bar in capsules (like the Claude app): a round ‹ back to the list; a
  * centred capsule with the status mark (blue spinner working, pulsing orange dot waiting, dashed
@@ -36,10 +37,10 @@ const PILL = "border border-[#E7E5E0] bg-panel shadow-[0_1px_2px_rgba(0,0,0,0.05
 
 <template>
   <header class="flex h-14 shrink-0 items-center gap-2 border-b border-[#EFEDE8] px-2.5">
-    <el-tooltip content="讨论串列表" placement="bottom" :show-after="300" :hide-after="0" effect="dark" :show-arrow="false">
+    <el-tooltip :content="$t('讨论串列表')" placement="bottom" :show-after="300" :hide-after="0" effect="dark" :show-arrow="false">
       <button
         type="button"
-        aria-label="返回讨论串列表"
+        :aria-label="$t('返回讨论串列表')"
         :class="[PILL, 'flex size-9 shrink-0 items-center justify-center rounded-full text-[#4A4843] hover:bg-raised dark:text-foreground/80']"
         @click="emit('back')"
       >
@@ -49,15 +50,15 @@ const PILL = "border border-[#E7E5E0] bg-panel shadow-[0_1px_2px_rgba(0,0,0,0.05
     <div class="flex min-w-0 flex-1 justify-center">
       <div
         :class="[PILL, 'flex h-9 min-w-0 max-w-full items-center gap-2 rounded-full pl-3 pr-3.5']"
-        :title="`#${thread.no} ${thread.title} · ${look.label}${progress ? ` · 主任务 ${progress.label}` : ''}`"
+        :title="$t('#{no} {title} · {label}{n}', { no: thread.no, title: thread.title, label: look.label, n: progress ? $t(' · 主任务 {label}', { label: progress.label }) : '' })"
         data-capsule="title"
       >
         <ThreadMark :thread="thread" :mark="mark" class="!mt-0" />
         <TitleEdit v-if="renaming" :thread="thread" @done="renaming = false" />
         <template v-else>
-          <Pin v-if="thread.pinned_at" class="size-3 shrink-0 rotate-45 text-muted-foreground" :stroke-width="2" aria-label="已置顶" />
+          <Pin v-if="thread.pinned_at" class="size-3 shrink-0 rotate-45 text-muted-foreground" :stroke-width="2" :aria-label="$t('已置顶')" />
           <span aria-current="page" class="truncate text-[13px] font-medium" @dblclick="renaming = true">#{{ thread.no }} {{ thread.title }}</span>
-          <span v-if="progress" class="shrink-0 text-xs tabular-nums text-muted-foreground" :aria-label="`主任务完成 ${progress.label}`" data-progress="">{{ progress.label }}</span>
+          <span v-if="progress" class="shrink-0 text-xs tabular-nums text-muted-foreground" :aria-label="$t('主任务完成 {label}', { label: progress.label })" data-progress="">{{ progress.label }}</span>
         </template>
       </div>
     </div>
@@ -79,6 +80,6 @@ const PILL = "border border-[#E7E5E0] bg-panel shadow-[0_1px_2px_rgba(0,0,0,0.05
       <Minimize2 v-if="expand.collapse" :stroke-width="1.8" />
       <Maximize2 v-else :stroke-width="1.8" />
     </IconButton>
-    <IconButton v-if="closable" label="关闭" class="-ml-1" @click="emit('close')"><X :stroke-width="1.8" /></IconButton>
+    <IconButton v-if="closable" :label="$t('关闭')" class="-ml-1" @click="emit('close')"><X :stroke-width="1.8" /></IconButton>
   </header>
 </template>

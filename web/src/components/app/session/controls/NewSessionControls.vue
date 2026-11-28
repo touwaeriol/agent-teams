@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * The new-session page's thinking effort and permission mode (#53), from GET /api/session-options
  * for the picked role, agent (runtime) and model (the model chip sits before these in NewSessionOptions). The
@@ -10,7 +11,7 @@ import { ChevronDown, Gauge } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useSessionOptions } from "@/api/queries";
 import { runtimeLabel } from "@/lib/runtimes";
-import { MODE_LOOK, TONE_CLASS, appliesNote, effortLabel, isMode, modeRows, noAutoNote, rowForKey } from "@/lib/sessionControls";
+import { MODE_LOOK, TONE_CLASS, appliesNote, appliesNow, effortLabel, isMode, modeRows, noAutoNote, rowForKey } from "@/lib/sessionControls";
 import ModeIcon from "./ModeIcon.vue";
 import ModeMenuBody from "./ModeMenuBody.vue";
 
@@ -28,7 +29,7 @@ const efforts = computed(() => o.value?.efforts ?? []);
 const runtime = computed(() => o.value?.runtime ?? "claude");
 const shown = computed(() => mode.value || o.value?.default_mode || "default");
 const look = computed(() => (isMode(shown.value) ? MODE_LOOK[shown.value] : MODE_LOOK.default));
-const effortText = computed(() => (effort.value ? effortLabel(effort.value) : o.value && efforts.value.length ? "默认强度" : ""));
+const effortText = computed(() => (effort.value ? effortLabel(effort.value) : o.value && efforts.value.length ? $t("默认强度") : ""));
 // A pick the new role or model cannot take goes back to the default.
 watch(o, (v) => {
   if (!v) return;
@@ -39,8 +40,8 @@ const modeOpen = ref(false);
 const effortOpen = ref(false);
 const notes = computed(() => [
   noAutoNote(runtime.value, o.value?.models, o.value?.model ?? ""),
-  "新会话默认：Claude 用“自动”（模型不支持时用“手动”），Codex 和 Antigravity 沿用岗位设置。会话里随时可以改。",
-  appliesNote(runtime.value, o.value?.modes).startsWith("立即") ? "" : appliesNote(runtime.value, o.value?.modes),
+  $t("新会话默认：Claude 用“自动”（模型不支持时用“手动”），Codex 和 Antigravity 沿用岗位设置。会话里随时可以改。"),
+  appliesNow(runtime.value, o.value?.modes) ? "" : appliesNote(runtime.value, o.value?.modes),
 ].filter(Boolean));
 function pick(id: string) {
   mode.value = id === o.value?.default_mode ? "" : id;
@@ -63,14 +64,14 @@ const chip = "inline-flex h-7 max-w-[240px] items-center gap-1.5 rounded-md px-2
   <template v-if="o">
     <el-popover v-if="efforts.length" v-model:visible="effortOpen" trigger="click" placement="top-start" :width="260">
       <template #reference>
-        <button type="button" :class="chip" data-testid="effort-chip" :title="`思考强度：${effortText}`">
+        <button type="button" :class="chip" data-testid="effort-chip" :title="$t('思考强度：{effortText}', { effortText })">
           <Gauge class="size-3.5 shrink-0" />
           <span class="truncate">{{ effortText }}</span>
           <ChevronDown class="size-3 shrink-0" />
         </button>
       </template>
       <div class="flex flex-col gap-2 text-[13px]">
-        <span class="text-xs font-semibold">思考强度</span>
+        <span class="text-xs font-semibold">{{ $t("思考强度") }}</span>
         <div class="flex flex-wrap gap-1" data-testid="effort-chips">
           <button
             v-for="e in ['', ...efforts]"
@@ -80,14 +81,14 @@ const chip = "inline-flex h-7 max-w-[240px] items-center gap-1.5 rounded-md px-2
             :data-effort="e || 'default'"
             :class="['rounded-full border px-2.5 py-0.5 text-xs', e === effort ? 'border-foreground/60 bg-foreground text-background' : 'hover:bg-accent']"
             @click="(effort = e), (effortOpen = false)"
-          >{{ e ? effortLabel(e) : "默认" }}</button>
+          >{{ e ? effortLabel(e) : $t("默认") }}</button>
         </div>
-        <span class="text-[11.5px] text-muted-foreground">默认：项目或岗位设置的强度。</span>
+        <span class="text-[11.5px] text-muted-foreground">{{ $t("默认：项目或岗位设置的强度。") }}</span>
       </div>
     </el-popover>
     <el-popover v-if="rows.length" v-model:visible="modeOpen" trigger="click" placement="top-start" :width="360" popper-class="at-session-menu !p-1.5">
       <template #reference>
-        <button type="button" :class="['inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs', TONE_CLASS[look.tone]]" data-testid="new-mode-chip" :data-mode="shown" :title="`权限模式：${look.state}`">
+        <button type="button" :class="['inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs', TONE_CLASS[look.tone]]" data-testid="new-mode-chip" :data-mode="shown" :title="$t('权限模式：{state}', { state: look.state })">
           <ModeIcon :mode="shown" class="size-3" />
           <span>{{ look.state }}</span>
           <ChevronDown class="size-3 shrink-0" />

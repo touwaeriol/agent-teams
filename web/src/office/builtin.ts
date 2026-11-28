@@ -1,5 +1,6 @@
 // Minimal built-in layout: used when the served layout has an unknown
 // `format` or fails validation before any good layout was seen (§6.4).
+import { $t } from "@/i18n";
 import type { OfficeLayout } from "./types";
 
 const person: OfficeLayout["characters"]["person"] = {
@@ -28,7 +29,7 @@ const person: OfficeLayout["characters"]["person"] = {
 export const BUILTIN_LAYOUT: OfficeLayout = {
   format: 1,
   id: "builtin",
-  name: "内置最小布局",
+  name: $t("内置最小布局"),
   canvas: { width: 760, height: 460, pixel: 4, background: "#EDE6D8", frame: { color: "#3A3D48", width: 4, radius: 12 } },
   floors: { wood: { base: "#E9C997", pattern: "plain" }, lounge: { base: "#F3E9DC", pattern: "plain" } },
   sprites: {
@@ -45,19 +46,19 @@ export const BUILTIN_LAYOUT: OfficeLayout = {
   characters: { person },
   looks: {
     outfits: {
-      tee: { label: "T 恤", colors: { shirt: "@color", accent: "shade(@color,-0.3)", pants: "#2F3A55" } },
-      hoodie: { label: "卫衣", colors: { shirt: "@color", accent: "shade(@color,0.25)", pants: "#3B3F4A" } },
-      suit: { label: "西装", colors: { shirt: "@color", accent: "#FFFFFF", pants: "#23262D" } },
-      coat: { label: "白大褂", colors: { shirt: "#F4F4F2", accent: "@color", pants: "@color" } },
+      tee: { label: $t("T 恤"), colors: { shirt: "@color", accent: "shade(@color,-0.3)", pants: "#2F3A55" } },
+      hoodie: { label: $t("卫衣"), colors: { shirt: "@color", accent: "shade(@color,0.25)", pants: "#3B3F4A" } },
+      suit: { label: $t("西装"), colors: { shirt: "@color", accent: "#FFFFFF", pants: "#23262D" } },
+      coat: { label: $t("白大褂"), colors: { shirt: "#F4F4F2", accent: "@color", pants: "@color" } },
     },
-    accessories: { none: { label: "无" }, glasses: { label: "眼镜", colors: { S: "#2B2B2B" } }, headset: { label: "耳机" }, cap: { label: "帽子" } },
+    accessories: { none: { label: $t("无") }, glasses: { label: $t("眼镜"), colors: { S: "#2B2B2B" } }, headset: { label: $t("耳机") }, cap: { label: $t("帽子") } },
     colors: ["#4C7BD0", "#3F8F6B", "#C8622A", "#7A4FD1"],
     hair: ["#3B2A20", "#6B4A2E", "#1F1E1C"],
     defaults: { "*": { color: "#4C7BD0", outfit: "tee", accessory: "none" } },
   },
   rooms: [
-    { id: "dev", label: "开发区", kind: "dev", rect: [16, 16, 728, 300], floor: "wood", wall: { color: "#8A6A45", width: 4 }, labelStyle: { bg: "#8A6A45", fg: "#FFF6E6" } },
-    { id: "lounge", label: "休息区", kind: "lounge", rect: [16, 332, 728, 112], floor: "lounge", wall: { color: "#B49A7C", width: 4 }, labelStyle: { bg: "#B49A7C", fg: "#FFFFFF" } },
+    { id: "dev", label: $t("开发区"), kind: "dev", rect: [16, 16, 728, 300], floor: "wood", wall: { color: "#8A6A45", width: 4 }, labelStyle: { bg: "#8A6A45", fg: "#FFF6E6" } },
+    { id: "lounge", label: $t("休息区"), kind: "lounge", rect: [16, 332, 728, 112], floor: "lounge", wall: { color: "#B49A7C", width: 4 }, labelStyle: { bg: "#B49A7C", fg: "#FFFFFF" } },
   ],
   threadPods: {
     area: { room: "dev", rect: [24, 48, 712, 260] },

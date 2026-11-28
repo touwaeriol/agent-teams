@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { computed, ref } from "vue";
 import { useAdminUsers, useMe } from "@/api/queries";
 import CopyBlock from "@/components/common/CopyBlock.vue";
@@ -26,7 +27,7 @@ const shown = computed({ get: () => Boolean(temp.value), set: (v: boolean) => !v
       </tbody>
     </table>
     <Loading v-if="users.isLoading.value" />
-    <InfoDialog v-model:open="shown" title="临时密码" :description="`把它交给 ${temp?.email}，登录后必须修改。只显示这一次。`">
+    <InfoDialog v-model:open="shown" :title="$t('临时密码')" :description="$t('把它交给 {email}，登录后必须修改。只显示这一次。', { email: temp?.email })">
       <CopyBlock v-if="temp" :text="temp.password" />
     </InfoDialog>
   </div>

@@ -1,5 +1,6 @@
 // Nodes page helpers (pure): runtime chips, the card's meta line, the slot bar, totals and the
 // settings patch.
+import { $t, intlLocale } from "@/i18n";
 import type { NodeRuntime, NodeUsage, NodeView, RuntimeUsage, UsageWindow } from "@/api/views";
 import { formatDateTime } from "@/lib/library";
 import { summarizeNodes, nodeSlots } from "@/components/shell/nodes";
@@ -14,15 +15,15 @@ export interface RuntimeInfo {
   installed?: boolean;
 }
 
-const AUTH_TEXT: Record<string, string> = { api_key: "已配置 API Key", adc: "已配置 ADC 凭证" };
+const AUTH_TEXT: Record<string, string> = { api_key: $t("已配置 API Key"), adc: $t("已配置 ADC 凭证") };
 
 export const RUNTIMES: [string, string][] = RUNTIME_SPECS.map((r) => [r.id, r.label]);
 
 /** One runtime chip: version and login state (protocol.md hello.runtimes). */
 export function runtimeLine(key: string, info: RuntimeInfo | undefined): { ver: string; login: string; ok: boolean } {
-  if (!info || !info.cli || info.installed === false) return { ver: "未安装", login: runtimeSpec(key).installHint, ok: false };
+  if (!info || !info.cli || info.installed === false) return { ver: $t("未安装"), login: runtimeSpec(key).installHint, ok: false };
   if (!info.auth || info.auth === "none") return { ver: info.cli, login: runtimeSpec(key).loginHint, ok: false };
-  return { ver: info.cli, login: AUTH_TEXT[info.auth] ?? "已登录", ok: true };
+  return { ver: info.cli, login: AUTH_TEXT[info.auth] ?? $t("已登录"), ok: true };
 }
 
 export type NodeCli = NodeRuntime;
@@ -35,10 +36,10 @@ export function cliLabel(id: string): string {
   return RUNTIME_SPECS.find((r) => r.id === id)?.label ?? EXTRA_LABELS[id] ?? id;
 }
 
-const LOGIN_TEXT: Record<string, string> = { subscription: "已登录（订阅）", chatgpt: "已登录（ChatGPT）", api_key: "已配置 API Key", none: "未登录", unknown: "登录状态未知" };
+const LOGIN_TEXT: Record<string, string> = { subscription: $t("已登录（订阅）"), chatgpt: $t("已登录（ChatGPT）"), api_key: $t("已配置 API Key"), none: $t("未登录"), unknown: $t("登录状态未知") };
 
 /** Runtime-specific wording: Antigravity's subscription is a Google account login (the daemon maps agy's oauth to it). */
-const RUNTIME_LOGIN_TEXT: Record<string, Record<string, string>> = { antigravity: { subscription: "已登录（Google 账号）", api_key: "已配置 API Key / ADC" } };
+const RUNTIME_LOGIN_TEXT: Record<string, Record<string, string>> = { antigravity: { subscription: $t("已登录（Google 账号）"), api_key: $t("已配置 API Key / ADC") } };
 
 /** ok: sessions may run there; warn: something to do on the node; bad: was logged in, now expired; muted: unknown. */
 export type CliTone = "ok" | "warn" | "bad" | "muted";
@@ -61,13 +62,13 @@ export interface CliRow {
 
 /** The login half of a reported CLI (data-model §2.2): not installed, expired, then by auth. */
 export function cliLogin(c: Pick<NodeCli, "runtime" | "installed" | "auth" | "expired" | "ready">): { login: string; tone: CliTone } {
-  if (!c.installed) return { login: RUNTIME_SPECS.find((r) => r.id === c.runtime)?.installHint ?? "安装后登录", tone: "warn" };
-  if (c.expired) return { login: "登录已过期", tone: "bad" };
+  if (!c.installed) return { login: RUNTIME_SPECS.find((r) => r.id === c.runtime)?.installHint ?? $t("安装后登录"), tone: "warn" };
+  if (c.expired) return { login: $t("登录已过期"), tone: "bad" };
   const login = RUNTIME_LOGIN_TEXT[c.runtime]?.[c.auth] ?? LOGIN_TEXT[c.auth] ?? c.auth;
   if (c.auth === "unknown") return { login, tone: "muted" };
   if (c.auth === "none") return { login, tone: "warn" };
   // A login whose auth_expires_at has passed is not ready even when the daemon has not said expired yet.
-  return c.ready ? { login, tone: "ok" } : { login: "登录已过期", tone: "bad" };
+  return c.ready ? { login, tone: "ok" } : { login: $t("登录已过期"), tone: "bad" };
 }
 
 const HELLO_ALWAYS = new Set(["claude", "codex"]);
@@ -84,9 +85,9 @@ export function cliRows(n: Pick<NodeView, "clis" | "runtimes"> & { runtime_statu
       return {
         key: c.runtime,
         label: cliLabel(c.runtime),
-        ver: c.installed ? c.version || "已安装" : "未安装",
+        ver: c.installed ? c.version || $t("已安装") : $t("未安装"),
         ...cliLogin(c),
-        checked: Number.isNaN(t) ? "" : `检测于 ${timeAgo((Date.now() - Math.max(0, now - t)) / 1000)}`,
+        checked: Number.isNaN(t) ? "" : $t("检测于 {timeAgo}", { timeAgo: timeAgo((Date.now() - Math.max(0, now - t)) / 1000) }),
         checkedTitle: Number.isNaN(t) ? "" : formatDateTime(c.checked_at),
         error: c.error ?? "",
       };
@@ -98,8 +99,8 @@ export function cliRows(n: Pick<NodeView, "clis" | "runtimes"> & { runtime_statu
   return RUNTIMES.filter(([key]) => HELLO_ALWAYS.has(key) || hello[key] !== undefined).map(([key, label]) => {
     const r = runtimeLine(key, hello[key]);
     // A daemon that reports but has not yet (just upgraded or connected): hello data until the first report.
-    const checked = n.runtime_status && n.online ? "等待首次检测" : "";
-    return { key, label, ver: r.ver, login: r.login, tone: r.ok ? "ok" : "warn", checked, checkedTitle: checked ? "守护进程连上后会立即检测并上报" : "", error: "" };
+    const checked = n.runtime_status && n.online ? $t("等待首次检测") : "";
+    return { key, label, ver: r.ver, login: r.login, tone: r.ok ? "ok" : "warn", checked, checkedTitle: checked ? $t("守护进程连上后会立即检测并上报") : "", error: "" };
   });
 }
 
@@ -112,9 +113,9 @@ export function runtimeInfos(n: Pick<NodeView, "clis" | "runtimes">): Record<str
 
 /** The 重新检测 button: whether it can be pressed and, when not, why (tooltip). */
 export function recheckState(n: Pick<NodeView, "online" | "runtime_status">): { enabled: boolean; hint: string } {
-  if (!n.runtime_status) return { enabled: false, hint: "守护进程版本过旧，需要升级后才能重新检测" };
-  if (!n.online) return { enabled: false, hint: "节点不在线" };
-  return { enabled: true, hint: "立即检测各 CLI 的安装和登录状态，并刷新余量" };
+  if (!n.runtime_status) return { enabled: false, hint: $t("守护进程版本过旧，需要升级后才能重新检测") };
+  if (!n.online) return { enabled: false, hint: $t("节点不在线") };
+  return { enabled: true, hint: $t("立即检测各 CLI 的安装和登录状态，并刷新余量") };
 }
 
 /** Puts the node a recheck returned into the cached list. */
@@ -125,23 +126,23 @@ export function withNode<T extends { id: string }>(list: T[] | undefined, node: 
 /** Subscription logins that have a quota to show (claude.ai / ChatGPT accounts). */
 const SUBSCRIPTION: Record<string, string> = Object.fromEntries(RUNTIME_SPECS.map((r) => [r.id, r.subscriptionAuth]));
 
-const WINDOW_NAMES: Record<string, string> = { five_hour: "5 小时", weekly: "每周", weekly_opus: "每周 Opus", weekly_sonnet: "每周 Sonnet" };
+const WINDOW_NAMES: Record<string, string> = { five_hour: $t("5 小时"), weekly: $t("每周"), weekly_opus: $t("每周 Opus"), weekly_sonnet: $t("每周 Sonnet") };
 
 /** Chinese window name: weekly_model is "每周 {label}", a server label wins elsewhere, codex's primary/secondary are named by their length when known. */
 export function windowLabel(w: Pick<UsageWindow, "key" | "window_minutes" | "label">): string {
   const label = w.label?.trim();
-  if (w.key === "weekly_model") return label ? `每周 ${label}` : "每周（模型）";
+  if (w.key === "weekly_model") return label ? $t("每周 {label}", { label }) : $t("每周（模型）");
   if (label) return label;
   if (WINDOW_NAMES[w.key]) return WINDOW_NAMES[w.key];
   const m = w.window_minutes;
   if (m) {
-    if (m === 300) return "5 小时";
-    if (m === 10080) return "每周";
-    if (m % 1440 === 0) return `${m / 1440} 天`;
-    if (m % 60 === 0) return `${m / 60} 小时`;
-    return `${m} 分钟`;
+    if (m === 300) return $t("5 小时");
+    if (m === 10080) return $t("每周");
+    if (m % 1440 === 0) return $t("{n} 天", { n: m / 1440 });
+    if (m % 60 === 0) return $t("{n} 小时", { n: m / 60 });
+    return $t("{m} 分钟", { m });
   }
-  return w.key === "primary" ? "短窗口" : w.key === "secondary" ? "长窗口" : w.key;
+  return w.key === "primary" ? $t("短窗口") : w.key === "secondary" ? $t("长窗口") : w.key;
 }
 
 export type UsageLevel = "normal" | "warn" | "danger";
@@ -159,12 +160,12 @@ export function resetText(resetsAt: string | null | undefined, now = Date.now())
   const t = Date.parse(resetsAt);
   if (Number.isNaN(t)) return "";
   const min = Math.ceil((t - now) / 60_000);
-  if (min <= 1) return "即将重置";
-  if (min < 60) return `${min} 分钟后重置`;
-  if (min < 24 * 60) return `${Math.floor(min / 60)} 小时后重置`;
+  if (min <= 1) return $t("即将重置");
+  if (min < 60) return $t("{n} 分钟后重置", { n: min });
+  if (min < 24 * 60) return $t("{n} 小时后重置", { n: Math.floor(min / 60) });
   const d = new Date(t);
-  const hm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${hm} 重置`;
+  const hm = d.toLocaleTimeString(intlLocale(), { hour: "2-digit", minute: "2-digit", hour12: false });
+  return $t("{month}月{day}日 {hm} 重置", { month: d.getMonth() + 1, day: d.getDate(), hm });
 }
 
 export type UsageRow = { key: string; label: string; pct: number; width: string; tone: string; reset: string };
@@ -182,7 +183,7 @@ export function usageView(key: string, info: RuntimeInfo | undefined, usage: Run
   // An old daemon never reports usage: no endless "loading" hint for it.
   if (!usage) return node.online && node.usage_supported !== false ? { kind: "pending" } : null;
   if (usage.auth !== sub || usage.status === "unsupported") return null;
-  if (usage.status === "error") return { kind: "error", error: usage.error || "未知原因" };
+  if (usage.status === "error") return { kind: "error", error: usage.error || $t("未知原因") };
   const rows = (usage.windows ?? []).map((w) => {
     const pct = Math.max(0, Math.min(100, Math.round(w.used_percent)));
     return { key: w.key, label: windowLabel(w), pct, width: `${pct}%`, tone: USAGE_TONE[usageLevel(pct)], reset: resetText(w.resets_at, now) };
@@ -190,7 +191,7 @@ export function usageView(key: string, info: RuntimeInfo | undefined, usage: Run
   if (!rows.length) return null;
   // The plan moves to the account line when there is one (accountView); an older daemon keeps it here.
   const plan = hasAccount(usage) ? "" : usage.plan;
-  return { kind: "windows", rows, updated: [plan, `更新于 ${timeAgo(usage.fetched_at || usage.received_at)}`].filter(Boolean).join(" · ") };
+  return { kind: "windows", rows, updated: [plan, $t("更新于 {timeAgo}", { timeAgo: timeAgo(usage.fetched_at || usage.received_at) })].filter(Boolean).join(" · ") };
 }
 
 /** Claude's plan tier from `claude auth status`; max_other / other fall back to the subscription type. */
@@ -285,11 +286,11 @@ export function withNodeUsage<T extends { id: string; usage?: NodeUsage | null }
   return list.map((n) => (n.id === id ? { ...n, usage } : n));
 }
 
-const ISOLATION: Record<string, string> = { agent_user: "独立系统用户", sandbox: "沙箱", none: "未隔离" };
+const ISOLATION: Record<string, string> = { agent_user: $t("独立系统用户"), sandbox: $t("沙箱"), none: $t("未隔离") };
 
 /** v0.3.1 · 独立系统用户 · 连接于 5 分钟前 */
 export function nodeMeta(n: Pick<NodeView, "version" | "isolation" | "online" | "since" | "last_seen_at">): string {
-  const seen = n.online && n.since ? `连接于 ${timeAgo(n.since)}` : n.last_seen_at ? `最后在线 ${timeAgo(n.last_seen_at)}` : "从未连接";
+  const seen = n.online && n.since ? $t("连接于 {since}", { since: timeAgo(n.since) }) : n.last_seen_at ? $t("最后在线 {last_seen_at}", { last_seen_at: timeAgo(n.last_seen_at) }) : $t("从未连接");
   return [n.version ? `v${n.version}` : null, ISOLATION[n.isolation], seen].filter(Boolean).join(" · ");
 }
 
@@ -301,10 +302,10 @@ export function slotPct(n: Pick<NodeView, "active_sessions" | "max_active_sessio
 export function nodeStats(list: NodeView[]): { k: string; v: string }[] {
   const s = summarizeNodes(list);
   return [
-    { k: "节点", v: `${s.total}（在线 ${s.online}）` },
-    { k: s.unlimited ? "运行中（有节点不限槽位）" : "运行中 / 总槽位", v: s.unlimited ? String(s.active) : `${s.active} / ${s.slots}` },
-    { k: "排队中", v: String(s.queued) },
-    { k: "停放的会话", v: String(list.reduce((n, x) => n + x.parked_sessions, 0)) },
+    { k: $t("节点"), v: $t("{total}（在线 {online}）", { total: s.total, online: s.online }) },
+    { k: s.unlimited ? $t("运行中（有节点不限槽位）") : $t("运行中 / 总槽位"), v: s.unlimited ? String(s.active) : `${s.active} / ${s.slots}` },
+    { k: $t("排队中"), v: String(s.queued) },
+    { k: $t("停放的会话"), v: String(list.reduce((n, x) => n + x.parked_sessions, 0)) },
   ];
 }
 
@@ -340,21 +341,21 @@ export function updateView(n: Pick<NodeView, "online" | "version" | "latest_vers
   if (u && BUSY.has(u.phase) && n.online !== false) {
     const turns = u.active_turns;
     const line: Record<string, string> = {
-      requested: `准备更新到 ${u.target}…`,
-      staging: `正在下载并安装 ${u.target}…`,
-      draining: turns ? `等 ${turns} 个正在跑的回合结束后切换到 ${u.target}` : `正在切换到 ${u.target}…`,
-      drain_timeout: `已等待较久，还有 ${turns} 个回合在跑；可以立即更新（会中断它们）`,
-      restarting: `正在重启到 ${u.target}…`,
-      confirming: `${u.target} 已启动，确认运行正常中…`,
+      requested: $t("准备更新到 {target}…", { target: u.target }),
+      staging: $t("正在下载并安装 {target}…", { target: u.target }),
+      draining: turns ? $t("等 {turns} 个正在跑的回合结束后切换到 {target}", { turns, target: u.target }) : $t("正在切换到 {target}…", { target: u.target }),
+      drain_timeout: $t("已等待较久，还有 {turns} 个回合在跑；可以立即更新（会中断它们）", { turns }),
+      restarting: $t("正在重启到 {target}…", { target: u.target }),
+      confirming: $t("{target} 已启动，确认运行正常中…", { target: u.target }),
     };
     const waiting = u.phase === "draining" || u.phase === "drain_timeout";
     return { offer: false, busy: true, canNow: waiting && u.mode !== "now", canCancel: u.phase === "staging" || waiting, line: line[u.phase] ?? "", tone: u.phase === "drain_timeout" ? "warn" : "muted" };
   }
-  if (u?.phase === "done" && u.target === n.version) return { ...none, line: `已更新到 ${u.target}`, tone: "ok" };
+  if (u?.phase === "done" && u.target === n.version) return { ...none, line: $t("已更新到 {target}", { target: u.target }), tone: "ok" };
   const failed = u && (u.phase === "failed" || u.phase === "rolled_back") && u.target === n.latest_version;
-  const failLine = failed ? (u.phase === "rolled_back" ? `更新到 ${u.target} 失败，已自动回到原版本：${u.error ?? ""}` : `更新失败：${u.error ?? ""}`) : "";
+  const failLine = failed ? (u.phase === "rolled_back" ? $t("更新到 {target} 失败，已自动回到原版本：{n}", { target: u.target, n: u.error ?? "" }) : $t("更新失败：{n}", { n: u.error ?? "" })) : "";
   if (!n.update_available) return failed ? { ...none, line: failLine, tone: "error" } : none;
-  if (!n.self_update) return { ...none, line: `有新版本 ${n.latest_version}；这台节点要先在机器上重新运行一次安装命令（容器节点按新的 compose.yml 重建）才能一键更新`, tone: "warn" };
+  if (!n.self_update) return { ...none, line: $t("有新版本 {latest_version}；这台节点要先在机器上重新运行一次安装命令（容器节点按新的 compose.yml 重建）才能一键更新", { latest_version: n.latest_version }), tone: "warn" };
   return { ...none, offer: true, line: failLine, tone: failed ? "error" : "muted" };
 }
 
@@ -362,14 +363,14 @@ export function updateView(n: Pick<NodeView, "online" | "version" | "latest_vers
 export function sharedFolderLine(n: Pick<NodeView, "shared_folder" | "online">): { text: string; tone: "ok" | "warn" | "error" | "muted"; error?: string } | null {
   const f = n.shared_folder;
   if (!f) return null;
-  const how = f.mode === "external" ? "（Docker 卷）" : "";
-  if (!n.online) return { text: `共享文件夹${how}：离线`, tone: "muted" };
+  const how = f.mode === "external" ? $t("（Docker 卷）") : "";
+  if (!n.online) return { text: $t("共享文件夹{how}：离线", { how }), tone: "muted" };
   const STATES: Record<string, { text: string; tone: "ok" | "warn" | "error" | "muted" }> = {
-    mounted: { text: "已挂载", tone: "ok" },
-    mounting: { text: "挂载中", tone: "warn" },
-    unmounted: { text: "未挂载", tone: "muted" },
-    error: { text: "挂载失败", tone: "error" },
+    mounted: { text: $t("已挂载"), tone: "ok" },
+    mounting: { text: $t("挂载中"), tone: "warn" },
+    unmounted: { text: $t("未挂载"), tone: "muted" },
+    error: { text: $t("挂载失败"), tone: "error" },
   };
-  const s = STATES[f.state] ?? { text: "未开通或未上报", tone: "muted" as const };
-  return { text: `共享文件夹${how}：${s.text}`, tone: s.tone, ...(f.state === "error" && f.error ? { error: f.error } : {}) };
+  const s = STATES[f.state] ?? { text: $t("未开通或未上报"), tone: "muted" as const };
+  return { text: $t("共享文件夹{how}：{text}", { how, text: s.text }), tone: s.tone, ...(f.state === "error" && f.error ? { error: f.error } : {}) };
 }

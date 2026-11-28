@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** 添加仓库 / 编辑仓库 (docs/v2/git-repos.md §11.2). Paste a URL → transport, host and provider are
  * inferred; pick a credential of that host or create one (token, pasted key, or a key pair the
  * platform generates so the browser only ever sees the public key); 测试连接 before saving.
@@ -70,7 +71,7 @@ watch(sameHost, (list) => {
 const creating = computed(() => auth.value !== "public" && credId.value === "new");
 const summary = computed(() => {
   const p = parsed.value;
-  return p.ok ? `${p.transport === "ssh" ? "SSH" : "HTTPS"} · ${p.host} · ${p.path} · 识别为 ${PROVIDER_LABEL[p.provider ?? "generic"]}` : "";
+  return p.ok ? $t("{n} · {host} · {path} · 识别为 {n2}", { n: p.transport === "ssh" ? "SSH" : "HTTPS", host: p.host, path: p.path, n2: PROVIDER_LABEL[p.provider ?? "generic"] }) : "";
 });
 
 /** The unsaved credential typed in the form (a generated key is saved at once, so never here). */
@@ -83,17 +84,17 @@ function draftCredential(): GitCredentialInput | undefined {
 const credentialID = () => (auth.value === "public" || credId.value === "new" ? undefined : credId.value);
 
 const problem = computed(() => {
-  if (!parsed.value.ok) return parsed.value.problem ?? "请填仓库地址";
+  if (!parsed.value.ok) return parsed.value.problem ?? $t("请填仓库地址");
   if (!creating.value) return "";
-  if (auth.value === "https_token" && !token.value.trim()) return "请填令牌";
-  if (auth.value === "ssh_key" && keySource.value === "paste" && !privateKey.value.trim()) return "请粘贴私钥";
-  if (auth.value === "ssh_key" && keySource.value === "generate") return "请先生成密钥对";
+  if (auth.value === "https_token" && !token.value.trim()) return $t("请填令牌");
+  if (auth.value === "ssh_key" && keySource.value === "paste" && !privateKey.value.trim()) return $t("请粘贴私钥");
+  if (auth.value === "ssh_key" && keySource.value === "generate") return $t("请先生成密钥对");
   return "";
 });
 
 const generate = useAction(
   () =>
-    gitCredentials.create({ name: credName.value.trim() || `${parsed.value.path?.split("/").pop()} 部署密钥`, host: parsed.value.host, kind: "ssh_key", username: username.value.trim() || "git", generate: true }),
+    gitCredentials.create({ name: credName.value.trim() || $t("{pop} 部署密钥", { pop: parsed.value.path?.split("/").pop() }), host: parsed.value.host, kind: "ssh_key", username: username.value.trim() || "git", generate: true }),
   {
     invalidate: [keys.gitCredentials],
     onSuccess: (c) => {
@@ -114,7 +115,7 @@ const save = useAction(
   },
   {
     invalidate: [keys.gitRepos, keys.gitCredentials],
-    success: () => (editing.value ? "已保存" : "仓库已添加"),
+    success: () => (editing.value ? $t("已保存") : $t("仓库已添加")),
     onSuccess: () => (open.value = false),
   },
 );
@@ -129,87 +130,87 @@ function submit() {
 <template>
   <FormDialog
     v-model:open="open"
-    :title="editing ? `编辑仓库 ${repoTitle(editing)}` : '添加仓库'"
-    description="凭据在控制面加密保存，运行本项目会话时下发给节点上的 git 使用（见下方提示）。保存后凭据不能再查看，只能替换。"
-    :submit-label="editing ? '保存' : '添加'"
+    :title="editing ? $t('编辑仓库 {editing}', { editing: repoTitle(editing) }) : $t('添加仓库')"
+    :description="$t('凭据在控制面加密保存，运行本项目会话时下发给节点上的 git 使用（见下方提示）。保存后凭据不能再查看，只能替换。')"
+    :submit-label="editing ? $t('保存') : $t('添加')"
     :busy="save.isPending.value"
     width="38rem"
     @submit="submit"
   >
-    <Field v-slot="{ id }" label="仓库地址" :hint="editing ? '地址是仓库的身份，不能修改；要换地址请删除后重新添加' : '粘贴克隆地址：https://… 或 git@…:…'">
+    <Field v-slot="{ id }" :label="$t('仓库地址')" :hint="editing ? $t('地址是仓库的身份，不能修改；要换地址请删除后重新添加') : $t('粘贴克隆地址：{https} 或 {ssh}', { https: 'https://…', ssh: 'git@…:…' })">
       <el-input :id="id" v-model="url" class="at-mono" placeholder="https://gitlab.com/group/project.git" :disabled="!!editing" />
     </Field>
     <p v-if="parsed.ok && !editing" class="-mt-2 text-xs text-muted-foreground">{{ summary }}</p>
     <p v-else-if="parsed.problem && url" class="-mt-2 text-xs text-bad">{{ parsed.problem }}</p>
-    <Field v-slot="{ id }" label="显示名称（可选）" hint="不填就用仓库名；员工和工具里用的是 主机/路径">
+    <Field v-slot="{ id }" :label="$t('显示名称（可选）')" :hint="$t('不填就用仓库名；员工和工具里用的是 主机/路径')">
       <el-input :id="id" v-model="name" :placeholder="parsed.path?.split('/').pop() ?? ''" />
     </Field>
-    <Field label="认证方式">
-      <el-radio-group v-model="auth" aria-label="认证方式">
-        <el-radio-button value="https_token" :disabled="parsed.transport === 'ssh'">HTTPS 令牌</el-radio-button>
-        <el-radio-button value="ssh_key" :disabled="parsed.transport === 'https'">SSH 私钥</el-radio-button>
-        <el-radio-button value="public">公开仓库（只读）</el-radio-button>
+    <Field :label="$t('认证方式')">
+      <el-radio-group v-model="auth" :aria-label="$t('认证方式')">
+        <el-radio-button value="https_token" :disabled="parsed.transport === 'ssh'">{{ $t("HTTPS 令牌") }}</el-radio-button>
+        <el-radio-button value="ssh_key" :disabled="parsed.transport === 'https'">{{ $t("SSH 私钥") }}</el-radio-button>
+        <el-radio-button value="public">{{ $t("公开仓库（只读）") }}</el-radio-button>
       </el-radio-group>
     </Field>
     <template v-if="auth !== 'public'">
-      <Field v-slot="{ id }" label="凭据" :hint="`同一主机（${parsed.host ?? '…'}）的仓库可以共用一条凭据`">
+      <Field v-slot="{ id }" :label="$t('凭据')" :hint="$t('同一主机（{n}）的仓库可以共用一条凭据', { n: parsed.host ?? '…' })">
         <el-select :id="id" v-model="credId">
-          <el-option v-for="c in sameHost" :key="c.id" :value="c.id" :label="`${c.name}（${c.repos} 个仓库在用）`" />
-          <el-option value="new" :label="editing ? '新建凭据（请到下方“凭据”里添加后再选）' : '新建凭据…'" :disabled="!!editing" />
+          <el-option v-for="c in sameHost" :key="c.id" :value="c.id" :label="$t('{name}（{repos} 个仓库在用）', { name: c.name, repos: c.repos })" />
+          <el-option value="new" :label="editing ? $t('新建凭据（请到下方“凭据”里添加后再选）') : $t('新建凭据…')" :disabled="!!editing" />
         </el-select>
       </Field>
       <Callout tone="warn" data-cred-warning>{{ CREDENTIAL_WARNING }}</Callout>
       <div v-if="creating && !editing" class="flex flex-col gap-4 rounded-xl border bg-well/40 p-4">
-        <Field v-slot="{ id }" label="凭据名称（可选）" hint="不填就用主机名">
-          <el-input :id="id" v-model="credName" :placeholder="auth === 'ssh_key' ? 'deploy 部署密钥' : 'GitLab 个人令牌'" />
+        <Field v-slot="{ id }" :label="$t('凭据名称（可选）')" :hint="$t('不填就用主机名')">
+          <el-input :id="id" v-model="credName" :placeholder="auth === 'ssh_key' ? $t('deploy 部署密钥') : $t('GitLab 个人令牌')" />
         </Field>
         <template v-if="auth === 'https_token'">
           <div class="grid gap-3 sm:grid-cols-[10rem_1fr]">
-            <Field v-slot="{ id }" label="用户名" hint="GitLab 填 oauth2">
+            <Field v-slot="{ id }" :label="$t('用户名')" :hint="$t('GitLab 填 oauth2')">
               <el-input :id="id" v-model="username" class="at-mono" />
             </Field>
-            <Field v-slot="{ id }" label="令牌" hint="需要读写仓库的权限（GitLab：read_repository + write_repository）">
+            <Field v-slot="{ id }" :label="$t('令牌')" :hint="$t('需要读写仓库的权限（GitLab：read_repository + write_repository）')">
               <el-input :id="id" v-model="token" type="password" show-password autocomplete="new-password" placeholder="glpat-…" />
             </Field>
           </div>
-          <Field v-slot="{ id }" label="到期日（可选）" hint="填了会在到期前 14 天提醒你换">
-            <el-date-picker :id="id" v-model="expires" type="date" placeholder="选择日期" class="!w-48" />
+          <Field v-slot="{ id }" :label="$t('到期日（可选）')" :hint="$t('填了会在到期前 14 天提醒你换')">
+            <el-date-picker :id="id" v-model="expires" type="date" :placeholder="$t('选择日期')" class="!w-48" />
           </Field>
         </template>
         <template v-else>
-          <Field label="私钥来源">
-            <el-radio-group v-model="keySource" aria-label="私钥来源">
-              <el-radio-button value="generate">平台生成密钥对（推荐）</el-radio-button>
-              <el-radio-button value="paste">粘贴已有私钥</el-radio-button>
+          <Field :label="$t('私钥来源')">
+            <el-radio-group v-model="keySource" :aria-label="$t('私钥来源')">
+              <el-radio-button value="generate">{{ $t("平台生成密钥对（推荐）") }}</el-radio-button>
+              <el-radio-button value="paste">{{ $t("粘贴已有私钥") }}</el-radio-button>
             </el-radio-group>
           </Field>
           <el-button v-if="keySource === 'generate'" class="self-start" :disabled="!parsed.ok || generate.isPending.value" @click="generate.mutate()">
-            <Spinner v-if="generate.isPending.value" /> 生成密钥对
+            <Spinner v-if="generate.isPending.value" /> {{ $t("生成密钥对") }}
           </el-button>
           <template v-else>
-            <Field v-slot="{ id }" label="私钥" hint="OpenSSH 或 PEM 格式（-----BEGIN … PRIVATE KEY-----）">
+            <Field v-slot="{ id }" :label="$t('私钥')" :hint="$t('OpenSSH 或 PEM 格式（-----BEGIN … PRIVATE KEY-----）')">
               <el-input :id="id" v-model="privateKey" type="textarea" :rows="4" class="at-mono" spellcheck="false" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" />
             </Field>
-            <Field v-slot="{ id }" label="私钥口令（可选）">
+            <Field v-slot="{ id }" :label="$t('私钥口令（可选）')">
               <el-input :id="id" v-model="passphrase" type="password" show-password autocomplete="new-password" />
             </Field>
           </template>
         </template>
       </div>
       <template v-if="generated && credId === generated.id">
-        <Field label="公钥" hint="私钥由平台生成后直接加密保存，你和员工都看不到它">
+        <Field :label="$t('公钥')" :hint="$t('私钥由平台生成后直接加密保存，你和员工都看不到它')">
           <CopyBlock :text="generated.public_key" />
         </Field>
-        <Callout tone="info">把上面的公钥添加为这个仓库的<strong>部署密钥</strong>，并勾选“允许写入”，然后点“测试连接”。</Callout>
+        <Callout tone="info">{{ $t("把上面的公钥添加为这个仓库的") }}<strong>{{ $t("部署密钥") }}</strong>{{ $t("，并勾选“允许写入”，然后点“测试连接”。") }}</Callout>
       </template>
     </template>
     <Callout tone="warn">
-      单独添加的仓库没有 PR 和 CI：讨论串的改动留在讨论串分支上，完成即交付，合并由你在仓库平台上做。要用 PR 和 CI，请用 GitHub App 连接。
+      {{ $t("单独添加的仓库没有 PR 和 CI：讨论串的改动留在讨论串分支上，完成即交付，合并由你在仓库平台上做。要用 PR 和 CI，请用 GitHub App 连接。") }}
     </Callout>
     <p v-if="touched && problem" class="text-[13px] text-bad" role="alert">{{ problem }}</p>
     <TestResult v-if="result" :result="result" />
     <el-button class="self-start" :disabled="!parsed.ok || test.isPending.value || (creating && keySource === 'generate' && auth === 'ssh_key')" @click="test.mutate()">
-      <Spinner v-if="test.isPending.value" /> 测试连接
+      <Spinner v-if="test.isPending.value" /> {{ $t("测试连接") }}
     </el-button>
   </FormDialog>
 </template>

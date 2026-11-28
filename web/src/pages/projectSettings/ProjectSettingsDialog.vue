@@ -2,6 +2,7 @@
 // 项目设置 as a dialog with a section nav (通用 / 记忆 / 环境 / 使用情况 / 高级).
 // /projects/:pid/settings[/:section] opens it over the main board. Switches and selects save at
 // once; text saves on blur (name, intro) or with its button (项目指令, memory files).
+import { $t } from "@/i18n";
 import { BarChart3, Brain, FolderGit2, Settings2, Wrench } from "lucide-vue-next";
 import type { Component } from "vue";
 import type { ProjectView } from "@/api/views";
@@ -26,17 +27,17 @@ const close = (o: boolean) => !o && emit("close");
     append-to-body
     class="at-dialog at-dialog-flush flex h-[min(800px,92vh)] max-h-[90vh] w-[calc(100%-2rem)] max-w-[960px] flex-col overflow-hidden !rounded-[14px]"
     width="960px"
-    :aria-label="`${project.name} 的设置`"
+    :aria-label="$t('{name} 的设置', { name: project.name })"
     @update:model-value="close"
   >
     <template #header>
       <div class="flex h-14 shrink-0 items-center border-b px-5">
-        <h2 class="text-[15px] font-medium">项目设置</h2>
-        <span class="sr-only">{{ project.name }} 的设置</span>
+        <h2 class="text-[15px] font-medium">{{ $t("项目设置") }}</h2>
+        <span class="sr-only">{{ $t("{name} 的设置", { name: project.name }) }}</span>
       </div>
     </template>
     <div class="flex h-full min-h-0 min-w-0 flex-1 max-md:flex-col">
-      <nav aria-label="设置分区" class="scroll-thin flex shrink-0 gap-0.5 overflow-x-auto border-r p-3 max-md:border-b max-md:border-r-0 md:w-[200px] md:flex-col">
+      <nav :aria-label="$t('设置分区')" class="scroll-thin flex shrink-0 gap-0.5 overflow-x-auto border-r p-3 max-md:border-b max-md:border-r-0 md:w-[200px] md:flex-col">
         <button
           v-for="s in SETTINGS_SECTIONS"
           :key="s.id"

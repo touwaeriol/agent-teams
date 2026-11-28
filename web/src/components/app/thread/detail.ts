@@ -1,4 +1,5 @@
 // Pure helpers of the thread panel / page (web/src/components/app/ThreadDetail.tsx).
+import { $t } from "@/i18n";
 import type { MessageView, ThreadView } from "@/api/views";
 import { phaseLine, type PhaseInput } from "@/lib/phase";
 import { neighbours } from "@/lib/threadList";
@@ -19,12 +20,12 @@ export const typingLine = (thread: PhaseInput): { text: string; spin: boolean } 
 /** What replaces the message box: only archived threads refuse messages (with 取消归档). */
 export function closedNote(t: Pick<ThreadView, "status">): { text: string; unarchive: boolean } | null {
   if (t.status !== "archived") return null;
-  return { text: "讨论串已归档，取消归档后再继续", unarchive: true };
+  return { text: $t("讨论串已归档，取消归档后再继续"), unarchive: true };
 }
 
 /** The quiet hint above the message box of a done or failed thread. */
 export function reopenHint(t: Pick<ThreadView, "status">): string | null {
-  return t.status === "done" || t.status === "failed" ? "发送消息会重新打开讨论串" : null;
+  return t.status === "done" || t.status === "failed" ? $t("发送消息会重新打开讨论串") : null;
 }
 
 /** Expand / collapse button of the detail header. */
@@ -48,7 +49,7 @@ export function threadNav(order: number[], no: number, path: (no: number) => str
 
 /** Who handed the brief to the lead: the user when they opened the thread, else the coordinator. */
 export function dispatchSpeaker(openedBy: string): string {
-  return openedBy === "user" ? "你 → 组长" : "统筹 → 组长";
+  return openedBy === "user" ? $t("你 → 组长") : $t("统筹 → 组长");
 }
 
 /** Lines a collapsed brief shows. */

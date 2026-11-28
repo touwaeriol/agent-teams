@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * The permission menu (title 模式): one row per mode the server lists, with its description, a
  * check on the current one and its number (the shortcut while the menu is open; not on touch).
@@ -19,9 +20,9 @@ const busy = computed(() => Boolean(props.pending) || Boolean(props.disabled));
 </script>
 
 <template>
-  <div class="flex flex-col text-[13px]" role="menu" aria-label="权限模式" data-testid="mode-menu">
+  <div class="flex flex-col text-[13px]" role="menu" :aria-label="$t('权限模式')" data-testid="mode-menu">
     <div class="flex items-center justify-between px-2.5 pb-1 pt-0.5 text-xs text-muted-foreground">
-      <span class="font-semibold text-foreground">模式 · {{ runtimeLabel }}</span>
+      <span class="font-semibold text-foreground">{{ $t("模式 · {runtimeLabel}", { runtimeLabel }) }}</span>
     </div>
     <template v-for="(group, gi) in [normal, danger]" :key="gi">
       <div v-if="gi === 1 && group.length" class="mx-2.5 my-1 border-t" />
@@ -46,8 +47,8 @@ const busy = computed(() => Boolean(props.pending) || Boolean(props.disabled));
         <span v-if="!touch" class="mt-0.5 shrink-0 rounded-[5px] border bg-background px-[5px] font-mono text-[11px] leading-4 text-muted-foreground">{{ r.key }}</span>
       </button>
     </template>
-    <p v-if="!rows.length" class="px-2.5 py-1.5 text-xs text-muted-foreground">这个会话现在不能切换权限模式。</p>
+    <p v-if="!rows.length" class="px-2.5 py-1.5 text-xs text-muted-foreground">{{ $t("这个会话现在不能切换权限模式。") }}</p>
     <p v-for="n in notes" :key="n" class="px-2.5 pt-1 text-[11.5px] leading-[18px] text-muted-foreground">{{ n }}</p>
-    <p v-if="pending" class="px-2.5 pt-1 text-[11.5px] leading-[18px] text-[#2F6FDB]">已提交，等节点确认后才算切换成功。</p>
+    <p v-if="pending" class="px-2.5 pt-1 text-[11.5px] leading-[18px] text-[#2F6FDB]">{{ $t("已提交，等节点确认后才算切换成功。") }}</p>
   </div>
 </template>

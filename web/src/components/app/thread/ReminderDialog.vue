@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** 添加提醒 → 自定义…: pick a date and time (local, in the future, within a year). */
 import { computed, ref } from "vue";
 import type { ThreadView } from "@/api/views";
@@ -21,17 +22,17 @@ function submit() {
 </script>
 
 <template>
-  <FormDialog v-model:open="open" :title="`提醒 #${thread.no}`" description="到时间后讨论串会移到“等你处理”，浏览器允许时还会弹出通知。" submit-label="设置提醒" :disabled="!valid" width="26rem" @submit="submit">
+  <FormDialog v-model:open="open" :title="$t('提醒 #{no}', { no: thread.no })" :description="$t('到时间后讨论串会移到“等你处理”，浏览器允许时还会弹出通知。')" :submit-label="$t('设置提醒')" :disabled="!valid" width="26rem" @submit="submit">
     <el-date-picker
       v-model="at"
       type="datetime"
       format="YYYY-MM-DD HH:mm"
       :disabled-date="disabledDate"
       :clearable="false"
-      placeholder="选择日期和时间"
-      aria-label="提醒时间"
+      :placeholder="$t('选择日期和时间')"
+      :aria-label="$t('提醒时间')"
       class="!w-full"
     />
-    <p v-if="at && !valid" class="text-xs text-destructive">提醒时间要在将来一年以内。</p>
+    <p v-if="at && !valid" class="text-xs text-destructive">{{ $t("提醒时间要在将来一年以内。") }}</p>
   </FormDialog>
 </template>

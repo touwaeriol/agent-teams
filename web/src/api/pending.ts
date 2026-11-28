@@ -19,6 +19,7 @@
 // successful send of the conversation.
 //
 // Sends to one conversation go out one after another, so the server stores them in order.
+import { $t } from "@/i18n";
 import { useQueryClient, type QueryClient, type QueryKey } from "@tanstack/vue-query";
 import { reactive } from "vue";
 import { dropPickedRefs } from "@/components/app/composer/useComposerAssist";
@@ -183,11 +184,11 @@ function settleOthers(qc: QueryClient, p: PendingMessage, m: MessageView) {
 /** Posts a pending send (after the conversation's earlier sends) and settles it. */
 function deliver(qc: QueryClient, key: string): Promise<MessageView> {
   const first = findPending(key);
-  if (!first) return Promise.reject(new Error("消息已不在发送队列里"));
+  if (!first) return Promise.reject(new Error($t("消息已不在发送队列里")));
   const cid = first.cid;
   const run = (queues.get(cid) ?? Promise.resolve()).then(async () => {
     const p = findPending(key);
-    if (!p) throw new Error("消息已删除");
+    if (!p) throw new Error($t("消息已删除"));
     try {
       const m = (await conversations.send(p.cid, p.content, false, p.images, p.refs, p.key)) as MessageView;
       // Same tick: the real message takes the pending one's place without a flicker. A cache that

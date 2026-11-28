@@ -1,4 +1,5 @@
 // State helpers of the 资料库 browser (web/src/components/app/Library.tsx).
+import { $t } from "@/i18n";
 import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import { projects as projectActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -8,11 +9,11 @@ import { readLocal, writeLocal } from "@/lib/persist";
 import { toast } from "@/lib/toast";
 
 export const LIBRARY_TYPES: [string, string][] = [
-  ["", "全部类型"],
-  ["design", "设计稿"],
-  ["doc", "文档"],
-  ["slides", "幻灯片"],
-  ["data", "数据"],
+  ["", $t("全部类型")],
+  ["design", $t("设计稿")],
+  ["doc", $t("文档")],
+  ["slides", $t("幻灯片")],
+  ["data", $t("数据")],
 ];
 
 export type LibraryView = "list" | "grid";
@@ -29,14 +30,14 @@ export function saveView(v: LibraryView): void {
 }
 
 export function typeName(value: string): string {
-  return LIBRARY_TYPES.find(([id]) => id === value)?.[1] ?? "全部类型";
+  return LIBRARY_TYPES.find(([id]) => id === value)?.[1] ?? $t("全部类型");
 }
 
 /** Uploads picked files one after another; refused ones become a toast. */
 export function useUpload(pid: () => string) {
   const upload = useAction((file: File) => fileBase64(file).then((data) => projectActions.upload(pid(), { name: file.name, data })), {
     invalidate: () => [keys.allDeliverables(pid())],
-    success: (d) => `已添加 ${d.title}`,
+    success: (d) => $t("已添加 {title}", { title: d.title }),
   });
   return async (files: FileList | File[] | null) => {
     for (const file of Array.from(files ?? [])) {

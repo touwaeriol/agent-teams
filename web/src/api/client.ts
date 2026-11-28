@@ -1,6 +1,7 @@
 // The one HTTP client of the web app: openapi-fetch over the generated core
 // paths plus the orchestration paths, same-origin cookies, CSRF header on
 // writes, and `{detail, code, fields}` errors turned into ApiError.
+import { $t } from "@/i18n";
 import createClient, { type Middleware } from "openapi-fetch";
 import type { OrchestrationPaths } from "./orchestration";
 import type { paths as CorePaths } from "./schema";
@@ -58,9 +59,9 @@ export function toApiError(status: number, body: unknown, statusText = ""): ApiE
     const fields = Array.isArray(b.fields) ? (b.fields as FieldProblem[]) : [];
     const detail = typeof b.detail === "string" && b.detail ? b.detail : typeof b.title === "string" ? b.title : "";
     const extra = fields.length ? `：${fields.map((f) => f.message).join("；")}` : "";
-    return new ApiError(status, (detail || statusText || `请求失败（${status}）`) + extra, typeof b.code === "string" ? b.code : "", fields);
+    return new ApiError(status, (detail || statusText || $t("请求失败（{status}）", { status })) + extra, typeof b.code === "string" ? b.code : "", fields);
   }
-  return new ApiError(status, typeof body === "string" && body ? body : statusText || `请求失败（${status}）`);
+  return new ApiError(status, typeof body === "string" && body ? body : statusText || $t("请求失败（{status}）", { status }));
 }
 
 // fetch is looked up per request (not captured at import) so tests can stub it.

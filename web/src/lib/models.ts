@@ -1,6 +1,7 @@
 // Models (pure). There is no model list: every role (coordinator and lead too) and the project
 // settings name their model by hand. The fields suggest the models the roles already use plus a
 // few common ids, and accept any id in the server's format (composer.ValidModel).
+import { $t } from "@/i18n";
 import { runtimeLabel, runtimeSpec, type Runtime } from "@/lib/runtimes";
 
 export { runtimeLabel, type Runtime };
@@ -35,7 +36,7 @@ export function validModel(id: string): boolean {
   return id === "" || MODEL_ID.test(id);
 }
 
-export const MODEL_FORMAT_HINT = "模型 ID 只能用字母、数字和 . _ - : / @ [ ]，最多 100 个字符";
+export const MODEL_FORMAT_HINT = $t("模型 ID 只能用字母、数字和 {chars}，最多 100 个字符", { chars: ". _ - : / @ [ ]" });
 
 /** The display name of a model id: the common name when it is one, else the id. */
 export function modelName(id: string): string {
@@ -49,7 +50,7 @@ export function modelName(id: string): string {
 /** What a role's empty model falls back to (the built-in default), short enough for the placeholder. */
 export function emptyRoleModel(runtime: Runtime): string {
   const s = runtimeSpec(runtime);
-  return s.builtinModel ? `留空 = ${s.builtinModel}` : "留空 = 默认";
+  return s.builtinModel ? $t("留空 = {builtinModel}", { builtinModel: s.builtinModel }) : $t("留空 = 默认");
 }
 
 interface ScopedRole {
@@ -115,14 +116,14 @@ export function scopedModel(r: ScopedRole, runtime: string): string | undefined 
 /** The name of a runtime's built-in model, for the role lists. */
 function builtinName(runtime: Runtime): string {
   const s = runtimeSpec(runtime);
-  return s.builtinModel ? `内置默认 ${modelName(s.builtinModel)}` : `${s.label} 默认`;
+  return s.builtinModel ? $t("内置默认 {builtinModel}", { builtinModel: modelName(s.builtinModel) }) : $t("{label} 默认", { label: s.label });
 }
 
 /** The effective state of a project model field: 项目指定：X, or 跟随岗位配置（岗位：…）. */
 export function projectModelStatus(value: string, roles: ScopedRole[], field: ProjectField): string {
-  if (value) return `项目指定：${modelName(value)}`;
+  if (value) return $t("项目指定：{n}", { n: modelName(value) });
   const names = roleModelNames(roles, field);
-  return `跟随岗位配置（${names.length ? `岗位：${names.join("、")}` : "没有这类岗位"}）`;
+  return $t("跟随岗位配置（{n}）", { n: names.length ? $t("岗位：{names}", { names: names.join("、") }) : $t("没有这类岗位") });
 }
 
 /** Whether to offer the Codex field: there is a Codex role, or the field is set. */

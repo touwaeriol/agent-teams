@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** The right panel with one thread open (or a note when it is gone). */
 import { computed } from "vue";
 import { useWaiting } from "@/api/queries";
@@ -26,9 +27,9 @@ const nav = computed(() => {
 
 <template>
   <Loading v-if="loading" class="py-16" />
-  <EmptyState v-else-if="!thread" :title="`找不到讨论串 #${no}`" description="它可能已被删除。">
+  <EmptyState v-else-if="!thread" :title="$t('找不到讨论串 #{no}', { no })" :description="$t('它可能已被删除。')">
     <template #action>
-      <button type="button" class="text-[13px] underline-offset-2 hover:underline" @click="emit('back')">回到讨论串列表</button>
+      <button type="button" class="text-[13px] underline-offset-2 hover:underline" @click="emit('back')">{{ $t("回到讨论串列表") }}</button>
     </template>
   </EmptyState>
   <ThreadDetail
@@ -39,7 +40,7 @@ const nav = computed(() => {
     :view="view"
     :full-href="full"
     :nav="nav"
-    :expand="{ to: full, label: '全屏打开' }"
+    :expand="{ to: full, label: $t('全屏打开') }"
     @view="(v) => emit('view', v)"
     @back="emit('back')"
     @close="emit('close')"

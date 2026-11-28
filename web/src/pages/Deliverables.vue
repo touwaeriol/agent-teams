@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Deliverables board (资料库, full page): the library table, plus the “新做一个” chips that
 // hand a templated request to the coordinator.
+import { $t } from "@/i18n";
 import { computed, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { useProject } from "@/api/queries";
@@ -22,12 +23,12 @@ const making = ref<string | null>(null);
       <div class="flex items-start gap-1">
         <NavButton />
         <div class="flex flex-col gap-1">
-          <RouterLink :to="`/projects/${pid}`" class="text-xs text-muted-foreground hover:text-foreground">{{ project.data.value?.name ?? "项目" }}</RouterLink>
-          <h1 class="text-[22px] font-semibold">资料库</h1>
+          <RouterLink :to="`/projects/${pid}`" class="text-xs text-muted-foreground hover:text-foreground">{{ project.data.value?.name ?? $t("项目") }}</RouterLink>
+          <h1 class="text-[22px] font-semibold">{{ $t("资料库") }}</h1>
         </div>
       </div>
       <section class="flex flex-col gap-2">
-        <span class="text-xs text-muted-foreground">让团队做一个新的（交给项目统筹，它会开讨论串去做）</span>
+        <span class="text-xs text-muted-foreground">{{ $t("让团队做一个新的（交给项目统筹，它会开讨论串去做）") }}</span>
         <div class="flex flex-wrap gap-2">
           <button
             v-for="m in MAKE"

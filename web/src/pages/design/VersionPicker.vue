@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { computed } from "vue";
 import type { DeliverableFiles } from "@/api/views";
 import { pickedVersion, versionLabel } from "./viewer";
@@ -11,7 +12,7 @@ const latest = computed(() => props.files.versions[0]?.version ?? props.files.ve
 <template>
   <el-select
     :model-value="files.version"
-    aria-label="版本"
+    :aria-label="$t('版本')"
     size="small"
     class="at-version-select"
     popper-class="at-select-popper"

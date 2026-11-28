@@ -2,6 +2,7 @@
 // as the server lists them (GET /api/projects/{pid}/session-controls, GET /api/session-options).
 // The server already filters the menus by CLI, model, role and node; this file only numbers,
 // groups, labels and colours them.
+import { $t } from "@/i18n";
 import type { components } from "@/api/schema";
 
 export type ModeOption = components["schemas"]["ModeOption"];
@@ -12,11 +13,11 @@ export type ModeId = ModeOption["id"];
 
 /** Look of each mode: the chip's state text and tone, and its icon name (lucide). */
 export const MODE_LOOK: Record<ModeId, { state: string; short: string; tone: "none" | "info" | "review" | "warn"; icon: "sparkles" | "hand" | "pen" | "list" | "shield" }> = {
-  auto: { state: "自动审批", short: "自动", tone: "info", icon: "sparkles" },
-  default: { state: "修改前询问", short: "手动", tone: "none", icon: "hand" },
-  acceptEdits: { state: "自动接受编辑", short: "接受编辑", tone: "info", icon: "pen" },
-  plan: { state: "计划模式", short: "计划", tone: "review", icon: "list" },
-  bypassPermissions: { state: "跳过权限确认", short: "跳过确认", tone: "warn", icon: "shield" },
+  auto: { state: $t("自动审批"), short: $t("自动"), tone: "info", icon: "sparkles" },
+  default: { state: $t("修改前询问"), short: $t("手动"), tone: "none", icon: "hand" },
+  acceptEdits: { state: $t("自动接受编辑"), short: $t("接受编辑"), tone: "info", icon: "pen" },
+  plan: { state: $t("计划模式"), short: $t("计划"), tone: "review", icon: "list" },
+  bypassPermissions: { state: $t("跳过权限确认"), short: $t("跳过确认"), tone: "warn", icon: "shield" },
 };
 
 /** Chip colours by tone (text, border, background), from the design's palette. */
@@ -28,7 +29,7 @@ export const TONE_CLASS: Record<string, string> = {
   pending: "border-[#C9D8F3] bg-[#F7F9FE] text-[#2F6FDB]",
 };
 
-const EFFORT_LABELS: Record<string, string> = { none: "关闭", minimal: "最低", low: "低", medium: "中", high: "高", xhigh: "超高", max: "最高" };
+const EFFORT_LABELS: Record<string, string> = { none: $t("关闭"), minimal: $t("最低"), low: $t("低"), medium: $t("中"), high: $t("高"), xhigh: $t("超高"), max: $t("最高") };
 
 /** 低 / 中 / 高 …; an unknown level shows as is. */
 export function effortLabel(e: string): string {
@@ -62,12 +63,15 @@ export function rowForKey(rows: ModeRow[], key: string): ModeRow | undefined {
 }
 
 /** When a switch takes effect, for the menu's footer (by the modes' applies). */
+/** Mode changes take effect at once (from the next tool call) rather than next turn. */
+export const appliesNow = (runtime: string, modes: ModeOption[] | null | undefined): boolean =>
+  (modes ?? []).some((m) => m.applies === "now") || (runtime === "claude" && !(modes ?? []).length);
+
 export function appliesNote(runtime: string, modes: ModeOption[] | null | undefined): string {
-  const now = (modes ?? []).some((m) => m.applies === "now") || (runtime === "claude" && !(modes ?? []).length);
-  if (now) return "立即生效：从下一次工具调用起按新模式。";
-  if (runtime === "codex") return "下一轮生效。Codex 没有“接受编辑”和“计划”模式。";
-  if (runtime === "antigravity") return "下一轮生效。Antigravity 只有“手动”和“跳过权限确认”两档。";
-  return "下一轮生效。";
+  if (appliesNow(runtime, modes)) return $t("立即生效：从下一次工具调用起按新模式。");
+  if (runtime === "codex") return $t("下一轮生效。Codex 没有“接受编辑”和“计划”模式。");
+  if (runtime === "antigravity") return $t("下一轮生效。Antigravity 只有“手动”和“跳过权限确认”两档。");
+  return $t("下一轮生效。");
 }
 
 /** The model row for an id (undefined when the runtime did not list it). */
@@ -79,7 +83,7 @@ export function modelOf(models: ModelChoice[] | null | undefined, id: string): M
 export function modelLabel(models: ModelChoice[] | null | undefined, id: string, runtime = "claude"): string {
   const m = modelOf(models, id);
   if (m?.name) return m.name;
-  if (!id) return runtime === "codex" ? "Codex 默认" : runtime === "antigravity" ? "Antigravity 默认" : "默认模型";
+  if (!id) return runtime === "codex" ? $t("Codex 默认") : runtime === "antigravity" ? $t("Antigravity 默认") : $t("默认模型");
   return id;
 }
 
@@ -102,5 +106,5 @@ export function effortFor(model: ModelChoice | undefined, current: string): stri
 export function noAutoNote(runtime: string, models: ModelChoice[] | null | undefined, model: string): string {
   const m = modelOf(models, model);
   if (runtime !== "claude" || !m || m.supports_auto) return "";
-  return `${modelLabel(models, model)} 不支持自动模式，所以菜单里没有“自动”。`;
+  return $t("{modelLabel} 不支持自动模式，所以菜单里没有“自动”。", { modelLabel: modelLabel(models, model) });
 }

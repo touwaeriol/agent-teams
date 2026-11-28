@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * You and the lead: the brief the thread was opened with first, then the lead's messages as
  * Markdown, yours as bubbles, open cards where they were asked. While the thread is queued or
@@ -21,9 +22,9 @@ import ThreadDeliverables from "./ThreadDeliverables.vue";
 import TypingLine from "./TypingLine.vue";
 
 const props = defineProps<{ pid: string; thread: ThreadView; compact: boolean; session?: boolean }>();
-const who = computed(() => (props.session ? "员工" : "组长"));
+const who = computed(() => (props.session ? $t("员工") : $t("组长")));
 /** A session's employee is named by its role (工程师), not its internal handle (lead-1). */
-const speaker = computed(() => (props.session ? leadOf(props.thread)?.title || "员工" : undefined));
+const speaker = computed(() => (props.session ? leadOf(props.thread)?.title || $t("员工") : undefined));
 const questions = useQuestions(() => props.thread.id);
 const lead = computed(() => leadOf(props.thread)?.name);
 const inserts = computed(() => chatQuestions(questions.data.value).map((q: QuestionView) => ({ key: q.id, at: q.created_at, question: q })));
@@ -49,12 +50,12 @@ const dispatched = computed(() => (props.thread.dispatch && props.thread.brief.t
     <template #before><DispatchMessage v-if="dispatched" :brief="thread.brief" :dispatch="dispatched" :pid="pid" :compact="compact" /></template>
     <template #insert="{ item }"><WaitingCard :cid="thread.id" :pid="pid" :question="item.question" variant="soft" :lead-name="speaker ?? lead" /></template>
     <template #empty>
-      <p v-if="!dispatched && !reading" class="py-10 text-center text-[13px] leading-6 text-muted-foreground">还没有对话。{{ who }}的回复会出现在这里，你也可以直接给{{ who }}发消息。</p>
+      <p v-if="!dispatched && !reading" class="py-10 text-center text-[13px] leading-6 text-muted-foreground">{{ $t("还没有对话。{who}的回复会出现在这里，你也可以直接给{who2}发消息。", { who, who2: who }) }}</p>
     </template>
     <template #after>
       <p v-if="reading" role="status" class="flex items-center gap-2 text-[13px] text-muted-foreground" data-lead-reading>
         <Spin v-if="!typing" color="#8A877F" :size="11" />
-        {{ who }}正在阅读任务…
+        {{ $t("{who}正在阅读任务…", { who }) }}
       </p>
       <ThreadDeliverables v-if="ended && !session" :pid="pid" :thread="thread" />
       <ReviewCard v-if="showReviewCard(thread)" :thread="thread" variant="soft" />

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * The session box's controls (#53): "模型 · 强度" and the permission mode chip, from
  * GET /api/projects/{pid}/session-controls. A pick goes out with PUT and shows 切换中… until the
@@ -59,14 +60,14 @@ const modeNotes = computed(() => {
   if (!v) return [];
   return [
     noAutoNote(runtime.value, models.value, v.model),
-    v.node_outdated ? "会话所在节点的守护进程较旧，只能用这几档；升级节点后可用全部选项。" : "",
-    v.error ? `上次切换没有成功：${v.error}` : "",
-    `${appliesNote(runtime.value, v.modes)}选择记在这个会话上，重开会话沿用，不改岗位设置。`,
+    v.node_outdated ? $t("会话所在节点的守护进程较旧，只能用这几档；升级节点后可用全部选项。") : "",
+    v.error ? $t("上次切换没有成功：{error}", { error: v.error }) : "",
+    $t("{appliesNote}选择记在这个会话上，重开会话沿用，不改岗位设置。", { appliesNote: appliesNote(runtime.value, v.modes) }),
   ].filter(Boolean);
 });
 const modelNote = computed(() => {
   const now = (c.value?.modes ?? []).some((m) => m.applies === "now") || runtime.value === "claude";
-  return `${now ? "立即生效" : "下一轮生效"}，只改这个会话，不改岗位设置。${c.value?.node_outdated ? "节点较旧，暂时不能切换思考强度。" : ""}`;
+  return $t("{n}，只改这个会话，不改岗位设置。{n2}", { n: now ? $t("立即生效") : $t("下一轮生效"), n2: c.value?.node_outdated ? $t("节点较旧，暂时不能切换思考强度。") : "" });
 });
 
 const put = useAction((body: { permission_mode?: string; model?: string; effort?: string }) => sessions.setControls(props.pid, body as never), {
@@ -131,9 +132,9 @@ watch(c, (v) => {
   const a = asked.value;
   if (!v || v.pending || sent.value || !a) return;
   asked.value = null;
-  if (v.error) return void toast.error(`切换没有成功：${v.error}`);
+  if (v.error) return void toast.error($t("切换没有成功：{error}", { error: v.error }));
   const kept = (Object.keys(a) as (keyof Picks)[]).some((k) => a[k] !== undefined && v[k] !== a[k]);
-  if (kept) toast.error("节点没有回应，切换未生效");
+  if (kept) toast.error($t("节点没有回应，切换未生效"));
 });
 
 /** Digits pick a row while the mode menu is open (not while typing elsewhere). */
@@ -157,7 +158,7 @@ const toneClass = computed(() => (busy.value && pendingMode.value ? TONE_CLASS.p
     <template v-if="!narrow">
       <el-popover v-model:visible="modelOpen" trigger="click" placement="top-start" :width="330" popper-class="at-session-menu !p-1.5">
         <template #reference>
-          <button type="button" :class="[chip, 'border-transparent bg-raised text-muted-foreground hover:text-foreground']" data-testid="model-control" title="模型 · 思考强度" aria-haspopup="menu" :aria-expanded="modelOpen">
+          <button type="button" :class="[chip, 'border-transparent bg-raised text-muted-foreground hover:text-foreground']" data-testid="model-control" :title="$t('模型 · 思考强度')" aria-haspopup="menu" :aria-expanded="modelOpen">
             <Loader2 v-if="busy && !pendingMode" class="size-3 animate-spin" />
             <span class="truncate">{{ modelText }}</span>
             <ChevronDown class="size-3 shrink-0" />
@@ -173,13 +174,13 @@ const toneClass = computed(() => (busy.value && pendingMode.value ? TONE_CLASS.p
             data-testid="mode-control"
             :data-mode="mode"
             :aria-busy="busy && Boolean(pendingMode)"
-            :title="busy && pendingMode ? '已提交，等节点确认后才算切换成功' : `权限模式：${modeLabel(mode)}`"
+            :title="busy && pendingMode ? $t('已提交，等节点确认后才算切换成功') : $t('权限模式：{mode}', { mode: modeLabel(mode) })"
             aria-haspopup="menu"
             :aria-expanded="modeOpen"
           >
             <template v-if="busy && pendingMode">
               <Loader2 class="size-3 animate-spin" />
-              <span>切换到{{ modeLabel(pendingMode) }}…</span>
+              <span>{{ $t("切换到{pendingMode}…", { pendingMode: modeLabel(pendingMode) }) }}</span>
             </template>
             <template v-else>
               <ModeIcon :mode="mode" class="size-3" />
@@ -195,10 +196,10 @@ const toneClass = computed(() => (busy.value && pendingMode.value ? TONE_CLASS.p
       <button type="button" :class="[chip, toneClass, 'max-w-full']" data-testid="controls-chip" @click="sheet = true">
         <Loader2 v-if="busy" class="size-3 shrink-0 animate-spin" />
         <ModeIcon v-else :mode="mode" class="size-3 shrink-0" />
-        <span class="truncate">{{ modelText }} · {{ busy ? "切换中…" : look.short }}</span>
+        <span class="truncate">{{ modelText }} · {{ busy ? $t("切换中…") : look.short }}</span>
         <ChevronDown class="size-3 shrink-0" />
       </button>
-      <el-drawer v-model="sheet" direction="btt" size="auto" title="模型和模式" append-to-body class="at-sheet !h-auto max-h-[85vh] rounded-t-2xl">
+      <el-drawer v-model="sheet" direction="btt" size="auto" :title="$t('模型和模式')" append-to-body class="at-sheet !h-auto max-h-[85vh] rounded-t-2xl">
         <div class="flex flex-col gap-3 pb-2" data-testid="controls-sheet">
           <ModelMenuBody :models="models" :model="c.model" :effort="c.effort" :efforts="c.node_outdated ? [] : efforts" :runtime="runtime" :disabled="busy" :note="modelNote" touch @model="pickModel" @effort="pickEffort" />
           <div class="border-t pt-2">

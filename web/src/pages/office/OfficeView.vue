@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The pixel office driven by the snapshot plus live `status` frames from the project stream,
 // with the dark side panel, scope switch, employee card and replay.
+import { $t } from "@/i18n";
 import { useQuery } from "@tanstack/vue-query";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -48,9 +49,9 @@ const summary = computed(() => staffSummaryText(staffSummary(employees.value, fo
 
 <template>
   <div class="flex min-h-full flex-wrap text-[#F0EDE6]" :style="{ background: DARK.page }">
-    <section aria-label="办公室场景" class="flex min-w-0 flex-[999_1_820px] flex-col gap-3 p-[18px]">
+    <section :aria-label="$t('办公室场景')" class="flex min-w-0 flex-[999_1_820px] flex-col gap-3 p-[18px]">
       <OfficeHeader :pid="pid" :name="name" :threads="threads" :focus="focus" :replaying="replaying" :summary="summary" @focus="(n) => (focus = n)" />
-      <div v-if="remote.error.value" class="text-xs text-[#F2A65E]">布局未生效：{{ remote.error.value }}</div>
+      <div v-if="remote.error.value" class="text-xs text-[#F2A65E]">{{ $t("布局未生效：{error}", { error: remote.error.value }) }}</div>
       <ReplayOffice v-if="replaying" :pid="pid" :common="common" />
       <Office v-else v-bind="common" :employees="employees" :events="live" />
     </section>

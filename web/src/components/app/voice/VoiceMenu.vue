@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * The mic dropdown (like the Claude app): 麦克风 rows with exactly one checked, a 语言 row that
  * opens a searchable language list in place, and 按住录音 with a switch.
@@ -12,7 +13,7 @@ import { cn } from "@/lib/utils";
 const props = defineProps<{ prefs: VoicePrefs; languages: LanguageOption[]; shortcut: string }>();
 const emit = defineEmits<{ change: [patch: Partial<VoicePrefs>] }>();
 
-const mics = ref<MicDevice[]>([{ deviceId: "", label: "系统默认" }]);
+const mics = ref<MicDevice[]>([{ deviceId: "", label: $t("系统默认") }]);
 const labelled = ref(true);
 const micNote = ref("");
 const view = ref<"main" | "language">("main");
@@ -23,7 +24,7 @@ const checkedMic = computed(() => selectedMic(mics.value, props.prefs.deviceId))
 const language = computed(() => languageLabel(props.languages, props.prefs.language));
 /** What the mic button does in the current mode (the switch's explanation). */
 const modeNote = computed(() =>
-  props.prefs.pushToTalk ? `按住麦克风或 ${props.shortcut} 说话，松开结束` : `点一下麦克风开始，再点一下结束（${props.shortcut} 同样）`,
+  props.prefs.pushToTalk ? $t("按住麦克风或 {shortcut} 说话，松开结束", { shortcut: props.shortcut }) : $t("点一下麦克风开始，再点一下结束（{shortcut} 同样）", { shortcut: props.shortcut }),
 );
 
 async function refresh() {
@@ -31,9 +32,9 @@ async function refresh() {
     const r = await listMics();
     mics.value = r.devices;
     labelled.value = r.labelled || r.devices.length <= 1;
-    micNote.value = r.devices.length > 1 ? "" : "没有找到麦克风";
+    micNote.value = r.devices.length > 1 ? "" : $t("没有找到麦克风");
   } catch {
-    micNote.value = "读不到麦克风列表";
+    micNote.value = $t("读不到麦克风列表");
   }
 }
 
@@ -75,8 +76,8 @@ const label = "px-2.5 pb-1 pt-1.5 text-xs text-muted-foreground";
 <template>
   <div class="flex w-full flex-col text-sm" data-testid="voice-menu">
     <template v-if="view === 'main'">
-      <span :class="label">麦克风</span>
-      <div role="radiogroup" aria-label="麦克风" class="scroll-thin flex max-h-[240px] flex-col overflow-y-auto">
+      <span :class="label">{{ $t("麦克风") }}</span>
+      <div role="radiogroup" :aria-label="$t('麦克风')" class="scroll-thin flex max-h-[240px] flex-col overflow-y-auto">
         <button
           v-for="m in mics"
           :key="m.deviceId"
@@ -93,14 +94,14 @@ const label = "px-2.5 pb-1 pt-1.5 text-xs text-muted-foreground";
         </button>
       </div>
       <p v-if="!labelled" class="flex items-center justify-between gap-2 px-2.5 py-1 text-xs text-muted-foreground">
-        允许使用麦克风后显示设备名
-        <button type="button" class="shrink-0 underline underline-offset-2 hover:text-foreground" @click="allow">允许</button>
+        {{ $t("允许使用麦克风后显示设备名") }}
+        <button type="button" class="shrink-0 underline underline-offset-2 hover:text-foreground" @click="allow">{{ $t("允许") }}</button>
       </p>
       <p v-if="micNote" class="px-2.5 py-1 text-xs text-muted-foreground">{{ micNote }}</p>
 
       <div class="mx-1 my-1 border-t" />
       <button type="button" :class="row" aria-haspopup="true" data-testid="voice-language-row" @click="openLanguages">
-        <span class="flex-1">语言</span>
+        <span class="flex-1">{{ $t("语言") }}</span>
         <span class="truncate text-[13px] text-muted-foreground">{{ language }}</span>
         <ChevronRight class="size-4 shrink-0 text-muted-foreground" />
       </button>
@@ -108,12 +109,12 @@ const label = "px-2.5 pb-1 pt-1.5 text-xs text-muted-foreground";
       <div class="mx-1 my-1 border-t" />
       <!-- Only the switch itself changes the mode (a click anywhere on the row used to flip it unnoticed). -->
       <div :class="cn(row, 'cursor-default hover:bg-transparent')" :title="modeNote" data-testid="voice-ptt-row">
-        <span class="flex-1">按住录音</span>
+        <span class="flex-1">{{ $t("按住录音") }}</span>
         <span class="text-xs text-muted-foreground">{{ shortcut }}</span>
         <el-switch
           :model-value="prefs.pushToTalk"
           size="small"
-          aria-label="按住录音"
+          :aria-label="$t('按住录音')"
           data-testid="voice-ptt-switch"
           @change="(v: string | number | boolean) => emit('change', { pushToTalk: v === true })"
         />
@@ -124,13 +125,13 @@ const label = "px-2.5 pb-1 pt-1.5 text-xs text-muted-foreground";
     <template v-else>
       <button type="button" :class="cn(row, 'font-medium')" data-testid="voice-language-back" @click="view = 'main'">
         <ChevronLeft class="size-4 shrink-0 text-muted-foreground" />
-        <span class="flex-1">语言</span>
+        <span class="flex-1">{{ $t("语言") }}</span>
       </button>
       <label class="mx-1 my-1 flex h-8 items-center gap-1.5 rounded-lg border border-input px-2">
         <Search class="size-3.5 text-muted-foreground" />
-        <input ref="search" v-model="q" class="min-w-0 flex-1 bg-transparent text-[13px] outline-none" placeholder="搜索语言" aria-label="搜索语言" />
+        <input ref="search" v-model="q" class="min-w-0 flex-1 bg-transparent text-[13px] outline-none" :placeholder="$t('搜索语言')" :aria-label="$t('搜索语言')" />
       </label>
-      <div role="radiogroup" aria-label="语言" class="scroll-thin flex max-h-[260px] flex-col overflow-y-auto">
+      <div role="radiogroup" :aria-label="$t('语言')" class="scroll-thin flex max-h-[260px] flex-col overflow-y-auto">
         <button
           v-if="!q"
           type="button"
@@ -139,8 +140,8 @@ const label = "px-2.5 pb-1 pt-1.5 text-xs text-muted-foreground";
           :class="cn(row, prefs.language === 'auto' && 'bg-raised')"
           @click="pickLanguage('auto')"
         >
-          <span class="flex-1">自动</span>
-          <span class="text-xs text-muted-foreground">识别说的语言</span>
+          <span class="flex-1">{{ $t("自动") }}</span>
+          <span class="text-xs text-muted-foreground">{{ $t("识别说的语言") }}</span>
           <Check v-if="prefs.language === 'auto'" class="size-4 shrink-0 text-[#2F6FDB]" />
         </button>
         <button
@@ -156,7 +157,7 @@ const label = "px-2.5 pb-1 pt-1.5 text-xs text-muted-foreground";
           <span v-if="l.zh !== l.name" class="text-xs text-muted-foreground">{{ l.zh }}</span>
           <Check v-if="prefs.language === l.code" class="size-4 shrink-0 text-[#2F6FDB]" />
         </button>
-        <p v-if="q && !shown.length" class="px-2.5 py-1.5 text-xs text-muted-foreground">没有这个语言</p>
+        <p v-if="q && !shown.length" class="px-2.5 py-1.5 text-xs text-muted-foreground">{{ $t("没有这个语言") }}</p>
       </div>
     </template>
   </div>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { threads as threadActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys } from "@/api/queries";
@@ -14,7 +15,7 @@ const toggle = useAction(() => threadActions.setMainTask(props.thread.id, props.
 
 <template>
   <span class="flex items-center gap-2.5 text-[13px]">
-    <button type="button" :title="status === 'done' ? '取消完成' : '标记为完成'" class="rounded-full" @click="toggle.mutate()"><CheckMark :status="status" /></button>
+    <button type="button" :title="status === 'done' ? $t('取消完成') : $t('标记为完成')" class="rounded-full" @click="toggle.mutate()"><CheckMark :status="status" /></button>
     <span :class="cn('min-w-0 flex-1', status === 'done' && 'text-[#8A877F] line-through')">{{ title }}</span>
   </span>
 </template>

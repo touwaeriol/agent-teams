@@ -12,7 +12,9 @@
     "test:office": "vitest run src/office",
     "dev:mock": "node mock/server.mjs & vite",
     "mock": "node mock/server.mjs",
-    "gen:api": "openapi-typescript src/api/openapi.json -o src/api/schema.d.ts"
+    "gen:api": "openapi-typescript src/api/openapi.json -o src/api/schema.d.ts",
+    "i18n:extract": "node scripts/i18n-extract.mjs",
+    "i18n:convert": "node scripts/i18n-convert.mjs"
   },
   "dependencies": {
     "@tanstack/vue-query": "5.90.2",
@@ -30,6 +32,7 @@
     "tailwind-merge": "3.3.1",
     "unified": "11.0.5",
     "vue": "3.5.22",
+    "vue-i18n": "11.4.24",
     "vue-router": "4.6.3",
     "yaml": "2.8.1"
   },

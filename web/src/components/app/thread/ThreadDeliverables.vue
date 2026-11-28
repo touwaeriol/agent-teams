@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * At the end of a finished thread's chat: every deliverable the thread published, the lead's and
  * the members' alike (by thread, not by publisher), so the final report links them all.
@@ -15,8 +16,8 @@ const items = computed(() => (list.data.value?.items ?? []).filter((d) => d.kind
 </script>
 
 <template>
-  <section v-if="items.length" class="flex flex-col gap-2" aria-label="本讨论串的交付物" data-thread-deliverables>
-    <span class="text-xs text-muted-foreground">本讨论串的交付物 · {{ items.length }}</span>
+  <section v-if="items.length" class="flex flex-col gap-2" :aria-label="$t('本讨论串的交付物')" data-thread-deliverables>
+    <span class="text-xs text-muted-foreground">{{ $t("本讨论串的交付物 · {itemsCount}", { itemsCount: items.length }) }}</span>
     <DeliverableChip v-for="d in items" :key="d.id" :pid="pid" :item="d" />
   </section>
 </template>

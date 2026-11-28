@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** The result of 测试连接: success or the reason, the host key to check, and 重置主机密钥 on a mismatch. */
 import { CircleAlert, CircleCheck, ShieldAlert } from "lucide-vue-next";
 import { computed } from "vue";
@@ -24,20 +25,20 @@ const TEXT = { ok: "text-ok", warn: "text-warn", danger: "text-bad" };
     </span>
     <p v-if="v.detail" class="text-[13px] leading-5 text-foreground/85">{{ v.detail }}</p>
     <template v-if="v.expected">
-      <HostKeyBox :type="v.hostKey?.type ?? ''" :fingerprint="v.expected" label="已固定的主机密钥" :command="false" />
-      <HostKeyBox v-if="v.hostKey" :type="v.hostKey.type" :fingerprint="v.hostKey.fingerprint" label="这次服务器出示的主机密钥（不一致）" tone="bad" />
+      <HostKeyBox :type="v.hostKey?.type ?? ''" :fingerprint="v.expected" :label="$t('已固定的主机密钥')" :command="false" />
+      <HostKeyBox v-if="v.hostKey" :type="v.hostKey.type" :fingerprint="v.hostKey.fingerprint" :label="$t('这次服务器出示的主机密钥（不一致）')" tone="bad" />
     </template>
-    <HostKeyBox v-else-if="v.hostKey && (v.hostKey.pinnedNow || v.tone !== 'ok')" :type="v.hostKey.type" :fingerprint="v.hostKey.fingerprint" :label="v.hostKey.pinnedNow ? '已固定的主机密钥（本次）' : '服务器出示的主机密钥'" />
+    <HostKeyBox v-else-if="v.hostKey && (v.hostKey.pinnedNow || v.tone !== 'ok')" :type="v.hostKey.type" :fingerprint="v.hostKey.fingerprint" :label="v.hostKey.pinnedNow ? $t('已固定的主机密钥（本次）') : $t('服务器出示的主机密钥')" />
     <div v-if="v.canReset" class="flex flex-wrap items-center gap-2">
       <ConfirmAction
-        title="重置主机密钥？"
-        description="确认服务器确实重装过或换过密钥后再重置。重置后下一次测试连接会把服务器当前的主机密钥重新固定下来；如果是有人冒充，凭证会被发给冒充者。"
-        confirm-label="重置"
+        :title="$t('重置主机密钥？')"
+        :description="$t('确认服务器确实重装过或换过密钥后再重置。重置后下一次测试连接会把服务器当前的主机密钥重新固定下来；如果是有人冒充，凭证会被发给冒充者。')"
+        :confirm-label="$t('重置')"
         variant="danger"
         size="small"
         @confirm="emit('reset')"
       >
-        {{ resetting ? "正在重置…" : "重置主机密钥" }}
+        {{ resetting ? $t("正在重置…") : $t("重置主机密钥") }}
       </ConfirmAction>
     </div>
   </div>

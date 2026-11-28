@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** The answer to a platform command, shown at the top of the message box: /effort, /status, /context, /skills. */
 import { useQuery } from "@tanstack/vue-query";
 import { X } from "lucide-vue-next";
@@ -26,10 +27,10 @@ const context = useQuery({
 });
 const update = useAction((body: Parameters<typeof projects.update>[1]) => projects.update(props.pid, body), {
   invalidate: () => [keys.project(props.pid)],
-  success: "已保存，之后打开的会话生效",
+  success: $t("已保存，之后打开的会话生效"),
 });
 
-const TITLES: Record<Panel, string> = { effort: "思考强度", status: "状态", context: "上下文", skills: "技能和插件" };
+const TITLES: Record<Panel, string> = { effort: $t("思考强度"), status: $t("状态"), context: $t("上下文"), skills: $t("技能和插件") };
 const effort = computed(() => project.data.value?.thread_effort ?? "");
 const status = computed(() => (overview.data.value ? statusSummary(overview.data.value as unknown as OverviewView, coordinator.data.value) : null));
 const rows = computed(() => (context.data.value ? contextRows(context.data.value) : []));
@@ -46,13 +47,13 @@ const loading = computed(
   <section class="mx-3 mt-3 rounded-xl border bg-background p-3 text-[13px]" :aria-label="TITLES[panel]" data-testid="command-panel">
     <header class="mb-2 flex items-center justify-between">
       <span class="font-medium">/{{ panel }} · {{ TITLES[panel] }}</span>
-      <button type="button" aria-label="关闭" class="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-raised" @click="assist.closePanel()">
+      <button type="button" :aria-label="$t('关闭')" class="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-raised" @click="assist.closePanel()">
         <X class="size-3.5" />
       </button>
     </header>
     <Spinner v-if="loading" class="size-4" />
     <template v-else-if="panel === 'effort'">
-      <p class="mb-2 text-xs text-muted-foreground">这个项目所有讨论串的思考强度，对之后打开的会话生效。</p>
+      <p class="mb-2 text-xs text-muted-foreground">{{ $t("这个项目所有讨论串的思考强度，对之后打开的会话生效。") }}</p>
       <div class="flex flex-wrap gap-1.5">
         <button
           v-for="e in EFFORTS"
@@ -67,17 +68,17 @@ const loading = computed(
     </template>
     <template v-else-if="panel === 'status' && status">
       <dl class="grid grid-cols-3 gap-2 text-center">
-        <div class="rounded-lg bg-raised py-2"><dt class="text-xs text-muted-foreground">进行中的讨论串</dt><dd class="text-base font-medium">{{ status.activeThreads }}</dd></div>
-        <div class="rounded-lg bg-raised py-2"><dt class="text-xs text-muted-foreground">待你处理</dt><dd class="text-base font-medium">{{ status.cards + status.reviews }}</dd></div>
-        <div class="rounded-lg bg-raised py-2"><dt class="text-xs text-muted-foreground">节点在线</dt><dd class="text-base font-medium">{{ status.nodesOnline }}/{{ status.nodesTotal }}</dd></div>
+        <div class="rounded-lg bg-raised py-2"><dt class="text-xs text-muted-foreground">{{ $t("进行中的讨论串") }}</dt><dd class="text-base font-medium">{{ status.activeThreads }}</dd></div>
+        <div class="rounded-lg bg-raised py-2"><dt class="text-xs text-muted-foreground">{{ $t("待你处理") }}</dt><dd class="text-base font-medium">{{ status.cards + status.reviews }}</dd></div>
+        <div class="rounded-lg bg-raised py-2"><dt class="text-xs text-muted-foreground">{{ $t("节点在线") }}</dt><dd class="text-base font-medium">{{ status.nodesOnline }}/{{ status.nodesTotal }}</dd></div>
       </dl>
       <ul v-if="status.busy.length" class="mt-2 flex flex-col gap-1">
         <li v-for="b in status.busy" :key="b.where + b.name" class="flex gap-2 truncate">
           <span class="font-medium">{{ b.name }}</span><span class="text-muted-foreground">{{ b.where }}</span><span class="truncate">{{ b.doing }}</span>
         </li>
       </ul>
-      <p v-else class="mt-2 text-muted-foreground">现在没有人在忙。</p>
-      <p v-if="status.cards || status.reviews" class="mt-1 text-xs text-muted-foreground">卡片 {{ status.cards }} 张，待验收 {{ status.reviews }} 个。</p>
+      <p v-else class="mt-2 text-muted-foreground">{{ $t("现在没有人在忙。") }}</p>
+      <p v-if="status.cards || status.reviews" class="mt-1 text-xs text-muted-foreground">{{ $t("卡片 {cards} 张，待验收 {reviews} 个。", { cards: status.cards, reviews: status.reviews }) }}</p>
     </template>
     <dl v-else-if="panel === 'context'" class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
       <template v-for="[k, v] in rows" :key="k">
@@ -87,26 +88,26 @@ const loading = computed(
     </dl>
     <template v-else-if="panel === 'skills' && skills">
       <template v-if="(skills.custom ?? []).length">
-        <p class="mb-1.5 text-xs text-muted-foreground">自定义命令（在团队岗位里配置），输入 /名字 使用。</p>
+        <p class="mb-1.5 text-xs text-muted-foreground">{{ $t("自定义命令（在团队岗位里配置），输入 /名字 使用。") }}</p>
         <ul class="mb-2.5 flex flex-col gap-1">
           <li v-for="c in skills.custom ?? []" :key="c.name" class="flex gap-2">
             <span class="shrink-0 font-mono">/{{ c.name }}</span>
-            <span class="truncate text-muted-foreground">{{ c.description || (c.mode === "passthrough" ? "透传给 Claude Code" : "提示词模板") }}{{ c.source === "platform" ? " · 平台内置" : "" }}</span>
+            <span class="truncate text-muted-foreground">{{ c.description || (c.mode === "passthrough" ? $t("透传给 Claude Code") : $t("提示词模板")) }}{{ c.source === "platform" ? $t(" · 平台内置") : "" }}</span>
           </li>
         </ul>
       </template>
-      <p v-if="!runtimeSpec(skills.runtime).slashCommands" class="text-muted-foreground">{{ runtimeSpec(skills.runtime).label }} 员工没有斜杠技能。</p>
+      <p v-if="!runtimeSpec(skills.runtime).slashCommands" class="text-muted-foreground">{{ $t("{label} 员工没有斜杠技能。", { label: runtimeSpec(skills.runtime).label }) }}</p>
       <p v-else-if="skills.commands.length === 0" class="text-muted-foreground">
-        {{ skills.tier === "coordinator" ? "项目统筹不带技能和插件。" : `${skills.employee} 的岗位没有配置技能或插件。` }}
+        {{ skills.tier === "coordinator" ? $t("项目统筹不带技能和插件。") : $t("{employee} 的岗位没有配置技能或插件。", { employee: skills.employee }) }}
       </p>
       <template v-else>
         <p class="mb-1.5 text-xs text-muted-foreground">
-          {{ skills.from === "session" ? "当前会话加载的" : "岗位配置的（会话打开后以会话为准）" }}，输入 /名字 让 {{ skills.employee }} 使用。
+          {{ skills.from === "session" ? $t("当前会话加载的") : $t("岗位配置的（会话打开后以会话为准）") }}{{ $t("，输入 /名字 让 {employee} 使用。", { employee: skills.employee }) }}
         </p>
         <ul class="flex flex-col gap-1">
           <li v-for="c in skills.commands" :key="c.name" class="flex gap-2">
             <span class="shrink-0 font-mono">/{{ c.name }}</span>
-            <span class="truncate text-muted-foreground">{{ c.description || (c.source === "plugin" ? "插件命令" : "技能") }}</span>
+            <span class="truncate text-muted-foreground">{{ c.description || (c.source === "plugin" ? $t("插件命令") : $t("技能")) }}</span>
           </li>
         </ul>
       </template>
