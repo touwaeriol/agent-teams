@@ -69,7 +69,7 @@ const revoke = useAction((id: string) => auth.revokeSession(id), { invalidate: [
       </Card>
       <Card class="gap-3.5">
         <CardTitle>{{ $t("界面语言") }}</CardTitle>
-        <p class="-mt-1.5 text-[13px] text-muted-foreground">{{ $t("保存在账号上，所有设备通用；平台发给你的提示也用这个语言。选“跟随浏览器”则按浏览器语言显示。") }}</p>
+        <p class="-mt-1.5 text-[13px] text-muted-foreground">{{ $t("默认跟随浏览器语言；手动选择后保存在账号上，所有设备通用。") }}</p>
         <el-select
           v-model="language"
           class="!w-60"
