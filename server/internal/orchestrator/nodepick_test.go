@@ -251,9 +251,10 @@ func TestChooseNodeTight(t *testing.T) {
 	}
 }
 
-// TestStayIgnoresThresholds: the user's thresholds only keep new sessions off a node; a session
-// that must stay keeps its node until a window reaches QuotaHardFull or no slot is free.
-func TestStayIgnoresThresholds(t *testing.T) {
+// TestStayHonorsThresholds: a session that must stay leaves a node over the user's thresholds
+// when another usable node is under them; with every node over them it keeps its node until a
+// window reaches QuotaHardFull or no slot is free.
+func TestStayHonorsThresholds(t *testing.T) {
 	at := func(id string, used float64, tight string) nodeState {
 		s := roomy(id, used)
 		s.tight = tight
@@ -265,7 +266,8 @@ func TestStayIgnoresThresholds(t *testing.T) {
 		stay  bool
 		want  string
 	}{
-		{"5 h 88% (over the default 85) with an idle node: stay keeps it", []nodeState{at("a", 88, "five_hour 88% ≥ 85%"), roomy("b", 0)}, true, "a"},
+		{"5 h 88% (over the default 85) with an idle node: stay moves", []nodeState{at("a", 88, "five_hour 88% ≥ 85%"), roomy("b", 0)}, true, "b"},
+		{"5 h 88% and the other node over its threshold too: stay keeps it", []nodeState{at("a", 88, "five_hour 88% ≥ 85%"), at("b", 86, "five_hour 86% ≥ 85%")}, true, "a"},
 		{"the same without stay: the idle node", []nodeState{at("a", 88, "five_hour 88% ≥ 85%"), roomy("b", 0)}, false, "b"},
 		{"96% (hard full): stay moves", []nodeState{at("a", 96, "five_hour 96% ≥ 85%"), roomy("b", 0)}, true, "b"},
 		{"no free slot: stay moves", []nodeState{{id: "a", usable: true, free: 0, used: 10}, roomy("b", 50)}, true, "b"},
