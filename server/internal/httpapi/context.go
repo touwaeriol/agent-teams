@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -36,10 +38,11 @@ type requestInfo struct {
 	IP        string
 	UserAgent string
 	Host      string
+	Origin    string // scheme://host of the request when the host is a plain host[:port], else ""
 }
 
 func withRequest(ctx context.Context, r *http.Request) context.Context {
-	return context.WithValue(ctx, requestKey, requestInfo{IP: clientIP(r), UserAgent: r.UserAgent(), Host: r.Host})
+	return context.WithValue(ctx, requestKey, requestInfo{IP: clientIP(r), UserAgent: r.UserAgent(), Host: r.Host, Origin: requestOrigin(r)})
 }
 
 func requestOf(ctx context.Context) requestInfo {
@@ -66,4 +69,20 @@ func requireAdmin(ctx context.Context) (*principal, error) {
 		return nil, fail(http.StatusForbidden, "admin_required", "需要管理员权限")
 	}
 	return p, nil
+}
+
+var plainHost = regexp.MustCompile(`^(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$`)
+
+// requestOrigin is the origin the caller used: https when the request came over TLS or the proxy
+// says so (Caddy sets X-Forwarded-Proto), else http. Hosts with anything beyond letters, digits,
+// dots, dashes and a port give "" so a forged Host header cannot inject into install-node.sh.
+func requestOrigin(r *http.Request) string {
+	if !plainHost.MatchString(r.Host) {
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + strings.ToLower(r.Host)
 }

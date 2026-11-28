@@ -54,7 +54,7 @@ func (s *Server) fallback(c *gin.Context) {
 
 // installNode renders install-node.sh with the console URL and the current daemon release.
 func (s *Server) installNode(w http.ResponseWriter, r *http.Request) {
-	script := renderInstallScript(s.nodeURL(r.Context()), s.currentRelease(r.Context()))
+	script := renderInstallScript(s.nodeURL(withRequest(r.Context(), r)), s.currentRelease(r.Context()))
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = io.WriteString(w, script)
@@ -63,7 +63,7 @@ func (s *Server) installNode(w http.ResponseWriter, r *http.Request) {
 // nodeDockerDoc is the public guide to running a node in Docker / Compose, in Markdown so it can be
 // read in a browser or handed to an AI assistant as is.
 func (s *Server) nodeDockerDoc(w http.ResponseWriter, r *http.Request) {
-	doc := strings.NewReplacer("__CONSOLE__", s.nodeURL(r.Context()), "__IMAGE__", s.cfg.NodeImage).Replace(nodeDockerGuide)
+	doc := strings.NewReplacer("__CONSOLE__", s.nodeURL(withRequest(r.Context(), r)), "__IMAGE__", s.cfg.NodeImage).Replace(nodeDockerGuide)
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = io.WriteString(w, doc)

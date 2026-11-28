@@ -86,9 +86,21 @@ func TestNodeRegistrationURL(t *testing.T) {
 	h := newHarness(t)
 	admin, _ := h.signUp("a@example.com")
 	var s AdminSettings
-	admin.must(200, "GET", "/api/admin/settings", nil, &s)
-	if s.NodeURL != "" || s.NodeURLDefault != "http://console.test" {
-		t.Fatalf("defaults %+v", s)
+	admin.must(200, "GET", "/api/admin/settings", nil, &s, "Host", "Front.Test", "X-Forwarded-Proto", "https")
+	if s.NodeURL != "" || s.NodeURLDefault != "https://front.test" {
+		t.Fatalf("defaults follow the request host %+v", s)
+	}
+	unset := h.client()
+	if body := string(unset.must(200, "GET", "/install-node.sh", nil, nil, "Host", "front.test").Body); !strings.Contains(body, "http://front.test") {
+		t.Fatal("unset address does not follow the request host")
+	}
+	if body := string(unset.must(200, "GET", "/node-docker.md", nil, nil, "Host", "x.test$(id)").Body); strings.Contains(body, "$(id)") || !strings.Contains(body, "http://console.test") {
+		t.Fatal("a forged host reached the guide")
+	}
+	var g struct{ URL string }
+	admin.must(200, "GET", "/api/nodes/guide", nil, &g, "Host", "front.test")
+	if g.URL != "http://front.test/node-docker.md" {
+		t.Fatalf("guide unset %q", g.URL)
 	}
 	s.NodeURL = " https://backend.test/ "
 	admin.must(200, "PUT", "/api/admin/settings", s, &s)
@@ -101,6 +113,10 @@ func TestNodeRegistrationURL(t *testing.T) {
 		!strings.Contains(n.Docker, "AGENT_TEAMS_CONSOLE=https://backend.test") || !strings.Contains(n.Compose, "https://backend.test") ||
 		n.Guide != "https://backend.test/node-docker.md" {
 		t.Fatalf("enrollment %+v", n)
+	}
+	admin.must(200, "GET", "/api/nodes/guide", nil, &g, "Host", "front.test")
+	if g.URL != "https://backend.test/node-docker.md" {
+		t.Fatalf("guide set %q", g.URL)
 	}
 	c := h.client()
 	if body := string(c.must(200, "GET", "/install-node.sh", nil, nil).Body); !strings.Contains(body, "https://backend.test") || strings.Contains(body, "console.test") {
@@ -115,7 +131,7 @@ func TestNodeRegistrationURL(t *testing.T) {
 	}
 	s.NodeURL = ""
 	admin.must(200, "PUT", "/api/admin/settings", s, &s)
-	if body := string(c.must(200, "GET", "/install-node.sh", nil, nil).Body); !strings.Contains(body, "http://console.test") {
-		t.Fatal("cleared address not back to the public URL")
+	if body := string(c.must(200, "GET", "/install-node.sh", nil, nil, "Host", "front.test").Body); !strings.Contains(body, "http://front.test") {
+		t.Fatal("cleared address does not follow the request host again")
 	}
 }
