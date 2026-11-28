@@ -10,7 +10,8 @@ import Card from "@/components/app/Card.vue";
 import CardTitle from "@/components/app/CardTitle.vue";
 import Field from "@/components/common/Field.vue";
 import NavButton from "@/components/shell/NavButton.vue";
-import { $t, LOCALE_NAMES, LOCALES, applyChoice, storedChoice } from "@/i18n";
+import { $t, storedChoice } from "@/i18n";
+import { languageOptions, useSaveLanguage } from "@/components/app/language/language";
 import { useTheme, type Theme } from "@/lib/theme";
 import { cn, timeAgo } from "@/lib/utils";
 
@@ -22,11 +23,8 @@ const OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
 
 // "" follows the browser; a pick is saved on the account, then the page reloads in that language.
 const language = ref(storedChoice());
-const LANGUAGES = [{ value: "", label: $t("跟随浏览器") }, ...LOCALES.map((l) => ({ value: l, label: LOCALE_NAMES[l] }))];
-const saveLanguage = useAction((locale: string) => auth.setLocale(locale), {
-  invalidate: [keys.me],
-  onSuccess: (user) => applyChoice(user.locale ?? ""),
-});
+const LANGUAGES = languageOptions();
+const saveLanguage = useSaveLanguage();
 
 const current = ref("");
 const next = ref("");

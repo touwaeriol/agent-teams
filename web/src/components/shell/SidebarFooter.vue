@@ -7,6 +7,7 @@ import { useNodes } from "@/api/queries";
 import type { UserView } from "@/api/views";
 import Dot from "@/components/app/Dot.vue";
 import Initial from "@/components/app/Initial.vue";
+import LanguageMenu from "@/components/app/language/LanguageMenu.vue";
 import { runningText, summarizeNodes } from "./nodes";
 
 const props = defineProps<{ me: UserView }>();
@@ -34,6 +35,7 @@ const name = computed(() => props.me.display_name || props.me.email.split("@")[0
         <span class="truncate text-[13px]">{{ name }}</span>
         <span class="text-[11px] text-muted-foreground">{{ me.role === "admin" ? $t("管理员") : $t("成员") }}</span>
       </span>
+      <LanguageMenu />
       <RouterLink to="/settings/team" :aria-label="$t('设置')" class="flex size-8 items-center justify-center rounded-lg text-[#4A4843] hover:bg-accent" @click="emit('navigate')">
         <Settings class="size-4" :stroke-width="1.8" />
       </RouterLink>
