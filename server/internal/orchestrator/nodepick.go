@@ -15,9 +15,10 @@ import (
 )
 
 // QuotaHardFull is the used percent (of any window that applies) at which a node's quota counts as
-// used up whatever the user's thresholds: a session that must stay (stay) or is being moved
-// (moveTarget) leaves or skips such a node, while the user's lower thresholds (quotaTight) only
-// keep new sessions off a node.
+// used up whatever the user's thresholds: a session that must stay (stay) leaves such a node even
+// when every other node is tight too, and a session being moved (moveTarget) skips it. The user's
+// lower thresholds (quotaTight) keep new sessions off a node, and a session that would stay leaves
+// a node over them while another usable node is under them (openElsewhere).
 const QuotaHardFull = 95.0
 
 // shortWindowMinutes: a usage window up to this long counts as a 5-hour window for the thresholds
@@ -40,8 +41,8 @@ const SessionWeight = 10.0
 // live session on the node, so sessions spread over the nodes and the less used ones get more)
 // over every runtime of the role and its candidate nodes, and the employee stays on its current node and runtime only while it must
 // (stay: it resumes a conversation or has a worktree in its thread) and that node is online,
-// still a candidate and not hardFull (a free slot, every window under QuotaHardFull: the user's
-// thresholds do not move it). With no usable pair online it is the current node and
+// still a candidate, not hardFull (a free slot, every window under QuotaHardFull) and either not
+// tight (under the user's thresholds) or tight with no other usable pair under them (openElsewhere). With no usable pair online it is the current node and
 // runtime (the session waits for it), else the first candidate; when that node is online and
 // reports its runtime CLIs (runtime_status) but the runtime is not ready there, the pick is held
 // instead (hold = why no node can take the session, see holdReason).
@@ -197,8 +198,8 @@ func (s nodeState) same(o nodeState) bool { return s.id == o.id && s.rt == o.rt 
 // only picked when every usable pair is full.
 func (s nodeState) full() bool { return s.free <= 0 || s.tight != "" }
 
-// hardFull: no free slot, or a window at QuotaHardFull. A session that must stay keeps its node
-// until then, whatever the user's thresholds (they only steer new sessions).
+// hardFull: no free slot, or a window at QuotaHardFull. A session that must stay leaves its node
+// then even when every other node is over the user's thresholds too.
 func (s nodeState) hardFull() bool { return s.free <= 0 || s.used >= QuotaHardFull }
 
 func (o *Orchestrator) nodeStates(ctx context.Context, tx *core.Tx, cands []store.Node, runtime, model string,
@@ -284,7 +285,7 @@ func runtimeHoldReason(rt string, states []nodeState) string {
 // (id "" when it has none or it was deleted) and runtime, which may not be a candidate any more.
 func chooseNode(current nodeState, cands []nodeState, stay bool) nodeState {
 	cur := slices.IndexFunc(cands, func(c nodeState) bool { return c.same(current) })
-	if stay && cur >= 0 && cands[cur].usable && !cands[cur].hardFull() {
+	if stay && cur >= 0 && cands[cur].usable && !cands[cur].hardFull() && (!cands[cur].full() || !openElsewhere(cands, cur)) {
 		return cands[cur]
 	}
 	best := -1
@@ -301,6 +302,17 @@ func chooseNode(current nodeState, cands []nodeState, stay bool) nodeState {
 	default:
 		return cands[0]
 	}
+}
+
+// openElsewhere: a usable pair other than cands[cur] has a free slot and quota that is not tight,
+// so a session that would stay on a tight node (over the user's thresholds) goes there instead.
+func openElsewhere(cands []nodeState, cur int) bool {
+	for i, c := range cands {
+		if i != cur && c.usable && !c.full() {
+			return true
+		}
+	}
+	return false
 }
 
 // pickRank orders two usable pairs, negative when a goes first: one with a free slot and quota

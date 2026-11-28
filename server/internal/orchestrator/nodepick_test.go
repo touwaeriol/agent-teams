@@ -18,10 +18,18 @@ func roomy(id string, used float64) nodeState {
 	return s
 }
 
+// tightAt is a usable pair whose five-hour window is over the user's threshold but under QuotaHardFull.
+func tightAt(id string, used float64) nodeState {
+	s := roomy(id, used)
+	s.tight = "five_hour"
+	return s
+}
+
 // TestChooseNode: a new session goes to the usable pair with the lowest load score (used quota
 // plus SessionWeight per live session), passing over nodes whose quota is tight while another is
 // not, wherever the employee was before; it stays only when it must and its node is still usable
-// with a free slot and quota under QuotaHardFull.
+// with a free slot and quota under QuotaHardFull, and under the user's thresholds unless every
+// other usable node is over them too.
 func TestChooseNode(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -35,6 +43,10 @@ func TestChooseNode(t *testing.T) {
 		{"ties without a current node: most free slots", "", []nodeState{{id: "a", usable: true, free: 2, used: 10}, {id: "b", usable: true, free: 3, used: 10}}, false, "b"},
 		{"stay keeps a busier node", "a", []nodeState{roomy("a", 60), roomy("b", 0)}, true, "a"},
 		{"stay leaves a node out of quota", "a", []nodeState{roomy("a", 97), roomy("b", 80)}, true, "b"},
+		{"stay leaves a node over the user's threshold for one under it", "a", []nodeState{tightAt("a", 90), roomy("b", 10)}, true, "b"},
+		{"stay keeps a tight node when every other node is tight too", "a", []nodeState{tightAt("a", 90), tightAt("b", 88)}, true, "a"},
+		{"stay keeps a tight node when the other one has no free slot", "a", []nodeState{tightAt("a", 90), {id: "b", usable: true, free: 0}}, true, "a"},
+		{"stay keeps a tight node when the other one cannot run the session", "a", []nodeState{tightAt("a", 90), {id: "b", free: 1 << 20}}, true, "a"},
 		{"stay leaves an offline node", "a", []nodeState{{id: "a"}, roomy("b", 80)}, true, "b"},
 		{"stay leaves a node that is no candidate any more", "x", []nodeState{roomy("b", 80)}, true, "b"},
 		{"a full node loses to any node with a free slot", "", []nodeState{{id: "a", usable: true, free: 0, used: 0}, roomy("b", 90)}, false, "b"},

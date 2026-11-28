@@ -1,8 +1,10 @@
+import { proxyAuth } from "../git/exec.js";
+
 /** Default auth/network variables passed from node.env into employee sessions (architecture.md §6.1). */
 export const DEFAULT_PASS_ENV = [
   "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
   "AWS_*", "CLOUD_ML_REGION", "ANTHROPIC_VERTEX_PROJECT_ID", "GOOGLE_APPLICATION_CREDENTIALS",
-  "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE",
+  "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "GIT_HTTP_PROXY_AUTHMETHOD",
 ];
 export const CODEX_PASS_ENV = ["OPENAI_API_KEY", "OPENAI_BASE_URL"];
 
@@ -18,6 +20,9 @@ export interface EnvInput {
 /**
  * Builds a session environment item by item (the SDK env replaces, it does not merge).
  * AGENT_TEAMS_* (including the node token) is never passed, whatever the lists say.
+ * A proxy URL with credentials also gets GIT_HTTP_PROXY_AUTHMETHOD=basic (proxyAuth), so the
+ * employee's own git commands work through proxies that close the connection after a 407, like
+ * the daemon's git jobs do (gitEnv); extra / fixed (spec.env) still win.
  */
 export function buildEnv(input: EnvInput): Record<string, string> {
   const env: Record<string, string> = {
@@ -26,6 +31,7 @@ export function buildEnv(input: EnvInput): Record<string, string> {
     LANG: input.base.LANG ?? "C.UTF-8",
   };
   Object.assign(env, pickPassEnv(input.base, input.passList));
+  Object.assign(env, proxyAuth(env));
   Object.assign(env, input.extra ?? {}, input.fixed ?? {});
   for (const k of Object.keys(env)) if (k.startsWith("AGENT_TEAMS_")) delete env[k];
   return env;

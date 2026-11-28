@@ -100,7 +100,7 @@ func moveState(ctx context.Context, q core.DB, employeeID string) (pending, bloc
 
 // moveTarget is the best other candidate node for the employee's runtime (pickRank): online, the
 // runtime logged in there, a free slot and quota under QuotaHardFull (not the user's thresholds:
-// those only steer new sessions; pickRank still prefers a node under them), a session_move daemon, and not a node a
+// a moved session ran out, so any node with quota left beats pausing; pickRank still prefers a node under them), a session_move daemon, and not a node a
 // move left because of a limit that has not reset yet.
 func (o *Orchestrator) moveTarget(ctx context.Context, tx *core.Tx, env sessionEnv, from string) (store.Node, bool, error) {
 	e := env.emp
