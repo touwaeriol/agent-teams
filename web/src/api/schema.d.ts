@@ -3317,6 +3317,8 @@ export interface components {
             compose: string;
             /** @description docker run command that starts the node container with this token */
             docker: string;
+            /** @description Public Docker guide on the node registration address (node-docker.md), safe to hand to an AI */
+            guide: string;
             /** @description Shell command for the node (install-node.sh on the host) */
             install: string;
             /** @description Shown once */
@@ -3882,6 +3884,8 @@ export interface components {
             compose: string;
             /** @description docker run command that starts the node container with this token */
             docker: string;
+            /** @description Public Docker guide on the node registration address (node-docker.md), safe to hand to an AI */
+            guide: string;
             /** @description Shell command for the node (install-node.sh on the host) */
             install: string;
             node: components["schemas"]["NodeView"];

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dockerGuideUrl, enrollModes, enrollText, loadEnrollMode, saveEnrollMode } from "@/pages/settings/nodes/enroll";
 
-const data = { token: "t", install: "curl …", docker: "docker run …", compose: "name: x" };
+const data = { token: "t", install: "curl …", docker: "docker run …", compose: "name: x", guide: "https://backend.example.com/node-docker.md" };
 
 describe("node enrollment modes", () => {
   it("maps each mode to its snippet", () => {

@@ -15,7 +15,8 @@ const mode = ref<EnrollMode>(loadEnrollMode());
 watch(mode, saveEnrollMode);
 const current = computed(() => enrollModes.find((m) => m.id === mode.value) ?? enrollModes[0]);
 const text = computed(() => (props.data ? enrollText(props.data, mode.value) : ""));
-const guide = dockerGuideUrl();
+// The guide on the node registration address (agent-backend), not the page origin (a forwarder).
+const guide = computed(() => props.data?.guide || dockerGuideUrl());
 </script>
 
 <template>
