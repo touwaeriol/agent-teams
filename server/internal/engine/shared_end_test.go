@@ -156,14 +156,14 @@ func TestBusyElsewhereAndMailAcrossThreads(t *testing.T) {
 	if got := moved.expectSend("[#2 · 来自 lead-2 的留言]"); got.Text != "[#2 · 来自 lead-2 的留言]\nlook at the login page too" {
 		t.Fatalf("mail across threads: %q", got.Text)
 	}
-	if got := text(moved.mustCall("read_messages", map[string]any{})); !strings.Contains(got, "没有未读留言") ||
-		!strings.Contains(got, "其他讨论串还有发给你的未读留言：#2 1 条") {
+	if got := text(moved.mustCall("read_messages", map[string]any{})); !strings.Contains(got, "no unread messages") ||
+		!strings.Contains(got, "Unread messages to you in other threads: #2: 1") {
 		t.Fatalf("read_messages in #1: %s", got)
 	}
 	lead1.mustCall("send_message", map[string]any{"to": "dev-1", "text": "same thread"})
 	dev1.expectSend("[Message from lead-1]")
-	if got := text(dev1.mustCall("read_messages", map[string]any{})); !strings.Contains(got, "lead-1 → dev-1：same thread") ||
-		strings.Contains(got, "其他讨论串") {
+	if got := text(dev1.mustCall("read_messages", map[string]any{})); !strings.Contains(got, "lead-1 → dev-1: same thread") ||
+		strings.Contains(got, "other threads") {
 		t.Fatalf("dev-1 read_messages: %s", got)
 	}
 

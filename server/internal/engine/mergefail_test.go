@@ -115,7 +115,7 @@ func TestMergeFailReleasesTask(t *testing.T) {
 	eventually(t, t3+" blocked", func() bool { return taskStatus(t, c.w, c.thread.ID, t3) == "blocked" })
 	c.gh.setRef("main", main)
 	res := c.lead.mustCall("enqueue_merge", map[string]any{"task_id": t3})
-	if !strings.Contains(text(res), "合并队列") {
+	if !strings.Contains(text(res), "merge queue") {
 		t.Fatalf("enqueue again: %q", text(res))
 	}
 	c.events.wait(t, "task", `"id":"`+t3+`"`, `"status":"done"`)

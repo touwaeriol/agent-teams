@@ -32,7 +32,7 @@ func TestPublishFileScreenshotIsAttachment(t *testing.T) {
 	tm, _ := startDesignTeam(t)
 	res := tm.dev.publish(map[string]any{"path": "shots/login.png", "kind": "design", "title": "登录页截图"}, 1<<20,
 		upFile{"login.png", fakePNG})
-	if !res.Ok || res.Structured != nil || !strings.Contains(text(res), "不是交付物") || !strings.Contains(text(res), "/api/attachments/img_") ||
+	if !res.Ok || res.Structured != nil || !strings.Contains(text(res), "not deliverables") || !strings.Contains(text(res), "/api/attachments/img_") ||
 		!strings.Contains(text(res), "index.html") {
 		t.Fatalf("png publish %+v %s", res, text(res))
 	}
@@ -59,7 +59,7 @@ func TestPublishFileScreenshotIsAttachment(t *testing.T) {
 
 	// A lone SVG is refused, and an image cannot be a deliverable's new version.
 	res = tm.dev.publish(map[string]any{"path": "d.svg", "kind": "design", "title": "图"}, 1<<20, upFile{"d.svg", "<svg/>"})
-	if res.Ok || !strings.Contains(text(res), "SVG 不是交付物") {
+	if res.Ok || !strings.Contains(text(res), "SVG is not a deliverable") {
 		t.Fatalf("svg publish %+v", res)
 	}
 	site := tm.dev.publish(map[string]any{"path": "report", "kind": "doc", "title": "验收报告"}, 1<<20,
@@ -71,7 +71,7 @@ func TestPublishFileScreenshotIsAttachment(t *testing.T) {
 	_ = json.Unmarshal(*site.Structured, &pub)
 	res = tm.dev.publish(map[string]any{"path": "x.png", "kind": "doc", "title": "验收报告", "deliverable_id": pub.DeliverableID}, 1<<20,
 		upFile{"x.png", fakePNG})
-	if res.Ok || !strings.Contains(text(res), "不能作为交付物的新版本") {
+	if res.Ok || !strings.Contains(text(res), "cannot be a new version of a deliverable") {
 		t.Fatalf("image as new version %+v", res)
 	}
 	if left := uploadChunks(t, tm); left != 0 {
@@ -177,7 +177,7 @@ func TestPublishFileFakeImageRefused(t *testing.T) {
 	tm, _ := startDesignTeam(t)
 	for _, f := range []upFile{{"report.png", "%PDF-1.7 fake pdf"}, {"notes.jpg", "just text"}} {
 		res := tm.dev.publish(map[string]any{"path": f.path, "kind": "doc", "title": "假图片"}, 1<<20, f)
-		if res.Ok || !strings.Contains(text(res), "内容却不是 PNG、JPEG、GIF 或 WebP") || !strings.Contains(text(res), f.path) {
+		if res.Ok || !strings.Contains(text(res), "is not a PNG, JPEG, GIF or WebP image") || !strings.Contains(text(res), f.path) {
 			t.Fatalf("%s: %+v", f.path, res)
 		}
 	}

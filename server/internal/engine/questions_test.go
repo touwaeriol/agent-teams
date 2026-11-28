@@ -53,7 +53,7 @@ func teamIn(t *testing.T, w *world) *team {
 	var open protocol.SessionOpen
 	tm.dev, open = expectOpen(t, w, tm.n, "dev-1")
 	for _, o := range []protocol.SessionOpen{leadOpen, open} {
-		if o.Claude == nil || o.Claude.SystemAppend == nil || !strings.Contains(*o.Claude.SystemAppend, "## 回复语言") {
+		if o.Claude == nil || o.Claude.SystemAppend == nil || !strings.Contains(*o.Claude.SystemAppend, "## Reply language") {
 			t.Fatal("session prompt lacks the reply-language rule")
 		}
 	}

@@ -43,7 +43,7 @@ func scheduleWhen(at *time.Time, inMinutes *int, cron *string, now time.Time) (t
 		in.Kind, in.Cron = ptr(timers.KindCron), cron
 	}
 	if n > 1 {
-		return in, true, refuse("at、in_minutes、cron 只能给一个")
+		return in, true, refuse("give only one of at, in_minutes and cron")
 	}
 	return in, n == 1, nil
 }
@@ -64,7 +64,7 @@ func scheduleOwner(ctx context.Context, tx *core.Tx, c *call) (timers.Owner, err
 	case e.Tier == "member":
 		task, err := core.CurrentTaskOf(ctx, tx, e)
 		if err != nil {
-			return timers.Owner{}, refuse("你手上没有任务；员工的唤醒要绑定当前任务，任务结束就取消")
+			return timers.Owner{}, refuse("you have no task; a member's wake-up is bound to the current task and cancelled when it ends")
 		}
 		return timers.Owner{ProjectID: e.ProjectID, Target: timers.TargetMember, ThreadID: &task.ConversationID, EmployeeID: &e.ID,
 			TaskID: &task.ID, CreatedBy: timers.ByMember}, nil
@@ -74,7 +74,7 @@ func scheduleOwner(ctx context.Context, tx *core.Tx, c *call) (timers.Owner, err
 		id := c.thread.ID
 		return timers.Owner{ProjectID: e.ProjectID, Target: timers.TargetLead, ThreadID: &id, CreatedBy: timers.ByLead}, nil
 	}
-	return timers.Owner{}, refuse("你不能设置定时任务")
+	return timers.Owner{}, refuse("you cannot set schedules")
 }
 
 // mine reports whether the caller may change s: the coordinator any schedule an agent set in its
@@ -107,18 +107,18 @@ func (s *Service) scheduleCreate(ctx context.Context, tx *core.Tx, c *call) (Res
 		return Result{}, err
 	}
 	if !set {
-		return Result{}, refuse("要给 at、in_minutes 或 cron 其中一个")
+		return Result{}, refuse("give one of at, in_minutes or cron")
 	}
 	if in.Thread != nil {
 		if o.CreatedBy != timers.ByCoordinator {
-			return Result{}, refuse("只有统筹能给别的讨论串设置定时任务，你的定时任务只唤醒你自己")
+			return Result{}, refuse("only the coordinator can set schedules for other threads; yours wake only you")
 		}
 		t, err := core.ThreadByNo(ctx, tx, o.ProjectID, *in.Thread)
 		if err != nil {
-			return Result{}, refuse("没有讨论串 #%d", *in.Thread)
+			return Result{}, refuse("no thread #%d", *in.Thread)
 		}
 		if t.Status == "archived" {
-			return Result{}, refuse("讨论串 #%d 已归档", t.No)
+			return Result{}, refuse("thread #%d is archived", t.No)
 		}
 		o.Target, o.ThreadID = timers.TargetLead, &t.ID
 	}
@@ -130,8 +130,8 @@ func (s *Service) scheduleCreate(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err := s.scheduleNote(ctx, tx, c, sc.ID, true, fmt.Sprintf("%s设置了定时任务「%s」：%s，%s。", speaker(c), sc.Name, when(sc), wakes(sc))); err != nil {
 		return Result{}, err
 	}
-	return okText(fmt.Sprintf("已创建定时任务 %s「%s」：%s，下次 %s，%s。到点平台会发消息过来，现在可以结束本轮。",
-		sc.ID, sc.Name, when(sc), nextText(sc), wakes(sc))), nil
+	return okText(fmt.Sprintf("Created schedule %s %q: %s, next %s, %s. The platform sends a message when it fires; you can end the turn now.",
+		sc.ID, sc.Name, whenEn(sc), nextOr(sc, "none"), wakesEn(sc))), nil
 }
 
 func (s *Service) scheduleList(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
@@ -151,7 +151,7 @@ func (s *Service) scheduleList(ctx context.Context, tx *core.Tx, c *call) (Resul
 		}
 	}
 	if len(lines) == 0 {
-		return okText("没有定时任务"), nil
+		return okText("no schedules"), nil
 	}
 	return okText(strings.Join(lines, "\n")), nil
 }
@@ -174,11 +174,11 @@ func (s *Service) scheduleUpdate(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err != nil {
 		return Result{}, scheduleErr(err)
 	}
-	state := "下次 " + nextText(sc)
+	state := "next " + nextOr(sc, "none")
 	if !sc.Enabled {
-		state = "已暂停"
+		state = "paused"
 	}
-	return okText(fmt.Sprintf("已更新定时任务 %s「%s」：%s，%s。", sc.ID, sc.Name, when(sc), state)), nil
+	return okText(fmt.Sprintf("Updated schedule %s %q: %s, %s.", sc.ID, sc.Name, whenEn(sc), state)), nil
 }
 
 func (s *Service) scheduleCancel(ctx context.Context, tx *core.Tx, c *call) (Result, error) {
@@ -196,19 +196,19 @@ func (s *Service) scheduleCancel(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err := s.scheduleNote(ctx, tx, c, cur.ID, false, fmt.Sprintf("%s取消了定时任务「%s」。", speaker(c), cur.Name)); err != nil {
 		return Result{}, err
 	}
-	return okText(fmt.Sprintf("已取消定时任务 %s「%s」", cur.ID, cur.Name)), nil
+	return okText(fmt.Sprintf("cancelled schedule %s %q", cur.ID, cur.Name)), nil
 }
 
 func (s *Service) ownSchedule(ctx context.Context, tx *core.Tx, c *call, id string) (timers.Schedule, error) {
 	sc, err := timers.ScheduleByID(ctx, tx, id)
 	if err != nil || sc.ProjectID != c.emp().ProjectID {
-		return sc, refuse("没有定时任务 %s", id)
+		return sc, refuse("no schedule %s", id)
 	}
 	if !mine(c, sc) {
 		if sc.CreatedBy == timers.ByUser {
-			return sc, refuse("定时任务 %s 是用户设置的，只能由用户在页面上修改", id)
+			return sc, refuse("schedule %s was set by the user, who alone can change it on the page", id)
 		}
-		return sc, refuse("定时任务 %s 不是你设置的", id)
+		return sc, refuse("you did not set schedule %s", id)
 	}
 	return sc, nil
 }
@@ -260,9 +260,29 @@ func wakes(sc timers.Schedule) string {
 	return "唤醒统筹"
 }
 
-func nextText(sc timers.Schedule) string {
+// whenEn and wakesEn are when and wakes for tool results (when and wakes write the notes the
+// user sees in the chat).
+func whenEn(sc timers.Schedule) string {
+	if sc.Kind == timers.KindOnce {
+		return "once, " + localTime(sc.RunAt, sc.Timezone)
+	}
+	return fmt.Sprintf("recurring %s (%s)", sc.Cron, sc.Timezone)
+}
+
+func wakesEn(sc timers.Schedule) string {
+	switch {
+	case sc.Target == timers.TargetMember && sc.Employee != nil && sc.TaskID != nil:
+		return fmt.Sprintf("wakes %s (task %s, cancelled when it ends)", *sc.Employee, *sc.TaskID)
+	case sc.Target == timers.TargetLead && sc.ThreadNo != nil:
+		return fmt.Sprintf("wakes the lead of #%d", *sc.ThreadNo)
+	}
+	return "wakes the coordinator"
+}
+
+// nextOr is the next run in the schedule's zone, or none.
+func nextOr(sc timers.Schedule, none string) string {
 	if sc.NextRunAt == nil {
-		return "无"
+		return none
 	}
 	return localTime(sc.NextRunAt, sc.Timezone)
 }
@@ -278,22 +298,22 @@ func localTime(t *time.Time, zone string) string {
 	return t.In(loc).Format("2006-01-02 15:04 MST")
 }
 
-var scheduleStatusText = map[string]string{timers.StatusActive: "进行中", timers.StatusDone: "已完成", timers.StatusCancelled: "已取消",
-	timers.StatusMissed: "已错过"}
+var scheduleStatusText = map[string]string{timers.StatusActive: "active", timers.StatusDone: "done", timers.StatusCancelled: "cancelled",
+	timers.StatusMissed: "missed"}
 
-var creatorText = map[string]string{timers.ByUser: "用户", timers.ByCoordinator: "统筹", timers.ByLead: "组长", timers.ByMember: "员工"}
+var creatorText = map[string]string{timers.ByUser: "the user", timers.ByCoordinator: "the coordinator", timers.ByLead: "a lead", timers.ByMember: "a member"}
 
 func scheduleLine(sc timers.Schedule) string {
 	state := scheduleStatusText[sc.Status]
 	if sc.Status == timers.StatusActive {
-		state = "下次 " + nextText(sc)
+		state = "next " + nextOr(sc, "none")
 		if !sc.Enabled {
-			state = "已暂停"
+			state = "paused"
 		}
 	}
-	line := fmt.Sprintf("%s「%s」%s，%s，%s设置，%s，已触发 %d 次", sc.ID, sc.Name, when(sc), wakes(sc), creatorText[sc.CreatedBy], state, sc.RunCount)
+	line := fmt.Sprintf("%s %q: %s, %s, set by %s, %s, fired %d times", sc.ID, sc.Name, whenEn(sc), wakesEn(sc), creatorText[sc.CreatedBy], state, sc.RunCount)
 	if sc.LastError != "" {
-		line += "，上次出错：" + sc.LastError
+		line += ", last error: " + sc.LastError
 	}
 	return line
 }

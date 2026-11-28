@@ -163,28 +163,28 @@ func focusText(slug, base string) string {
 func (o *Orchestrator) reposSection(ctx context.Context, q core.DB, e core.Employee, t *core.Thread, p store.Project) string {
 	if !p.HasRepos() {
 		if e.Spec.Solo && t != nil {
-			return "## 工作目录\n你的工作目录是节点上的本地文件夹 " + PathsOf(e, t).Cwd + "（相对节点的数据根目录），没有 git 仓库，文件只在这台机器上。"
+			return "## Working directory\nYour working directory is the local folder " + PathsOf(e, t).Cwd + " on the node (relative to the node's data root), with no git repository; the files exist only on this machine."
 		}
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("## 仓库\n")
+	b.WriteString("## Repositories\n")
 	if t == nil || e.Tier == "coordinator" {
 		for _, r := range p.Repos {
 			if r.BaseBranch != "" {
-				fmt.Fprintf(&b, "- %s（起点分支 %s）\n", r.Repo, r.BaseBranch)
+				fmt.Fprintf(&b, "- %s (starting branch %s)\n", r.Repo, r.BaseBranch)
 			} else {
 				fmt.Fprintf(&b, "- %s\n", r.Repo)
 			}
 		}
-		b.WriteString("讨论串默认从各仓库的起点分支开始（在项目设置里配置）；某个讨论串要从别的分支开始时，open_thread 的 repos 参数带上 {repo, base}。")
+		b.WriteString("Threads start from each repository's starting branch by default (set in the project settings); for a thread to start from another branch, pass {repo, base} in open_thread's repos.")
 		return b.String()
 	}
 	paths := PathsOf(e, t)
 	for _, r := range o.ReposIn(ctx, q, p) {
-		fmt.Fprintf(&b, "- %s：目录 ./%s，基准分支 %s\n", r.Slug, ghops.Dir(r.Slug), o.BaseFor(ctx, q, *t, r))
+		fmt.Fprintf(&b, "- %s: directory ./%s, base branch %s\n", r.Slug, ghops.Dir(r.Slug), o.BaseFor(ctx, q, *t, r))
 	}
-	fmt.Fprintf(&b, "你的工作目录 %s 下每个仓库一个子目录；每个仓库里你的分支都叫 %s。只在需要改动的仓库里提交。", paths.Cwd, paths.Branch)
+	fmt.Fprintf(&b, "Your working directory %s has one subdirectory per repository; your branch is called %s in every repository. Commit only in the repositories that need changes.", paths.Cwd, paths.Branch)
 	return b.String()
 }
 

@@ -281,15 +281,15 @@ func tail(r *protocol.GitResult) string {
 func PushError(r *protocol.GitResult) string {
 	switch code(r) {
 	case "workflow_permission":
-		return "推送被拒绝：改动包含 .github/workflows，平台令牌没有 workflows 权限。请把 workflow 变更写进交付说明，由用户合并。"
+		return "push refused: the changes touch .github/workflows and the platform token has no workflows permission. Describe the workflow changes in your delivery notes for the user to merge."
 	case "rejected_non_ff":
-		return "推送被拒绝：远端分支有你本地没有的提交，请先 git pull --rebase 再完成。"
+		return "push refused: the remote branch has commits you do not have locally; run git pull --rebase first, then complete."
 	case "refspec_not_allowed":
-		return "推送被拒绝：只能推送到你自己的成员分支。"
+		return "push refused: you may push only to your own member branch."
 	case "not_a_repo":
-		return "推送失败：工作目录里没有这个仓库的检出（" + tail(r) + "）"
+		return "push failed: the working directory has no checkout of this repository (" + tail(r) + ")"
 	}
-	return "推送失败（" + code(r) + "）：" + tail(r)
+	return "push failed (" + code(r) + "): " + tail(r)
 }
 
 func str(v any) string {
