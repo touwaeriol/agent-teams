@@ -78,7 +78,7 @@ func (n nodeContainer) volume(key string) string { return n.slug + "-" + key }
 func (n nodeContainer) dockerRun() string {
 	lines := []string{
 		fmt.Sprintf("docker run -d --name %s --hostname %s --restart unless-stopped --stop-timeout 60", n.slug, n.host),
-		"--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined",
+		"--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined --ulimit core=0",
 		"-e AGENT_TEAMS_CONSOLE=" + shellQuote(n.console),
 		"-e AGENT_TEAMS_NODE_TOKEN=" + shellQuote(n.token),
 	}
@@ -104,6 +104,7 @@ func (n nodeContainer) compose() string {
 	w("    devices: [\"/dev/fuse\"]")
 	w("    cap_add: [\"SYS_ADMIN\"]")
 	w("    security_opt: [\"apparmor:unconfined\"]")
+	w("    ulimits: { core: 0 }   # 不生成 core dump：崩溃留下的几 GB 文件会被提交进仓库")
 	w("    environment:")
 	w("      AGENT_TEAMS_CONSOLE: %q", n.console)
 	w("      AGENT_TEAMS_NODE_TOKEN: %q", n.token)

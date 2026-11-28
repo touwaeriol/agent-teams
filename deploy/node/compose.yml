@@ -26,6 +26,10 @@ services:
       - SYS_ADMIN
     security_opt:
       - apparmor:unconfined
+    # No core dumps: a crash in a worktree would leave a core file of several GB that git add -A
+    # commits and GitHub rejects. (The daemon also turns them off for its sessions itself.)
+    ulimits:
+      core: 0
     volumes:
       - claude:/home/agent/.claude                     # Claude login (claude login) and session transcripts
       - codex:/home/agent/.codex                       # Codex login (codex login) and threads

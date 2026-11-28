@@ -5,6 +5,7 @@ import { ghMain, gitCredentialMain } from "./cred/helper.js";
 import { Daemon } from "./daemon.js";
 import { sshProxyMain } from "./ssh/proxy.js";
 import { createLogger } from "./util/log.js";
+import { disableCoreDumps } from "./util/coredump.js";
 import { DAEMON_RELEASE, DAEMON_VERSION } from "./version.js";
 
 const USAGE = `agent-teams-node ${DAEMON_VERSION}
@@ -47,6 +48,7 @@ async function runDaemon(argv: string[]): Promise<number> {
   const config = loadConfig(argv);
   const log = createLogger(config.logLevel);
   for (const w of config.warnings) log.warn(w);
+  if (disableCoreDumps() === "failed") log.warn("could not turn core dumps off (prlimit missing?): a crash in a worktree may leave a large core file");
   return new Promise<number>((resolve) => {
     let daemon: Daemon;
     const exit = (code: number) => void daemon.stop().finally(() => resolve(code));
