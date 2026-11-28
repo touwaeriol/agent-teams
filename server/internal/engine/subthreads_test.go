@@ -60,13 +60,13 @@ func TestSubthreads(t *testing.T) {
 		t.Fatal("no opened relay cards")
 	}
 
-	if r := sub.call("open_subthread", map[string]any{"title": "x", "brief": "y"}); r.Ok || !strings.Contains(text(r), "不能再开子讨论串") {
+	if r := sub.call("open_subthread", map[string]any{"title": "x", "brief": "y"}); r.Ok || !strings.Contains(text(r), "cannot open subthreads") {
 		t.Fatalf("nested subthread: %+v", r)
 	}
-	if r := tm.lead.call("finish", map[string]any{"summary": "done"}); r.Ok || !strings.Contains(text(r), "#2 还没结束") {
+	if r := tm.lead.call("finish", map[string]any{"summary": "done"}); r.Ok || !strings.Contains(text(r), "#2 have not ended") {
 		t.Fatalf("finish with an open subthread: %+v", r)
 	}
-	if got := text(tm.lead.mustCall("list_threads", map[string]any{})); !strings.Contains(got, "#2 调研缓存") || !strings.Contains(got, "（#1 的子讨论串）") {
+	if got := text(tm.lead.mustCall("list_threads", map[string]any{})); !strings.Contains(got, "#2 调研缓存") || !strings.Contains(got, " (subthread of #1)") {
 		t.Fatalf("list_threads %q", got)
 	}
 
@@ -104,10 +104,10 @@ func TestSubthreads(t *testing.T) {
 	}
 
 	res = tm.lead.mustCall("message_thread", map[string]any{"no": 2, "text": "再看一下内存占用"})
-	if !strings.Contains(text(res), "已重新打开") {
+	if !strings.Contains(text(res), "is reopened") {
 		t.Fatalf("reopen by parent %q", text(res))
 	}
-	if r := tm.lead.mustCall("close_subthread", map[string]any{"no": 2, "reason": "不需要了"}); !strings.Contains(text(r), "已关闭") {
+	if r := tm.lead.mustCall("close_subthread", map[string]any{"no": 2, "reason": "不需要了"}); !strings.Contains(text(r), "closed") {
 		t.Fatalf("close_subthread %q", text(r))
 	}
 	if v, _ := core.ThreadByID(tm.w.ctx, tm.w.e.Core.Pool, child.ID); v.Status != "done" {
@@ -127,7 +127,7 @@ func TestSubthreadLimits(t *testing.T) {
 	for i := range 5 {
 		tm.lead.mustCall("open_subthread", map[string]any{"title": "子" + string(rune('A'+i)), "brief": "x"})
 	}
-	if r := tm.lead.call("open_subthread", map[string]any{"title": "第六个", "brief": "x"}); r.Ok || !strings.Contains(text(r), "最多 5 个") {
+	if r := tm.lead.call("open_subthread", map[string]any{"title": "第六个", "brief": "x"}); r.Ok || !strings.Contains(text(r), "at most 5") {
 		t.Fatalf("sixth subthread: %+v", r)
 	}
 	for i := range 20 {
@@ -135,7 +135,7 @@ func TestSubthreadLimits(t *testing.T) {
 			t.Fatalf("message %d refused: %s", i, text(r))
 		}
 	}
-	if r := tm.lead.call("message_thread", map[string]any{"no": 2, "text": "多一条"}); r.Ok || !strings.Contains(text(r), "到上限了") {
+	if r := tm.lead.call("message_thread", map[string]any{"no": 2, "text": "多一条"}); r.Ok || !strings.Contains(text(r), "the limit") {
 		t.Fatalf("21st message: %+v", r)
 	}
 }

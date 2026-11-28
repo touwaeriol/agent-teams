@@ -99,7 +99,7 @@ func TestAssignTaskAttachmentsV2(t *testing.T) {
 
 	res := tm.lead.mustCall("assign_task", map[string]any{"assignee": "dev", "instruction": "按附件改", "main": "做",
 		"attachments": []string{png, small.ID, zip.ID, png}})
-	if !strings.Contains(text(res), "附带 3 个附件") {
+	if !strings.Contains(text(res), "with 3 attachments") {
 		t.Fatalf("assign_task result %q", text(res))
 	}
 	dev, open := expectOpen(t, tm.w, tm.n, "dev-1")
@@ -130,7 +130,7 @@ func TestAssignTaskAttachmentsV2(t *testing.T) {
 
 	// send_message: member → lead, with an attachment.
 	r := dev.mustCall("send_message", map[string]any{"to": "lead", "text": "结果见附件", "attachments": []string{zip.ID}})
-	if !strings.Contains(text(r), "附带 1 个附件") {
+	if !strings.Contains(text(r), "with 1 attachment") {
 		t.Fatalf("send_message %q", text(r))
 	}
 	send := tm.lead.expectSend("结果见附件")
@@ -231,7 +231,7 @@ func TestLegacyHandoffToV2(t *testing.T) {
 	_, open := expectOpen(t, tm.w, tm.n, "lead-1")
 	fm := open.FirstMessage
 	if fm == nil || !sameIDs(refIDs(fm.Attachments), zip.ID) || len(fm.Images) != 0 || !strings.Contains(fm.Text, "数据包给你") ||
-		strings.Contains(fm.Text, "请升级") || strings.Contains(fm.Text, "版本过旧") {
+		strings.Contains(fm.Text, "请升级") || strings.Contains(fm.Text, "too old") {
 		t.Fatalf("handed-off first message %+v", fm)
 	}
 }
@@ -244,7 +244,7 @@ func TestAttachmentToolRefusals(t *testing.T) {
 	tm.b.must(201, "POST", "/api/projects", map[string]any{"name": "other"}, &other)
 	foreign := putAttachment(t, tm, other.ID, "x.zip", "application/zip", []byte("PK"))
 	r := tm.lead.call("assign_task", map[string]any{"assignee": "dev", "instruction": "x", "main": "做", "attachments": []string{foreign.ID}})
-	if r.Ok || !strings.Contains(text(r), foreign.ID) || !strings.Contains(text(r), "不属于这个项目") {
+	if r.Ok || !strings.Contains(text(r), foreign.ID) || !strings.Contains(text(r), "is not in this project") {
 		t.Fatalf("foreign attachment: ok=%v %q", r.Ok, text(r))
 	}
 	mine := putAttachment(t, tm, tm.projectID, "y.zip", "application/zip", []byte("PK"))
@@ -272,7 +272,7 @@ func TestSubthreadAndRelayAttachments(t *testing.T) {
 	pdf := putAttachment(t, tm, tm.projectID, "spec.pdf", core.PDFType, []byte("%PDF-1.4 fake"))
 	md := putAttachment(t, tm, tm.projectID, "todo.md", core.TextType, []byte("暗号 osprey-9"))
 	r := tm.lead.mustCall("open_subthread", map[string]any{"title": "调研", "brief": "看规格书", "attachments": []string{pdf.ID, md.ID}})
-	if !strings.Contains(text(r), "附带 2 个附件") {
+	if !strings.Contains(text(r), "with 2 attachments") {
 		t.Fatalf("open_subthread %q", text(r))
 	}
 	_, open := expectOpen(t, tm.w, tm.n, "lead-2")
@@ -291,7 +291,7 @@ func TestSubthreadAndRelayAttachments(t *testing.T) {
 	conv := tm.coordinatorConv(t)
 	_, coord := projectChat(t, tm, conv, map[string]any{"content": "你好"})
 	r = coord.mustCall("message_thread", map[string]any{"no": tm.thread.No, "text": "用户补充了规格书", "attachments": []string{pdf.ID}})
-	if !strings.Contains(text(r), "附带 1 个附件") {
+	if !strings.Contains(text(r), "with 1 attachment") {
 		t.Fatalf("message_thread %q", text(r))
 	}
 	send := tm.lead.expectSend("用户补充了规格书")
@@ -337,7 +337,7 @@ func TestReadAttachmentOldDaemon(t *testing.T) {
 	tm := attTeam(t, false)
 	png := uploadPNG(t, tm)
 	r := tm.lead.call("read_attachment", map[string]any{"id": png})
-	if r.Ok || !strings.Contains(text(r), "版本过旧") {
+	if r.Ok || !strings.Contains(text(r), "too old") {
 		t.Fatalf("old daemon read_attachment: ok=%v %q", r.Ok, text(r))
 	}
 }

@@ -176,7 +176,7 @@ func TestDispatchSource(t *testing.T) {
 		if id == 0 {
 			t.Fatalf("no id for %s", what)
 		}
-		if r := coord.call("open_thread", map[string]any{"title": "x", "brief": "y", "message_id": id}); r.Ok || !strings.Contains(text(r), "不是用户在项目对话里发的消息") {
+		if r := coord.call("open_thread", map[string]any{"title": "x", "brief": "y", "message_id": id}); r.Ok || !strings.Contains(text(r), "is not a message the user wrote in the project chat") {
 			t.Fatalf("message_id of %s (%d) = %v %q", what, id, r.Ok, text(r))
 		}
 	}

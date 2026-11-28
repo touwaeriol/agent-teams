@@ -265,7 +265,7 @@ func TestFinishWaitsForUserQuestions(t *testing.T) {
 	args := map[string]map[string]string{"finish": {"summary": "设计稿"}, "open_pr": {"title": "设计稿", "body": "设计稿"}}
 	for _, tool := range []string{"finish", "open_pr"} {
 		res := tm.lead.call(tool, args[tool])
-		if res.Ok || !strings.Contains(text(res), "1 个问题在等用户回答") || !strings.Contains(text(res), tool) {
+		if res.Ok || !strings.Contains(text(res), "1 question still waiting for the user") || !strings.Contains(text(res), tool) {
 			t.Fatalf("%s with an open question: %+v", tool, res)
 		}
 	}
@@ -280,7 +280,7 @@ func TestFinishWaitsForUserQuestions(t *testing.T) {
 	}
 	tm.b.must(200, "POST", "/api/conversations/"+tm.thread.ID+"/questions/"+cards[0].ID+"/answer", map[string]string{"answer": "10 分钟"}, nil)
 	res := tm.lead.mustCall("finish", map[string]string{"summary": "设计稿，Q1 取 10 分钟"})
-	if !strings.Contains(text(res), "没有代码改动") {
+	if !strings.Contains(text(res), "no code changes") {
 		t.Fatalf("finish after the answer %q", text(res))
 	}
 	eventually(t, "thread done", func() bool { st, _ := threadStatus(tm); return st == "done" })
@@ -297,7 +297,7 @@ func TestReadOnlyFinish(t *testing.T) {
 	tm.dev.mustCall("complete_task", map[string]any{"task_id": "t1", "summary": "查完了"})
 	tm.lead.expectSend("[Task t1 · dev-1 · done]")
 	res = tm.lead.mustCall("finish", map[string]string{"summary": "调研结论：方案 A 更好"})
-	if !strings.Contains(text(res), "没有代码改动") || strings.Contains(text(res), "open_pr(") {
+	if !strings.Contains(text(res), "no code changes") || strings.Contains(text(res), "open_pr(") {
 		t.Fatalf("finish result %q", text(res))
 	}
 	eventually(t, "thread done", func() bool { st, _ := threadStatus(tm); return st == "done" })

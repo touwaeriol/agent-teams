@@ -145,7 +145,7 @@ func carried(files []core.AttachmentRef) string {
 	if len(files) == 0 {
 		return ""
 	}
-	return fmt.Sprintf(" (with %d attachments)", len(files))
+	return " (with " + plural(len(files), "attachment") + ")"
 }
 
 // human is a byte count for people (1.5 MB).
@@ -159,4 +159,12 @@ func human(n int64) string {
 		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
 	}
 	return fmt.Sprintf("%d B", n)
+}
+
+// plural is "1 thing" or "n things".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }

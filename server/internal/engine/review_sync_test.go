@@ -264,7 +264,7 @@ func TestReviewPlatformErrorReport(t *testing.T) {
 		t.Errorf("degraded brief asks for a check a read-only session cannot do:\n%s", open.FirstMessage.Text)
 	}
 	res := rev.mustCall("complete_task", map[string]any{"task_id": "t2", "status": "platform_error", "summary": "HEAD 是 develop 的提交"})
-	if !strings.Contains(text(res), "不算驳回") {
+	if !strings.Contains(text(res), "does not count as a rejection") {
 		t.Fatalf("platform_error result: %s", text(res))
 	}
 	rev.expectSend("[Task t2")

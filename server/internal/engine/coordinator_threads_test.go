@@ -57,7 +57,7 @@ func TestCoordinatorReopensDoneThread(t *testing.T) {
 
 	tm.b.must(200, "POST", "/api/threads/"+tm.thread.ID+"/archive", nil, nil)
 	res = coord.call("message_thread", map[string]any{"no": 1, "text": "还在吗"})
-	if res.Ok || !strings.Contains(text(res), "已归档") {
+	if res.Ok || !strings.Contains(text(res), "is archived") {
 		t.Fatalf("message to an archived thread: %+v", res)
 	}
 	if v, _ := core.ThreadByID(tm.w.ctx, tm.w.e.Core.Pool, tm.thread.ID); v.Status != "archived" {

@@ -16,7 +16,7 @@ import (
 func TestMemoryTools(t *testing.T) {
 	tm := startTeam(t)
 	res := tm.lead.mustCall("memory_write", map[string]string{"name": "testing", "description": "怎么跑测试", "content": "用 docker 跑 make test"})
-	if !strings.Contains(text(res), "已创建 testing.md") {
+	if !strings.Contains(text(res), "created testing.md") {
 		t.Fatalf("write %q", text(res))
 	}
 	if res := tm.lead.call("memory_write", map[string]string{"name": "notes", "content": "x"}); res.Ok || !strings.Contains(text(res), "描述") {
@@ -35,7 +35,7 @@ func TestMemoryTools(t *testing.T) {
 		t.Fatal("read a missing file")
 	}
 	res = tm.lead.mustCall("memory_edit", map[string]any{"name": "testing.md", "old_string": "make test", "new_string": "make test-all"})
-	if !strings.Contains(text(res), "1 处") {
+	if !strings.Contains(text(res), "1 replacement") {
 		t.Fatalf("edit %q", text(res))
 	}
 	if res := tm.lead.call("memory_edit", map[string]any{"name": "testing.md", "old_string": "nope", "new_string": "x"}); res.Ok || !strings.Contains(text(res), "old_string") {

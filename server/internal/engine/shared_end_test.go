@@ -162,8 +162,8 @@ func TestBusyElsewhereAndMailAcrossThreads(t *testing.T) {
 	}
 	lead1.mustCall("send_message", map[string]any{"to": "dev-1", "text": "same thread"})
 	dev1.expectSend("[Message from lead-1]")
-	if got := text(dev1.mustCall("read_messages", map[string]any{})); !strings.Contains(got, "lead-1 → dev-1：same thread") ||
-		strings.Contains(got, "其他讨论串") {
+	if got := text(dev1.mustCall("read_messages", map[string]any{})); !strings.Contains(got, "lead-1 → dev-1: same thread") ||
+		strings.Contains(got, "other threads") {
 		t.Fatalf("dev-1 read_messages: %s", got)
 	}
 

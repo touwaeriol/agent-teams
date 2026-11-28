@@ -471,7 +471,7 @@ func questionsAnswered(ctx context.Context, tx *core.Tx, t core.Thread, tool str
 	if err != nil || n == 0 {
 		return err
 	}
-	return refuse("%d questions are still waiting for the user, and ending the thread would cancel them. Wait for the answers, act on them, then call %s", n, tool)
+	return refuse("%s still waiting for the user, and ending the thread would cancel them. Wait for the answers, act on them, then call %s", plural(n, "question"), tool)
 }
 
 // openWork refuses finishing a thread whose main tasks or small tasks are still going.

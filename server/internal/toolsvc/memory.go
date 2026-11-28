@@ -146,7 +146,7 @@ func (s *Service) memoryEdit(ctx context.Context, tx *core.Tx, c *call) (Result,
 		err = s.changed(ctx, tx, sc, c.emp().Name, "write", f.Name)
 	}
 	return memoryResult(err, func() Result {
-		return okJSON(fmt.Sprintf("edited %s (%d replacements)", f.Name, n), protocol.MemoryEditResult{Name: f.Name, Replaced: n})
+		return okJSON(fmt.Sprintf("edited %s (%s)", f.Name, plural(n, "replacement")), protocol.MemoryEditResult{Name: f.Name, Replaced: n})
 	})
 }
 

@@ -85,11 +85,11 @@ func (e *Engine) resubmit(ctx context.Context, threadID string, force bool) (boo
 func (e *Engine) reviewWait(ctx context.Context, t core.Thread) string {
 	switch e.policy(ctx, t) {
 	case "auto":
-		return "PR 检查全部通过后平台自动合并，合并后讨论串结束（done）"
+		return "once the PR checks all pass the platform merges it automatically, and the thread ends (done) after the merge"
 	case "manual":
-		return "等用户在页面上验收（点验收后平台等检查通过再合并），合并后讨论串结束（done）"
+		return "waiting for the user's acceptance on the page (after acceptance the platform merges once the checks pass), and the thread ends (done) after the merge"
 	}
-	return "PR 检查全部通过后讨论串结束（done），PR 留给人在 GitHub 上合并"
+	return "once the PR checks all pass the thread ends (done), and the PR is left for a person to merge on GitHub"
 }
 
 // FinishWithPR runs inside finish for a thread that has pull requests: a thread back in running
@@ -104,9 +104,9 @@ func (e *Engine) FinishWithPR(ctx context.Context, tx *core.Tx, t core.Thread) (
 	if err != nil {
 		return "", err
 	}
-	const tail = "检查没过会把失败的检查发给你；修完（或验收被打回、改完）后再调用 finish 重新提交。结束条件满足后，要等你这一回合结束（最终汇报发出）讨论串才结束。"
+	const tail = " Failed checks come back to you; after fixing them (or changing what the user rejected), call finish again to resubmit. Once the end conditions hold, the thread ends only after this turn ends (with your final report out)."
 	if resubmitted {
-		return "总结已记录，讨论串已重新提交验收（review）：" + e.reviewWait(ctx, t) + "。" + tail, nil
+		return "Summary recorded; the thread is resubmitted for acceptance (review): " + e.reviewWait(ctx, t) + "." + tail, nil
 	}
 	prs, _, err := e.openPRs(ctx, t)
 	if err != nil {
@@ -114,12 +114,12 @@ func (e *Engine) FinishWithPR(ctx context.Context, tx *core.Tx, t core.Thread) (
 	}
 	switch {
 	case t.Status == "review" && len(prs) > 0:
-		return "总结已记录。讨论串在 review：" + e.reviewWait(ctx, t) + "。" + tail, nil
+		return "Summary recorded. The thread is in review: " + e.reviewWait(ctx, t) + "." + tail, nil
 	case len(prs) == 0 && t.PRState == "merged":
 		if busy, err := openTasksOrMerges(ctx, tx, t.ID); err != nil || busy {
-			return "总结已记录。PR 已合并，但还有未完成的小任务或合并队列里还有分支，它们结束后讨论串才结束。", err
+			return "Summary recorded. The PR is merged, but small tasks are still open or branches are still in the merge queue; the thread ends once they are done.", err
 		}
-		return "总结已记录。PR 已合并：这一回合结束后讨论串结束（done）。请把给用户的最终汇报写成本回合的最后一条回复。", nil
+		return "Summary recorded. The PR is merged: the thread ends (done) after this turn. Write the final report to the user as the last reply of this turn.", nil
 	}
-	return "总结已记录。讨论串现在是 " + t.Status + "、PR 状态 " + orDefault(t.PRState, "无") + "，平台不会自动结束它；需要时请用户在页面上处理。", nil
+	return "Summary recorded. The thread is " + t.Status + " with PR state " + orDefault(t.PRState, "none") + ", so the platform will not end it by itself; ask the user to handle it on the page if needed.", nil
 }

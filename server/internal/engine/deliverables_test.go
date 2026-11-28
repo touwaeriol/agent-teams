@@ -102,7 +102,7 @@ func TestReviseDeliverableAcrossThreads(t *testing.T) {
 		*summaries.Deliverables[0].Thread != 1 || summaries.Deliverables[0].PublishedBy != "designer-1" || !strings.Contains(text(list), "read_deliverable") {
 		t.Fatalf("list %+v %s", summaries, text(list))
 	}
-	if r := dev2.mustCall("list_deliverables", map[string]any{"thread": 2}); !strings.Contains(text(r), "还没有交付物") {
+	if r := dev2.mustCall("list_deliverables", map[string]any{"thread": 2}); !strings.Contains(text(r), "no deliverables yet") {
 		t.Fatalf("thread filter %s", text(r))
 	}
 
@@ -186,10 +186,10 @@ func TestReadDeliverableScope(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{lead3, map[string]any{"deliverable_id": pub.DeliverableID}, "这个项目没有交付物"},
-		{tm.dev, map[string]any{"deliverable_id": foreign.ID}, "这个项目没有交付物"},
-		{tm.dev, map[string]any{"deliverable_id": link.ID}, "外部链接"},
-		{tm.dev, map[string]any{"deliverable_id": pub.DeliverableID, "version": 9}, "没有第 9 版"},
+		{lead3, map[string]any{"deliverable_id": pub.DeliverableID}, "this project has no deliverable"},
+		{tm.dev, map[string]any{"deliverable_id": foreign.ID}, "this project has no deliverable"},
+		{tm.dev, map[string]any{"deliverable_id": link.ID}, "external link"},
+		{tm.dev, map[string]any{"deliverable_id": pub.DeliverableID, "version": 9}, "has no version 9"},
 	}
 	for _, c := range cases {
 		if r, _ := c.who.readCall(c.args); r.Ok || !strings.Contains(text(r), c.want) {
@@ -199,7 +199,7 @@ func TestReadDeliverableScope(t *testing.T) {
 	if r := lead3.mustCall("list_deliverables", map[string]any{}); strings.Contains(text(r), pub.DeliverableID) {
 		t.Fatalf("other project lists %s", text(r))
 	}
-	if r := tm.lead.mustCall("list_deliverables", map[string]any{"kind": "doc"}); !strings.Contains(text(r), "外部链接") || !strings.Contains(text(r), pub.DeliverableID) {
+	if r := tm.lead.mustCall("list_deliverables", map[string]any{"kind": "doc"}); !strings.Contains(text(r), "external link") || !strings.Contains(text(r), pub.DeliverableID) {
 		t.Fatalf("lead list %s", text(r))
 	}
 	if r, files := tm.lead.readCall(map[string]any{"deliverable_id": pub.DeliverableID}); !r.Ok || files["a.md"] != "# 说明" {
@@ -208,7 +208,7 @@ func TestReadDeliverableScope(t *testing.T) {
 	if _, err := store.Exec(tm.w.ctx, tm.w.e.Core.Pool, `UPDATE at_nodes SET last_hello = jsonb_set(last_hello, '{features}', '["sessions"]')`); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := tm.dev.readCall(map[string]any{"deliverable_id": pub.DeliverableID}); r.Ok || !strings.Contains(text(r), "升级") {
+	if r, _ := tm.dev.readCall(map[string]any{"deliverable_id": pub.DeliverableID}); r.Ok || !strings.Contains(text(r), "upgrade") {
 		t.Fatalf("old daemon %+v", r)
 	}
 }
