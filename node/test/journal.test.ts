@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Inbox } from "../src/link/inbox.js";
 import { Outbox } from "../src/link/outbox.js";
 import { Dispatcher } from "../src/link/dispatcher.js";
@@ -79,7 +79,9 @@ describe("dispatcher + inbox", () => {
     const d = new Dispatcher(link, inbox, handlers, silentLogger);
     d.handle(frame("session.send", 1, { session_id: "s", msg_id: "m1", text: "a" }));
     d.handle(frame("session.send", 2, { session_id: "s", msg_id: "m2", text: "b" }));
-    await new Promise((r) => setTimeout(r, 80));
+    // Wait for both runs and their acks rather than a fixed delay: a loaded CI runner can take longer,
+    // and a run still finishing after afterEach removed the directory would write into a missing journal.
+    await vi.waitFor(() => expect(sent.filter(([t]) => t === "session.delivered").length).toBe(2), { timeout: 5000, interval: 5 });
     expect(order).toEqual(["start m1", "end m1", "start m2", "end m2"]);
     d.handle(frame("session.send", 3, { session_id: "s", msg_id: "m1", text: "a" }));
     expect(runs).toBe(2);
@@ -99,8 +101,7 @@ describe("dispatcher + inbox", () => {
     const run = async (_b: Record<string, unknown>, f: Frame) => (ran.push(f.type), []);
     const d = new Dispatcher(link, new Inbox(dir), { "git.prepare": { run }, "session.send": { run } }, silentLogger);
     d.resumeUnfinished();
-    await new Promise((r) => setTimeout(r, 10));
+    await vi.waitFor(() => expect(new Inbox(dir).unfinished()).toEqual([]), { timeout: 5000, interval: 5 });
     expect(ran).toEqual(["git.prepare"]);
-    expect(new Inbox(dir).unfinished()).toEqual([]);
   });
 });
