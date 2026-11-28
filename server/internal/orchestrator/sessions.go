@@ -777,7 +777,7 @@ func (o *Orchestrator) QueueSync(ctx context.Context, tx *core.Tx, e core.Employ
 	if err != nil {
 		return 0, err
 	}
-	if !worked {
+	if !worked || nodeID != *env.emp.NodeID {
 		p := PathsOf(env.emp, env.thread)
 		if err := o.placeEmployee(ctx, tx, env.emp, nodeID, o.checkoutPaths(ctx, tx, p, env)); err != nil {
 			return 0, err
@@ -797,13 +797,21 @@ func (o *Orchestrator) QueueSync(ctx context.Context, tx *core.Tx, e core.Employ
 	return len(env.repos), nil
 }
 
-// syncNode is the node a pre-task sync runs on: the employee's, or for a review in a thread it
-// has no session in yet the node its session will open on ("" when there is none).
+// syncNode is the node a pre-task sync runs on: the node of the employee's live session, else the
+// node its next session will open on (pickNode with the same stay rule as openSession: a worked
+// employee may leave a node over the user's thresholds, and the sync must create the worktree
+// where the session will be); "" when there is none.
 func (o *Orchestrator) syncNode(ctx context.Context, tx *core.Tx, env sessionEnv, worked bool) (string, error) {
 	if worked {
-		return *env.emp.NodeID, nil
+		live, err := core.LiveSession(ctx, tx, env.emp.ID)
+		if err == nil && live.NodeID != nil {
+			return *live.NodeID, nil
+		}
+		if err != nil && !errors.Is(err, core.ErrNotFound) {
+			return "", err
+		}
 	}
-	pick, err := o.pickNode(ctx, tx, env.emp, env.project, false, pickSync)
+	pick, err := o.pickNode(ctx, tx, env.emp, env.project, worked, pickSync)
 	if errors.Is(err, ErrNoNode) || (err == nil && pick.hold != "") {
 		return "", nil
 	}
