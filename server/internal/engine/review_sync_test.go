@@ -30,6 +30,7 @@ type reviewWorld struct {
 	thread core.ThreadView
 	lead   *fakeAgent
 	dev1   *fakeAgent
+	gh     *fakeGitHub
 }
 
 func newReviewWorld(t *testing.T, features []string, tune func(*engine.Engine)) *reviewWorld {
@@ -59,7 +60,7 @@ func newReviewWorldN(t *testing.T, features []string, tune func(*engine.Engine),
 	tm.n = w.connect(node.Token, nodetest.Options{Features: features})
 	n := tm.n
 
-	rw := &reviewWorld{team: tm}
+	rw := &reviewWorld{team: tm, gh: gh}
 	tm.b.must(201, "POST", "/api/projects/"+project.ID+"/threads", map[string]any{"title": "Login", "brief": "登录页"}, &rw.thread)
 	rw.lead, _ = expectOpen(t, w, n, "lead-1")
 	answerPrepares(t, w, n)
@@ -348,4 +349,82 @@ func TestThreeReviewersOneGate(t *testing.T) {
 	if n := reviewers("AND instance_no IN (2, 3) AND node_id IS NOT NULL"); n != 2 {
 		t.Fatalf("raising the count again: %d of reviewer-2/3 back with a node", n)
 	}
+}
+
+// sendUsage reports the node's Claude five-hour window at used percent.
+func sendUsage(t *testing.T, w *world, n *nodetest.Node, used float64) {
+	t.Helper()
+	ctx, cancel := w.waitCtx()
+	defer cancel()
+	resets := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+	body := map[string]any{"runtimes": map[string]any{"claude": map[string]any{"auth": "subscription", "status": "ok",
+		"windows": []any{map[string]any{"key": "five_hour", "used_percent": used, "window_minutes": 300, "resets_at": resets}}}}}
+	if err := n.SendUnreliable(ctx, "node.usage", body); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestReviewSyncFollowsThresholdMove: a reviewer that worked in the thread on node a, now over the
+// user's five-hour threshold while node b is not, opens its next review session on b (a staying
+// session honors the thresholds), so the pre-task review sync must create the worktree at the
+// commit under review on b as well, not on a where the session no longer goes.
+func TestReviewSyncFollowsThresholdMove(t *testing.T) {
+	rw := newReviewWorld(t, reviewFeatures, nil)
+	rw.answer(t, rw.reviewSync(t), reviewedSHA)
+	rev, open := expectOpen(t, rw.w, rw.n, "reviewer-1")
+	answerPrepares(t, rw.w, rw.n)
+	rev.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(rev.session), MsgID: open.FirstMessage.MsgID})
+	rev.mustCall("complete_task", map[string]any{"task_id": "t2", "status": "failed", "summary": "缺少输入校验"})
+	rw.lead.expectSend("预留给 dev-1 返工")
+	// The reviewer's session ended after the review (context_clear: a gate role starts each review fresh).
+	rw.sql(t, `UPDATE at_agent_sessions SET state = 'closed', closed_at = now(), close_reason = 'context_clear' WHERE id = $1`, rev.session)
+
+	var b nodeCreated
+	rw.b.must(201, "POST", "/api/nodes", map[string]string{"name": "b"}, &b)
+	nb := rw.w.connect(b.Token, nodetest.Options{Features: reviewFeatures})
+	sendUsage(t, rw.w, rw.n, 90)
+	sendUsage(t, rw.w, nb, 5)
+	eventually(t, "usage reported", func() bool {
+		var nodes []usageNode
+		rw.b.must(200, "GET", "/api/nodes", nil, &nodes)
+		seen := 0
+		for _, n := range nodes {
+			if string(n.Usage) != "null" && len(n.Usage) > 0 {
+				seen++
+			}
+		}
+		return seen == 2
+	})
+
+	answerPrepares(t, rw.w, rw.n)
+	rw.dev1.expectSend("[Task t1")
+	gen := protocol.OpenGen(rw.dev1.gen)
+	rw.dev1.send(protocol.TypeToolCall, protocol.ToolCall{CallID: "tc_rework_t1", SessionID: protocol.SessionID(rw.dev1.session), OpenGen: &gen,
+		Tool: "complete_task", Args: []byte(`{"task_id":"t1","summary":"加了输入校验"}`)})
+	push(t, rw.w, rw.gh, rw.n, "thread/1/dev-1", otherSHA)
+	if res := rw.dev1.result("tc_rework_t1"); !res.Ok {
+		t.Fatalf("rework complete: %+v", res)
+	}
+
+	ctx, cancel := rw.w.waitCtx()
+	defer cancel()
+	f, err := nb.Wait(ctx, protocol.TypeGitPrepare, func(f nodetest.Frame) bool {
+		s := string(f.Body)
+		return strings.Contains(s, `"sync"`) && strings.Contains(s, "reviewer-1")
+	})
+	if err != nil {
+		t.Fatalf("no review sync on node b: %v", err)
+	}
+	var p protocol.GitPrepare
+	_ = f.Decode(&p)
+	if p.Sync == nil || p.Sync.ExpectSHA == nil || *p.Sync.ExpectSHA != otherSHA {
+		t.Fatalf("review sync on b %+v", p.Sync)
+	}
+	head := otherSHA
+	r := protocol.GitResult{JobID: p.JobID, Ok: true, HeadSHA: &head,
+		Sync: &protocol.GitResultSync{Action: protocol.GitResultSyncActionCheckout, HeadSHA: otherSHA}}
+	if _, err := nb.Send(ctx, protocol.TypeGitResult, r); err != nil {
+		t.Fatal(err)
+	}
+	expectOpen(t, rw.w, nb, "reviewer-1")
 }
