@@ -13,6 +13,7 @@ type Enrollment struct {
 	Install string `json:"install" doc:"Shell command for the node (install-node.sh on the host)"`
 	Docker  string `json:"docker" doc:"docker run command that starts the node container with this token"`
 	Compose string `json:"compose" doc:"compose.yml that starts the node container with this token (docker compose up -d)"`
+	Guide   string `json:"guide" doc:"Public Docker guide on the node registration address (node-docker.md), safe to hand to an AI"`
 }
 
 // nodeURL is the address nodes register and connect with: the administrator's 节点注册地址, else
@@ -30,7 +31,7 @@ func (s *Server) enrollment(ctx context.Context, name, token string) Enrollment 
 	cmd := fmt.Sprintf("curl -fsSL %s/install-node.sh | AGENT_TEAMS_NODE_TOKEN=%s bash -s -- --console %s --name %s",
 		console, token, shellQuote(console), shellQuote(name))
 	n := nodeContainer{name: name, host: strings.ReplaceAll(name, "_", "-"), slug: "agent-teams-node-" + strings.ToLower(name), console: console, token: token, image: s.cfg.NodeImage}
-	return Enrollment{Token: token, Install: cmd, Docker: n.dockerRun(), Compose: n.compose()}
+	return Enrollment{Token: token, Install: cmd, Docker: n.dockerRun(), Compose: n.compose(), Guide: console + "/node-docker.md"}
 }
 
 // nodeContainer renders the container snippets. Names derive from the node name (letters, digits,

@@ -15,6 +15,7 @@ type createdNode struct {
 	Install string   `json:"install"`
 	Docker  string   `json:"docker"`
 	Compose string   `json:"compose"`
+	Guide   string   `json:"guide"`
 }
 
 // TestNodeComposeSnippet: the compose hostname is quoted (a node named 123, true or 1e3 stays a

@@ -16,7 +16,7 @@ const create = useAction(() => nodeActions.create(name.value.trim()), {
   onSuccess: (r) => {
     open.value = false;
     name.value = "";
-    emit("created", r.node.name, { token: r.token, install: r.install, docker: r.docker, compose: r.compose });
+    emit("created", r.node.name, { token: r.token, install: r.install, docker: r.docker, compose: r.compose, guide: r.guide });
   },
 });
 </script>

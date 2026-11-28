@@ -98,7 +98,8 @@ func TestNodeRegistrationURL(t *testing.T) {
 	var n createdNode
 	admin.must(201, "POST", "/api/nodes", map[string]string{"name": "edge"}, &n)
 	if !strings.Contains(n.Install, "curl -fsSL https://backend.test/install-node.sh") || !strings.Contains(n.Install, "--console https://backend.test") ||
-		!strings.Contains(n.Docker, "AGENT_TEAMS_CONSOLE=https://backend.test") || !strings.Contains(n.Compose, "https://backend.test") {
+		!strings.Contains(n.Docker, "AGENT_TEAMS_CONSOLE=https://backend.test") || !strings.Contains(n.Compose, "https://backend.test") ||
+		n.Guide != "https://backend.test/node-docker.md" {
 		t.Fatalf("enrollment %+v", n)
 	}
 	c := h.client()

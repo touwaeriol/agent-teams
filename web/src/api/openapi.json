@@ -2136,6 +2136,10 @@
             "description": "docker run command that starts the node container with this token",
             "type": "string"
           },
+          "guide": {
+            "description": "Public Docker guide on the node registration address (node-docker.md), safe to hand to an AI",
+            "type": "string"
+          },
           "install": {
             "description": "Shell command for the node (install-node.sh on the host)",
             "type": "string"
@@ -2149,7 +2153,8 @@
           "token",
           "install",
           "docker",
-          "compose"
+          "compose",
+          "guide"
         ],
         "type": "object"
       },
@@ -3971,6 +3976,10 @@
             "description": "docker run command that starts the node container with this token",
             "type": "string"
           },
+          "guide": {
+            "description": "Public Docker guide on the node registration address (node-docker.md), safe to hand to an AI",
+            "type": "string"
+          },
           "install": {
             "description": "Shell command for the node (install-node.sh on the host)",
             "type": "string"
@@ -3988,7 +3997,8 @@
           "token",
           "install",
           "docker",
-          "compose"
+          "compose",
+          "guide"
         ],
         "type": "object"
       },
