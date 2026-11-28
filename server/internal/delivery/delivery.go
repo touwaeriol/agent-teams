@@ -248,17 +248,18 @@ func (e *Engine) prepared(ctx context.Context, tx *core.Tx, meta map[string]any,
 
 // prepareError explains a failed worktree preparation. A start branch that does not exist is
 // the user's to fix (project settings), so it says how instead of showing git's output.
-func prepareError(name string, meta map[string]any, r *protocol.GitResult) string {
+func prepareError(name string, meta map[string]any, r *protocol.GitResult) msg.Text {
 	if code(r) != "base_missing" {
-		return fmt.Sprintf("准备 %s 的工作目录失败（%s）：%s", name, code(r), tail(r))
+		return msg.T("准备 {name} 的工作目录失败（{code}）：{detail}", "name", name, "code", code(r), "detail", tail(r))
 	}
 	repo, base := str(meta["repo"]), str(meta["base"])
 	if base == "" {
-		return fmt.Sprintf("准备 %s 的工作目录失败：仓库 %s 没有配置起点分支，讨论串不知道从哪个分支开始。"+
-			"请到项目设置的仓库里填上起点分支（例如 develop），再点继续。", name, repo)
+		return msg.T("准备 {name} 的工作目录失败：仓库 {repo} 没有配置起点分支，讨论串不知道从哪个分支开始。"+
+			"请到项目设置的仓库里填上起点分支（例如 develop），再点继续。", "name", name, "repo", repo)
 	}
-	return fmt.Sprintf("准备 %s 的工作目录失败：起点分支 %s 在仓库 %s 里不存在（可能被删除或改名了）。"+
-		"请到项目设置的仓库里把起点分支改成一个存在的分支，再点继续；如果是统筹给这个讨论串指定的分支，请让统筹换一个。", name, base, repo)
+	return msg.T("准备 {name} 的工作目录失败：起点分支 {base} 在仓库 {repo} 里不存在（可能被删除或改名了）。"+
+		"请到项目设置的仓库里把起点分支改成一个存在的分支，再点继续；如果是统筹给这个讨论串指定的分支，请让统筹换一个。",
+		"name", name, "base", base, "repo", repo)
 }
 
 func code(r *protocol.GitResult) string {

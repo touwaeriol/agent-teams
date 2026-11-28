@@ -2714,6 +2714,7 @@ export interface components {
             employee: string;
             /** Format: int64 */
             id: number;
+            msg?: components["schemas"]["Text"];
             text: string;
         };
         ActivityPage: {

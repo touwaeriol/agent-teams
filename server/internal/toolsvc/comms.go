@@ -487,7 +487,7 @@ func (s *Service) reportProgress(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err := core.SetTaskProgress(ctx, tx, c.emp(), in.Text); err != nil {
 		return Result{}, err
 	}
-	return okText("ok"), tx.EmitActivity(ctx, c.emp().ProjectID, c.emp().WorkThreadID(), c.emp().Name, in.Text)
+	return okText("ok"), tx.EmitActivity(ctx, c.emp().ProjectID, c.emp().WorkThreadID(), c.emp().Name, msg.Text{Key: in.Text})
 }
 
 // publish registers a deliverable link.

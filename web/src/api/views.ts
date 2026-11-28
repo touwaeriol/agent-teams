@@ -6,6 +6,7 @@
 // api.md until the orchestration routes land in openapi.json; when they do,
 // replace each hand-written type with the generated one in this file only.
 import type { ForwardedFrom } from "@/lib/forward";
+import type { ServerText } from "@/i18n";
 import type { Runtime } from "@/lib/runtimes";
 import type { components } from "./schema";
 
@@ -354,6 +355,8 @@ export interface MessageView {
     schedule_id?: string;
     /** The line of a schedule just set: the user can undo it from there. */
     schedule_undo?: boolean;
+    /** A platform line's message (key + params, web i18n); content is its Chinese. */
+    text?: ServerText;
   };
   created_at: string;
   /** Client only: a message the user sent that the server has not confirmed yet (api/pending.ts). */
@@ -396,6 +399,8 @@ export interface ActivityView {
   thread_no?: number | null;
   employee: string;
   text: string;
+  /** The line as a message (key + params, web i18n); absent on older lines. */
+  msg?: ServerText | null;
   at: string;
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { $t } from "@/i18n";
+import { $t, serverText } from "@/i18n";
 /** The selected person: who, where, what now, the last few things they did. */
 import { computed } from "vue";
 import { errorText } from "@/api/mutations";
@@ -22,7 +22,7 @@ const e = computed(() => card.data.value);
       </span>
       <span class="text-[#8FD3A2]">{{ memberDoing(e) }}</span>
       <span v-if="e.current_task" :style="{ color: DARK.text }">{{ $t("在做：{n}", { n: e.current_task.instruction.split("\n")[0] }) }}</span>
-      <span v-for="(a, i) in e.recent_activity.slice(0, 3)" :key="i" class="text-[#7E8190]">{{ hhmmss(a.at) }} {{ a.text }}</span>
+      <span v-for="(a, i) in e.recent_activity.slice(0, 3)" :key="i" class="text-[#7E8190]">{{ hhmmss(a.at) }} {{ serverText(a.msg, a.text) }}</span>
     </template>
   </div>
 </template>

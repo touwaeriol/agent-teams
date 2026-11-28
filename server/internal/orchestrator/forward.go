@@ -344,16 +344,16 @@ func titleFrom(items []forwarded) string {
 // forwardNote tells the project chat where the messages went (meta.forwarded_to).
 func (o *Orchestrator) forwardNote(ctx context.Context, tx *core.Tx, req ForwardRequest, conv, key string, res ForwardResult) error {
 	ids := res.Sources
-	text := fmt.Sprintf("已转发 %d 条消息到 #%d · %s", len(res.Messages), res.Thread.No, res.Thread.Title)
+	text := msg.T("已转发 {n} 条消息到 #{no} · {title}", "n", len(res.Messages), "no", res.Thread.No, "title", res.Thread.Title)
 	if res.Created {
-		text = fmt.Sprintf("已转发 %d 条消息，新开讨论串 #%d · %s", len(res.Messages), res.Thread.No, res.Thread.Title)
+		text = msg.T("已转发 {n} 条消息，新开讨论串 #{no} · {title}", "n", len(res.Messages), "no", res.Thread.No, "title", res.Thread.Title)
 	}
 	author := "user"
 	if req.By == "coordinator" {
 		author = "coordinator"
 	}
-	m, err := core.InsertMessage(ctx, tx, core.NewMessage{ConversationID: conv, Role: "system", Author: author, Kind: "note", Content: text,
-		Meta: map[string]any{"forwarded_to": map[string]any{"no": res.Thread.No, "key": key, "message_ids": ids, "count": len(ids),
+	m, err := core.InsertMessage(ctx, tx, core.NewMessage{ConversationID: conv, Role: "system", Author: author, Kind: "note", Content: text.String(),
+		Meta: map[string]any{"text": text, "forwarded_to": map[string]any{"no": res.Thread.No, "key": key, "message_ids": ids, "count": len(ids),
 			"created": res.Created, "by": req.By}}})
 	if err != nil {
 		return err

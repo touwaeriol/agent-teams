@@ -366,7 +366,7 @@ func (a *API) card(ctx context.Context, emp core.Employee) (EmployeeCard, error)
 }
 
 func (a *API) employeeActivity(ctx context.Context, emp core.Employee) ([]core.Activity, error) {
-	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT seq, actor, COALESCE(payload->>'text', ''), created_at FROM at_events
+	rows, err := store.Query(ctx, a.e.Core.Pool, `SELECT seq, actor, COALESCE(payload->>'text', ''), payload->'msg', created_at FROM at_events
 		WHERE project_id = $1 AND type = 'activity' AND actor = $2 AND COALESCE(thread_id, '') = COALESCE($3, '')
 		ORDER BY seq DESC LIMIT 10`, emp.ProjectID, emp.Name, emp.WorkThreadID())
 	if err != nil {
@@ -376,8 +376,12 @@ func (a *API) employeeActivity(ctx context.Context, emp core.Employee) ([]core.A
 	out := []core.Activity{}
 	for rows.Next() {
 		var x core.Activity
-		if err := rows.Scan(&x.ID, &x.Employee, &x.Text, &x.At); err != nil {
+		var m []byte
+		if err := rows.Scan(&x.ID, &x.Employee, &x.Text, &m, &x.At); err != nil {
 			return nil, err
+		}
+		if len(m) > 0 && json.Unmarshal(m, &x.Msg) != nil {
+			x.Msg = nil
 		}
 		out = append(out, x)
 	}

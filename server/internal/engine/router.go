@@ -9,6 +9,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
@@ -316,7 +317,7 @@ func (r *router) checkTools(ctx context.Context, tx *core.Tx, sc core.SessionCon
 		if err := r.e.Orch.CloseSession(ctx, tx, sc.Session, "policy_violation"); err != nil {
 			return err
 		}
-		return r.e.Orch.PostError(ctx, tx, sc.Employee, fmt.Sprintf("%s 的会话出现了不允许的工具 %s，已关闭", sc.Employee.Name, bad))
+		return r.e.Orch.PostError(ctx, tx, sc.Employee, msg.T("{name} 的会话出现了不允许的工具 {tool}，已关闭", "name", sc.Employee.Name, "tool", bad))
 	}
 	return nil
 }
@@ -336,7 +337,7 @@ func (r *router) toolStarted(ctx context.Context, tx *core.Tx, sc core.SessionCo
 		return nil, err
 	}
 	text := fmt.Sprintf("%s %s", tool, o.Summary)
-	return []status.Observation{o}, tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.WorkThreadID(), sc.Employee.Name, text)
+	return []status.Observation{o}, tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.WorkThreadID(), sc.Employee.Name, msg.Text{Key: text})
 }
 
 // turnEnded records usage and nudges a member whose task is still running.
@@ -383,7 +384,7 @@ func (r *router) compacting(ctx context.Context, tx *core.Tx, sc core.SessionCon
 // also pauses the employee's thread until then (data-model.md §2.10).
 func (r *router) rateLimited(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {
 	e := sc.Employee
-	if err := tx.EmitActivity(ctx, e.ProjectID, e.WorkThreadID(), e.Name, "限速中："+val(ev.Detail)); err != nil {
+	if err := tx.EmitActivity(ctx, e.ProjectID, e.WorkThreadID(), e.Name, msg.T("限速中：{detail}", "detail", val(ev.Detail))); err != nil {
 		return err
 	}
 	if !timers.IsUsageLimit(ev.RetryAt, time.Now()) {
@@ -431,7 +432,7 @@ func (r *router) text(ctx context.Context, tx *core.Tx, sc core.SessionContext, 
 	if e.Tier == "coordinator" || e.Tier == "lead" {
 		return r.e.Orch.RecordReply(ctx, tx, e, *ev.Text)
 	}
-	return tx.EmitActivity(ctx, e.ProjectID, e.WorkThreadID(), e.Name, clip(*ev.Text, 300))
+	return tx.EmitActivity(ctx, e.ProjectID, e.WorkThreadID(), e.Name, msg.Text{Key: clip(*ev.Text, 300)})
 }
 
 func (r *router) sessionError(ctx context.Context, tx *core.Tx, sc core.SessionContext, ev *protocol.SessionEvent) error {
@@ -442,7 +443,7 @@ func (r *router) sessionError(ctx context.Context, tx *core.Tx, sc core.SessionC
 	if ev.Code != nil {
 		code = string(*ev.Code)
 	}
-	return r.e.Orch.PostError(ctx, tx, sc.Employee, fmt.Sprintf("%s 的会话出错（%s）：%s", sc.Employee.Name, code, val(ev.Message)))
+	return r.e.Orch.PostError(ctx, tx, sc.Employee, msg.T("{name} 的会话出错（{code}）：{detail}", "name", sc.Employee.Name, "code", code, "detail", val(ev.Message)))
 }
 
 func clip(s string, n int) string {

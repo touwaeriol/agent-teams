@@ -350,18 +350,19 @@ func (e *Engine) answerTx(ctx context.Context, tx *core.Tx, user store.User, q c
 	return e.applyRule(ctx, tx, q, ruleID)
 }
 
-var answerVerbs = map[string]string{"allow": "放行了", "allow_always": "总是允许", "deny": "拒绝了"}
+var answerVerbs = map[string]string{"allow": msg.K("放行了"), "allow_always": msg.K("总是允许"), "deny": msg.K("拒绝了")}
 
 // userActivity logs the user's decision in the thread's activity feed.
 func userActivity(ctx context.Context, tx *core.Tx, q core.Question, answer, reason string) error {
 	if q.ThreadID == nil {
 		return nil
 	}
-	line := fmt.Sprintf("%s %s 的请求 %s", answerVerbs[answer], q.Asker, Summary(q))
+	line := msg.T("{verb} {who} 的请求 {what}", "verb", msg.T(answerVerbs[answer]), "who", q.Asker, "what", Summary(q))
 	if reason != "" {
-		line += "（" + reason + "）"
+		line = msg.T("{verb} {who} 的请求 {what}（{reason}）", "verb", msg.T(answerVerbs[answer]), "who", q.Asker, "what", Summary(q),
+			"reason", reason)
 	}
-	return tx.EmitActivity(ctx, deref(q.ProjectID), q.ThreadID, "你", line)
+	return tx.EmitActivity(ctx, deref(q.ProjectID), q.ThreadID, msg.K("你"), line)
 }
 
 // remember stores an "always allow" rule (sdk_update kept verbatim, destination → session).

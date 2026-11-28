@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 )
 
@@ -169,9 +170,9 @@ func (s *Scheduler) passed(ctx context.Context, tx *core.Tx, th core.Thread, par
 
 func gateName(t core.Task) string {
 	if t.Kind == "decision" {
-		return "决策"
+		return msg.K("决策")
 	}
-	return "审查"
+	return msg.K("审查")
 }
 
 // rejected puts a reviewed task back into the queue as rework reserved for its member for

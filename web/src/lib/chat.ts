@@ -1,6 +1,7 @@
 // Turns a message list into what the chat column draws: user bubbles, speaker
 // articles (with the threads they opened as chips), and system lines.
 import type { MessageView } from "@/api/views";
+import { serverText } from "@/i18n";
 
 export type ChatBlock =
   | { kind: "user"; message: MessageView }
@@ -86,4 +87,9 @@ export function interleave<N>(blocks: ChatBlock[], inserts: { key: string; at: s
   }
   for (; i < rest.length; i += 1) out.push({ kind: "insert", key: rest[i].key, node: rest[i].node });
   return out;
+}
+
+/** What a message says in the page language: a platform line's meta.text, else its content. */
+export function messageText(m: Pick<MessageView, "content" | "meta">): string {
+  return m.meta?.text ? serverText(m.meta.text, m.content) : m.content;
 }

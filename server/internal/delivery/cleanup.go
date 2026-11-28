@@ -11,6 +11,7 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -201,7 +202,7 @@ func (e *Engine) cleaned(ctx context.Context, tx *core.Tx, node store.Node, meta
 		kept = append(kept, k.Path+"（"+k.Reason+"）")
 	}
 	return tx.EmitActivity(ctx, t.ProjectID, &t.ID, "platform",
-		fmt.Sprintf("节点 %s 上保留了有未推送改动的工作目录：%s", node.Name, strings.Join(kept, "、")))
+		msg.T("节点 {node} 上保留了有未推送改动的工作目录：{dirs}", "node", node.Name, "dirs", strings.Join(kept, "、")))
 }
 
 // Purge removes a project's directory on every node it used (project deletion).

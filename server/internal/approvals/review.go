@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 )
 
@@ -77,7 +78,7 @@ func (e *Engine) toLead(ctx context.Context, tx *core.Tx, sc core.SessionContext
 	}
 	e.orch.Touch(tx, sc.Employee.ID, "approval.open:"+deref(q.ApprovalID))
 	if err := tx.EmitActivity(ctx, sc.Employee.ProjectID, sc.Employee.WorkThreadID(), q.Asker,
-		fmt.Sprintf("请求 %s，等组长 %s 判断", Summary(q), lead.Name)); err != nil {
+		msg.T("请求 {what}，等组长 {lead} 判断", "what", Summary(q), "lead", lead.Name)); err != nil {
 		return err
 	}
 	_, err = e.orch.Deliver(ctx, tx, lead, orchestrator.Delivery{Text: LeadMessage(q), Kind: "mail", Priority: "next"})
@@ -155,7 +156,7 @@ func (e *Engine) LeadReview(ctx context.Context, tx *core.Tx, lead core.Employee
 	case "allow", "deny":
 		return e.leadDecides(ctx, tx, lead, q, decision, review)
 	case "ask_user":
-		return "已转给用户决定 " + q.ID, e.escalate(ctx, tx, q, review, lead.Name, "拿不准，转给你决定："+Summary(q)+"（"+reason+"）")
+		return "已转给用户决定 " + q.ID, e.escalate(ctx, tx, q, review, lead.Name, msg.T("拿不准，转给你决定：{what}（{reason}）", "what", Summary(q), "reason", reason))
 	}
 	return "", ErrBadDecision
 }
@@ -173,19 +174,19 @@ func (e *Engine) leadDecides(ctx context.Context, tx *core.Tx, lead core.Employe
 		return "", err
 	}
 	reason, _ := review["reason"].(string)
-	message, verb := "", "放行了"
+	message, verb := "", msg.K("放行了")
 	if decision == "deny" {
-		message, verb = "组长拒绝了这个操作："+reason, "拒绝了"
+		message, verb = "组长拒绝了这个操作："+reason, msg.K("拒绝了")
 	}
 	if err := e.resolve(ctx, tx, q, decision, DecidedLeadPrefix+lead.Name, message); err != nil {
 		return "", err
 	}
-	line := fmt.Sprintf("%s %s 的请求 %s（%s）", verb, q.Asker, Summary(q), reason)
+	line := msg.T("{verb} {who} 的请求 {what}（{reason}）", "verb", msg.T(verb), "who", q.Asker, "what", Summary(q), "reason", reason)
 	return verb + " " + q.ID, tx.EmitActivity(ctx, lead.ProjectID, lead.ThreadID, lead.Name, line)
 }
 
 // escalate turns a lead card into the user's card (ask_user or timeout) and logs why.
-func (e *Engine) escalate(ctx context.Context, tx *core.Tx, q core.Question, review map[string]any, who, line string) error {
+func (e *Engine) escalate(ctx context.Context, tx *core.Tx, q core.Question, review map[string]any, who string, line msg.Text) error {
 	q, err := setAudience(ctx, tx, q, "user", map[string]any{"review": review, "escalated_at": time.Now().UTC().Format(time.RFC3339Nano)})
 	if err != nil {
 		return err
@@ -240,7 +241,7 @@ func (e *Engine) leadTimedOut(ctx context.Context, conv, id string) {
 			return ignoreMissing(err)
 		}
 		review := map[string]any{"by": "policy:lead_timeout", "decision": "ask_user", "reason": "组长没有及时回应"}
-		return e.escalate(ctx, tx, q, review, "平台", fmt.Sprintf("组长 %v 没有及时判断，%s 的请求 %s 转给你决定", q.Detail["reviewer"], q.Asker, Summary(q)))
+		return e.escalate(ctx, tx, q, review, msg.K("平台"), msg.T("组长 {lead} 没有及时判断，{who} 的请求 {what} 转给你决定", "lead", fmt.Sprint(q.Detail["reviewer"]), "who", q.Asker, "what", Summary(q)))
 	})
 	if err != nil {
 		e.log.Warn("lead review timeout", "question", id, "err", err)

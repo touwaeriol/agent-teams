@@ -41,7 +41,9 @@ const GO_HELPERS = new Set(["fail", "failf", "failMsg", "invalid", "invalidf", "
 const HAN = /[\u4e00-\u9fff]/;
 const serverRoot = path.resolve(import.meta.dirname, "../../server/internal");
 
-function goKeys(src) {
+function goKeys(source) {
+  // "a" +\n "b" is one key at run time: join adjacent literals first.
+  const src = source.replace(/"[ \t]*\+[ \t]*\r?\n?[ \t]*"/g, "");
   const out = [];
   const stack = [];
   let ident = "";

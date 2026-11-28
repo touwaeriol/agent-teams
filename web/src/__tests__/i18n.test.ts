@@ -11,6 +11,7 @@ import ja from "@/i18n/locales/ja.json";
 import { applyChoice, currentLocale, detectLocale, resolveLocale, serverText, setLocale, syncAccountLocale } from "@/i18n";
 import { toApiError } from "@/api/client";
 import { statusBubble } from "@/lib/bubble";
+import { messageText } from "@/lib/chat";
 import { modeRows } from "@/lib/sessionControls";
 import { sessionText } from "@/components/app/session/session";
 
@@ -99,6 +100,13 @@ describe("choosing the language", () => {
 
 describe("server messages", () => {
   afterEach(() => setLocale("zh-CN"));
+
+  it("shows platform lines from meta.text, and old lines as stored", async () => {
+    await setLocale("en");
+    const text = { key: "{who}取消了定时任务「{name}」。", params: { who: "组长", name: "daily" }, nested: { who: { key: "组长" } } };
+    expect(messageText({ content: "组长取消了定时任务「daily」。", meta: { text } })).toBe('Lead cancelled the schedule "daily".'.replace("Lead", en["组长"]));
+    expect(messageText({ content: "旧的提示", meta: {} })).toBe("旧的提示");
+  });
 
   it("translates platform bubbles and mode labels, leaving employee text alone", async () => {
     await setLocale("en");

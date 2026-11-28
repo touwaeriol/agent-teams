@@ -45,6 +45,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "msg": {
+            "$ref": "#/components/schemas/Text"
+          },
           "text": {
             "type": "string"
           }
