@@ -33,7 +33,7 @@ const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS"]);
 const MEMORY_TOOLS = new Set(["Read", "Glob", "Grep", "Edit", "Write"]);
 /** Tools that walk a directory tree: their root must not contain a secret path. */
 const SEARCH_TOOLS = new Set(["Glob", "Grep"]);
-const DEFAULT_DENY_FLAGS = ["--output", "-o", "--ext-diff", "--textconv", "-c", "--exec-path", "--git-dir", "--work-tree"];
+const DEFAULT_DENY_FLAGS = ["--output", "-o", "--ext-diff", "--textconv", "--filters", "-c", "--exec-path", "--git-dir", "--work-tree", "--upload-pack"];
 const LIST_FLAGS = new Set(["--list", "-l", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--no-color", "--color"]);
 const LIST_FLAGS_WITH_ARG = new Set(["--contains", "--merged", "--no-merged", "--points-at"]);
 const METACHARS = /[;&|<>$`(){}\n\r\\]/;
@@ -231,7 +231,34 @@ function matchesRule(rule: string, argv: string[]): boolean {
   const [words, mode] = rule.split(":") as [string, string | undefined];
   const parts = words.trim().split(/\s+/);
   if (argv.length < parts.length || parts.some((p, i) => argv[i] !== p)) return false;
-  return mode === "list" ? isListForm(argv.slice(parts.length)) : true;
+  const rest = argv.slice(parts.length);
+  switch (mode) {
+    case "list":
+      return isListForm(rest);
+    case "fetch":
+      return isFetchForm(rest);
+    case "reflog":
+      return rest[0] !== "expire" && rest[0] !== "delete";
+    default:
+      return mode === undefined;
+  }
+}
+
+/** Options of git fetch / ls-remote that only read the remote or update remote-tracking refs. */
+const FETCH_FLAGS = new Set(["--prune", "-p", "--prune-tags", "-P", "--all", "--tags", "-t", "--no-tags", "-n", "--quiet", "-q",
+  "--verbose", "-v", "--dry-run", "--unshallow", "--heads", "-h", "--refs", "--symref", "--get-url", "--branches", "-b"]);
+const FETCH_FLAGS_WITH_VALUE = /^--(depth|deepen|shallow-since|sort)=[^=]+$/;
+
+/**
+ * `git fetch` / `git ls-remote` with a configured remote name and plain refs or patterns: no URLs,
+ * paths or refspecs with a destination (`a:b`, `+a`), so nothing but FETCH_HEAD and remote-tracking
+ * refs changes and no other host or transport is reached.
+ */
+function isFetchForm(args: string[]): boolean {
+  return args.every((a) => {
+    if (a.startsWith("-")) return FETCH_FLAGS.has(a) || FETCH_FLAGS_WITH_VALUE.test(a);
+    return a !== "" && !a.includes(":") && !/^[/.~+]/.test(a);
+  });
 }
 
 function isListForm(args: string[]): boolean {

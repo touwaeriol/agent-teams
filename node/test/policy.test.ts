@@ -238,6 +238,62 @@ describe("read-only bash argv policy", () => {
     });
   });
 
+  describe("git view commands (the platform's read-only allow list)", () => {
+    // Mirrors readOnlyBashAllow / readOnlyDenyFlags in server/internal/orchestrator/spec.go.
+    const FULL = {
+      mode: "argv" as const,
+      allow: ["git log", "git diff", "git show", "git status", "git rev-parse", "git ls-files", "git blame",
+        "git merge-base", "git branch:list", "git tag:list", "git remote:list", "git remote get-url", "git remote show",
+        "git fetch:fetch", "git ls-remote:fetch", "git reflog:reflog", "git describe", "git shortlog", "git show-ref",
+        "git for-each-ref", "git name-rev", "git rev-list", "git cat-file", "git count-objects", "git stash list", "git worktree list"],
+      deny_flags: ["--output", "-o", "--ext-diff", "--textconv", "--filters", "-c", "--exec-path", "--git-dir", "--work-tree", "--upload-pack"],
+      deny_metachar: true,
+    };
+    it.each([
+      ["git fetch", true],
+      ["git fetch origin", true],
+      ["git fetch --prune origin", true],
+      ["git fetch origin main", true],
+      ["git fetch --all --tags -q", true],
+      ["git fetch --depth=50 origin", true],
+      ["git ls-remote --heads origin", true],
+      ["git remote", true],
+      ["git remote -v", true],
+      ["git remote get-url origin", true],
+      ["git tag", true],
+      ["git tag --list", true],
+      ["git reflog", true],
+      ["git reflog show HEAD", true],
+      ["git describe --tags", true],
+      ["git stash list", true],
+      ["git worktree list", true],
+      ["git rev-list --count HEAD", true],
+      ["git cat-file -p HEAD", true],
+      ["git fetch origin main:main", false],
+      ["git fetch origin +refs/heads/x", false],
+      ["git fetch https://evil.example/x", false],
+      ["git fetch ext::sh", false],
+      ["git fetch /tmp/repo", false],
+      ["git fetch ../other", false],
+      ["git fetch --upload-pack=touch origin", false],
+      ["git fetch --upload-pa=touch origin", false],
+      ["git fetch --force origin", false],
+      ["git fetch --recurse-submodules origin", false],
+      ["git ls-remote --upload-pack=x origin", false],
+      ["git tag v1.0", false],
+      ["git tag -d v1.0", false],
+      ["git remote add x https://e", false],
+      ["git remote remove origin", false],
+      ["git reflog expire --all", false],
+      ["git reflog delete HEAD@{1}", false],
+      ["git cat-file --filters HEAD:a", false],
+      ["git stash pop", false],
+      ["git worktree add x", false],
+    ])("%s → %s", (cmd, ok) => {
+      expect(bashDecision(FULL, cmd) === null).toBe(ok);
+    });
+  });
+
   it("denies bash entirely without a policy", () => {
     expect(bashDecision(null, "git log")).not.toBeNull();
   });

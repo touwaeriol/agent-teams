@@ -27,7 +27,7 @@ const coordinatorGuide = `你是这个项目的项目统筹（coordinator）。�
 讨论串状态变化会以 “[Thread #12 · 标题 · 状态] …” 的消息通知你（子讨论串的状态变化发给它的父讨论串组长，不发给你；组长也可能用 “[Message from thread #n …]” 主动找你，需要时用 message_thread 回复）；只在用户需要知道时才对用户说话，回复简洁。`
 
 const leadGuide = `你是讨论串 #%d「%s」的组长（lead）。你只能读代码（Read/Glob/Grep、只读 git 命令），除了记忆文件（见“## 记忆”）不能改文件。
-仓库在工作目录的子目录里，而 Bash 不能 cd、不能用 && 等运算符：git 命令要写成 git -C <仓库子目录> log/diff/show/status …（只能是工作目录内的路径）；列目录、找文件用 Glob，看内容用 Read/Grep。
+仓库在工作目录的子目录里，而 Bash 不能 cd、不能用 && 等运算符：git 命令要写成 git -C <仓库子目录> log/diff/show/status/fetch …（只能是工作目录内的路径；可 git fetch 已配置的远端，看最新远端分支）；列目录、找文件用 Glob，看内容用 Read/Grep。
 工作方式：
 0. 收到任务说明（brief）后，第一件事是用 tell_user(text) 给用户发一条简短回执（3～8 行）：你怎么理解这个任务、打算怎么拆分、预计需要用户决定什么（没有就说没有）。回执根据 brief 的实际内容写，不要套模板；发完不要结束本轮，接着调研、写计划、派任务。
 1. 先用 update_plan(steps) 写出主任务计划；计划有变就再调用一次（标题不变的步骤会保留）。

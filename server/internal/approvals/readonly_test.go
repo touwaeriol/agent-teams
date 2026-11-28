@@ -22,7 +22,9 @@ func TestReadOnlyCommandAllows(t *testing.T) {
 		"ls *.go", "cat src/*.ts", "wc -l web/src/*.tsx", "grep -n foo *.md", "git log --oneline -- 'src/*.go'",
 		"rg -g '*.go' foo", "git diff --stat", "git log --output-indicator-new=+",
 		"git -C owner__repo log --oneline -5", "git -C owner__repo status", "git -Cowner__repo diff", "git -C a -C b show HEAD",
-		"git -C owner__repo branch -a",
+		"git -C owner__repo branch -a", "git fetch", "git fetch --prune origin", "git -C a fetch origin main", "git ls-remote --heads origin",
+		"git remote -v", "git remote get-url origin", "git tag", "git tag -l", "git reflog", "git describe --tags", "git stash list",
+		"git worktree list", "git rev-list --count HEAD", "git cat-file -p HEAD",
 	} {
 		if !ReadOnlyCommand("Bash", bash(cmd)) {
 			t.Errorf("should allow %q", cmd)
@@ -48,7 +50,11 @@ func TestReadOnlyCommandRefusesWrites(t *testing.T) {
 		"find . -execdir sh ;", "find . -okdir rm {} +", "find . -fprintf out x", "find . -fls out",
 		"git branch --list x", "git -c core.pager=sh log",
 		"git -C ../x log", "git -C a/../.. log", "git -C ~ log", "git -C a push", "git -C a branch new", "git -C", "git -C a",
-		"git -C a -c core.pager=sh log", "git -C a log --output=x", "git --no-pager log", "FOO=1 ls", "ls\tsrc;id",
+		"git -C a -c core.pager=sh log", "git -C a log --output=x",
+		"git fetch origin main:main", "git fetch origin +x", "git fetch https://e/x", "git fetch ext::sh", "git fetch ./x",
+		"git fetch --upload-pack=x origin", "git fetch --force origin", "git ls-remote --upload-pa=x origin", "git tag v1",
+		"git tag -d v1", "git remote add x y", "git reflog expire --all", "git cat-file --filters HEAD:a", "git stash pop",
+		"git worktree add x", "git --no-pager log", "FOO=1 ls", "ls\tsrc;id",
 	} {
 		if ReadOnlyCommand("Bash", bash(cmd)) {
 			t.Errorf("must not allow %q", cmd)
