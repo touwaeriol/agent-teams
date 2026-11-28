@@ -68,12 +68,12 @@ func TestMemoryTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	sys := *open.Claude.SystemAppend
-	for _, want := range []string{"## 项目指令", "回答都以【测】开头", "## 用户记忆", "- 回复都用中文", "## 项目记忆", "### MEMORY.md", "- [testing.md](testing.md) — 怎么跑测试", "memory_write(name, description, content)"} {
+	for _, want := range []string{"## Project instructions", "回答都以【测】开头", "## User memory", "- 回复都用中文", "## Project memory", "### MEMORY.md", "- [testing.md](testing.md) — 怎么跑测试", "memory_write(name, description, content)"} {
 		if !strings.Contains(sys, want) {
 			t.Fatalf("new lead prompt misses %q:\n%s", want, sys)
 		}
 	}
-	ins, lang, mem := strings.Index(sys, "## 项目指令"), strings.Index(sys, "## 回复语言"), strings.Index(sys, "## 项目记忆")
+	ins, lang, mem := strings.Index(sys, "## Project instructions"), strings.Index(sys, "## Reply language"), strings.Index(sys, "## Project memory")
 	if lang < ins || mem < lang || ins < 0 {
 		t.Fatalf("project instructions are not ahead of the rest: 项目指令=%d 回复语言=%d 项目记忆=%d", ins, lang, mem)
 	}

@@ -38,7 +38,7 @@ func TestSessionLocalFolder(t *testing.T) {
 		t.Fatalf("cwd %q", open.Cwd)
 	}
 	sys := *open.Claude.SystemAppend
-	if !strings.Contains(sys, "本地文件夹") || strings.Contains(sys, "git push") || strings.Contains(sys, "gh pr create") {
+	if !strings.Contains(sys, "local folder") || strings.Contains(sys, "git push") || strings.Contains(sys, "gh pr create") {
 		t.Fatalf("local session prompt:\n%s", sys)
 	}
 	emp.send(protocol.TypeSessionDelivered, protocol.SessionDelivered{SessionID: protocol.SessionID(emp.session), MsgID: open.FirstMessage.MsgID})

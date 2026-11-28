@@ -121,7 +121,7 @@ func deliveryTwoRepos(t *testing.T, webhook bool) {
 	lead, leadOpen := expectOpen(t, w, n, "lead-1")
 	leadPreps := prepares(t, w, n, 2)
 	assertLeadCheckouts(t, leadOpen, leadPreps)
-	if !strings.Contains(*leadOpen.Claude.SystemAppend, "o/web：目录 ./o__web") || !strings.Contains(*leadOpen.Claude.SystemAppend, "仓库 o/web 的基准分支：dev") {
+	if !strings.Contains(*leadOpen.Claude.SystemAppend, "o/web: directory ./o__web") || !strings.Contains(*leadOpen.Claude.SystemAppend, "仓库 o/web 的基准分支：dev") {
 		t.Fatalf("lead prompt lacks the repositories / project context:\n%s", *leadOpen.Claude.SystemAppend)
 	}
 

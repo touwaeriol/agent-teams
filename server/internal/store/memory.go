@@ -399,7 +399,7 @@ func MemoryPrompt(ctx context.Context, q DB, s MemoryScope) (string, error) {
 		b.WriteString("### MEMORY.md\n" + index + "\n")
 	}
 	if other := unlinked(files, index); len(other) > 0 {
-		b.WriteString("\n其他记忆文件：\n" + strings.Join(other, "\n") + "\n")
+		b.WriteString("\nOther memory files:\n" + strings.Join(other, "\n") + "\n")
 	}
 	return strings.TrimSpace(b.String()), nil
 }
@@ -416,7 +416,7 @@ func clipIndex(content string) string {
 		out, cut = strings.ToValidUTF8(out[:memoryPromptBytes], ""), true
 	}
 	if cut {
-		out += "\n…（MEMORY.md 后面的内容没有载入，用 memory_read(\"MEMORY.md\") 读全文，并把它整理精简）"
+		out += "\n… (the rest of MEMORY.md was not loaded; read it in full with memory_read(\"MEMORY.md\") and tidy it up)"
 	}
 	return out
 }

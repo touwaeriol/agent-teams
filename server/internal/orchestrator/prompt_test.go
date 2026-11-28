@@ -14,7 +14,7 @@ import (
 func TestLeadReceiptPrompt(t *testing.T) {
 	th := core.Thread{No: 3, Title: "登录", Brief: "修登录", Branch: "thread/3-x"}
 	g := guide(core.Employee{Tier: "lead"}, &th)
-	for _, want := range []string{"tell_user", "回执", "3～8 行", "怎么理解", "怎么拆分", "需要用户决定", "不要结束本轮"} {
+	for _, want := range []string{"tell_user", "receipt", "3–8 lines", "how you understand", "how you plan to split", "the user to decide", "do not end the turn"} {
 		if !strings.Contains(g, want) {
 			t.Fatalf("lead guide lacks %q", want)
 		}
@@ -37,7 +37,7 @@ func TestLeadReceiptPrompt(t *testing.T) {
 func TestMemberNotesPrompt(t *testing.T) {
 	th := core.Thread{No: 3, Title: "登录", Branch: "thread/3-x"}
 	g := guide(core.Employee{Tier: "member", Name: "dev-1", Role: "dev"}, &th)
-	for _, want := range []string{".agent-notes/<任务id>.md", "report_progress", "任务锚点"} {
+	for _, want := range []string{".agent-notes/<task id>.md", "report_progress", "task anchor"} {
 		if !strings.Contains(g, want) {
 			t.Fatalf("member guide lacks %q", want)
 		}
@@ -65,20 +65,20 @@ func TestReplyLanguagePrompt(t *testing.T) {
 	}
 	for _, c := range cases {
 		with := strings.Join(leadingSections(c.e, c.t, "使用中文进行沟通"), "\n\n")
-		ins, lang, role := strings.Index(with, "## 项目指令"), strings.Index(with, "## 回复语言"), strings.Index(with, "## 岗位说明")
+		ins, lang, role := strings.Index(with, "## Project instructions"), strings.Index(with, "## Reply language"), strings.Index(with, "## Role instructions")
 		if ins < 0 || lang < ins || role < lang {
 			t.Fatalf("%s: order 项目指令=%d 回复语言=%d 岗位说明=%d:\n%s", c.name, ins, lang, role, with)
 		}
 		without := strings.Join(leadingSections(c.e, c.t, ""), "\n\n")
-		if strings.Contains(without, "## 项目指令") || !strings.Contains(without, "## 回复语言") || !strings.Contains(without, "平台默认中文") {
+		if strings.Contains(without, "## Project instructions") || !strings.Contains(without, "## Reply language") || !strings.Contains(without, "default is Chinese") {
 			t.Fatalf("%s: no default language rule:\n%s", c.name, without)
 		}
-		for _, want := range []string{"回合结尾", "tell_user", "complete_task", "send_message", "ask_lead", "不代表要用英文回复"} {
+		for _, want := range []string{"end of each turn", "tell_user", "complete_task", "send_message", "ask_lead", "does not mean you should reply in English"} {
 			if !strings.Contains(without, want) {
 				t.Fatalf("%s: language rule lacks %q", c.name, want)
 			}
 		}
-		if lead := strings.Contains(without, "不是控制台日志"); lead != (c.e.Tier != "member") {
+		if lead := strings.Contains(without, "not a console log"); lead != (c.e.Tier != "member") {
 			t.Fatalf("%s: end-of-turn emphasis %v", c.name, lead)
 		}
 	}

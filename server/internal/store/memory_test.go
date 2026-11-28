@@ -63,7 +63,7 @@ func TestMemoryFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompt, _ := store.MemoryPrompt(ctx, q, store.ProjectMemory(pid))
-	if !strings.Contains(prompt, "### MEMORY.md\n# 项目记忆\n- 用户喜欢小 PR") || !strings.Contains(prompt, "其他记忆文件：\n- build.md — 构建步骤") {
+	if !strings.Contains(prompt, "### MEMORY.md\n# 项目记忆\n- 用户喜欢小 PR") || !strings.Contains(prompt, "Other memory files:\n- build.md — 构建步骤") {
 		t.Fatalf("prompt %q", prompt)
 	}
 	if err := store.DeleteMemoryFile(ctx, q, store.ProjectMemory(pid), "MEMORY.md", "user"); !store.IsMemoryError(err) {
