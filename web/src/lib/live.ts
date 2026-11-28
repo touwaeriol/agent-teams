@@ -1,5 +1,6 @@
 // Live progress of a thread, pure and unit-tested: what each employee is doing right now,
 // how far its tasks are, and how long it has been running.
+import { statusBubble } from "@/lib/bubble";
 import { $t } from "@/i18n";
 import type { EmployeeBrief, TaskView, ThreadView } from "@/api/views";
 
@@ -10,7 +11,7 @@ import type { EmployeeBrief, TaskView, ThreadView } from "@/api/views";
  */
 export function queueReason(m: Pick<EmployeeBrief, "status">): string {
   const s = m.status;
-  return s?.state === "queued" && s.substate === "no_runtime" ? (s.bubble ?? "") : "";
+  return s?.state === "queued" && s.substate === "no_runtime" ? statusBubble(s.bubble) : "";
 }
 
 /** States in which an employee is actively working (spinner / pulse). */
@@ -115,6 +116,6 @@ export function liveLine(t: Pick<ThreadView, "members" | "status" | "counts" | "
   if (t.status === "paused") return $t("已暂停");
   const m = featured(t);
   if (!m?.status || m.status.state === "idle") return "";
-  const doing = m.status.bubble ? ` · ${m.status.bubble}` : "";
+  const doing = m.status.bubble ? ` · ${statusBubble(m.status.bubble)}` : "";
   return `${m.name} ${stateLabel(m)}${doing}`;
 }

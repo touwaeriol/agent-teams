@@ -1,4 +1,5 @@
 // What the /status and /context panels show, pure and unit-tested.
+import { statusBubble } from "@/lib/bubble";
 import { $t } from "@/i18n";
 import type { components } from "@/api/schema";
 import type { CoordinatorView, EmployeeBrief, OverviewView } from "@/api/views";
@@ -24,7 +25,7 @@ export interface StatusSummary {
 
 const ACTIVE = new Set(["running", "waiting", "queued"]);
 
-const row = (e: EmployeeBrief, where: string): BusyRow => ({ name: e.name, where, doing: e.status?.bubble || stateLabel(e) });
+const row = (e: EmployeeBrief, where: string): BusyRow => ({ name: e.name, where, doing: statusBubble(e.status?.bubble) || stateLabel(e) });
 
 /** /status: who is working now, open cards and reviews, nodes online. */
 export function statusSummary(o: Pick<OverviewView, "threads" | "waiting" | "nodes">, coordinator?: CoordinatorView): StatusSummary {

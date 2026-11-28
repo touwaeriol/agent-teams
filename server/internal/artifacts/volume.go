@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
@@ -56,7 +57,7 @@ func (s Store) folder(ctx context.Context, q store.DB, deliverableID string) (fo
 
 // ErrFolderNotReady: the owner's shared folder is still being switched on (or failed and waits for
 // the next attempt); deliverables are stored only there.
-var ErrFolderNotReady = errors.New("共享文件夹还在开通中，交付物暂时存不进去，请稍后再发布")
+var ErrFolderNotReady = msg.Err("共享文件夹还在开通中，交付物暂时存不进去，请稍后再发布")
 
 // Save stores the files of one version in the owner's shared folder (the rows keep only
 // metadata). Only a console without a shared folder configured (local development) keeps them in

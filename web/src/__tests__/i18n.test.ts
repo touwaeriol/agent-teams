@@ -10,6 +10,8 @@ import ko from "@/i18n/locales/ko.json";
 import ja from "@/i18n/locales/ja.json";
 import { applyChoice, currentLocale, detectLocale, resolveLocale, serverText, setLocale, syncAccountLocale } from "@/i18n";
 import { toApiError } from "@/api/client";
+import { statusBubble } from "@/lib/bubble";
+import { modeRows } from "@/lib/sessionControls";
 import { sessionText } from "@/components/app/session/session";
 
 const LOCALES: Record<string, Record<string, string>> = { en, ko, ja };
@@ -97,6 +99,16 @@ describe("choosing the language", () => {
 
 describe("server messages", () => {
   afterEach(() => setLocale("zh-CN"));
+
+  it("translates platform bubbles and mode labels, leaving employee text alone", async () => {
+    await setLocale("en");
+    expect(statusBubble("排队等工位")).toBe("Waiting for a desk");
+    expect(statusBubble("领取 T-12")).toBe("Claiming T-12");
+    expect(statusBubble("正在改登录页")).toBe("正在改登录页");
+    const [row] = modeRows([{ id: "plan", label: "计划", hint: "只读代码、给出计划，不改文件", applies: "now" }]);
+    expect(row.label).toBe(en["计划"]);
+    expect(row.hint).toBe("Only reads code and gives a plan; doesn't change files");
+  });
 
   it("shows the server's key + params in the interface language", async () => {
     await setLocale("en");

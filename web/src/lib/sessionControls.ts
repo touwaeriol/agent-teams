@@ -2,7 +2,7 @@
 // as the server lists them (GET /api/projects/{pid}/session-controls, GET /api/session-options).
 // The server already filters the menus by CLI, model, role and node; this file only numbers,
 // groups, labels and colours them.
-import { $t } from "@/i18n";
+import { $t, serverText } from "@/i18n";
 import type { components } from "@/api/schema";
 
 export type ModeOption = components["schemas"]["ModeOption"];
@@ -53,7 +53,14 @@ export interface ModeRow extends ModeOption {
 export function modeRows(modes: ModeOption[] | null | undefined): ModeRow[] {
   const list = modes ?? [];
   const ordered = [...list.filter((m) => m.id !== "bypassPermissions"), ...list.filter((m) => m.id === "bypassPermissions")];
-  return ordered.map((m, i) => ({ ...m, key: i + 1, danger: m.id === "bypassPermissions" }));
+  // Labels and hints are Chinese message keys (orchestrator/controls.go modeLabels / modeHints).
+  return ordered.map((m, i) => ({
+    ...m,
+    label: serverText({ key: m.label }, m.label),
+    hint: serverText({ key: m.hint }, m.hint),
+    key: i + 1,
+    danger: m.id === "bypassPermissions",
+  }));
 }
 
 /** The row a digit key picks ("1".."9"), or undefined. */

@@ -22,6 +22,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/fanout"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/scheduler"
@@ -31,19 +32,19 @@ import (
 // Errors for tools and REST.
 var (
 	ErrNoRepo          = ghops.ErrNoRepo
-	ErrPRExists        = errors.New("这个讨论串已经开过 PR 了")
-	ErrNothingToPR     = errors.New("讨论串还没有把改动合并进任何仓库的讨论串分支")
-	ErrStandaloneNoPR  = errors.New("改动所在的是独立 Git 仓库，没有 PR：改动已经在讨论串分支上，直接调用 finish(summary) 结束讨论串")
-	ErrBaseNeedsRepo   = errors.New("项目有多个仓库要开 PR，指定 base 时请同时写 repo")
+	ErrPRExists        = msg.Err("这个讨论串已经开过 PR 了")
+	ErrNothingToPR     = msg.Err("讨论串还没有把改动合并进任何仓库的讨论串分支")
+	ErrStandaloneNoPR  = msg.Err("改动所在的是独立 Git 仓库，没有 PR：改动已经在讨论串分支上，直接调用 finish(summary) 结束讨论串")
+	ErrBaseNeedsRepo   = msg.Err("项目有多个仓库要开 PR，指定 base 时请同时写 repo")
 	ErrBaseUnknown     = errors.New("不知道这个仓库的起点分支：项目设置里还没记录，GitHub 暂时也查不到默认分支，稍后再试或在项目设置里填上")
-	ErrMergeInProgress = errors.New("合并队列里还有正在合并的条目，等它们处理完再开 PR")
-	ErrPlanOpen        = errors.New("还有主任务没有完成")
-	ErrNoPR            = errors.New("这个讨论串还没有 PR")
-	ErrNotInReview     = errors.New("这个讨论串现在不在等待验收（PR 可能已经合并或关闭，或者讨论串已经回到进行中），请刷新后再看")
+	ErrMergeInProgress = msg.Err("合并队列里还有正在合并的条目，等它们处理完再开 PR")
+	ErrPlanOpen        = msg.Err("还有主任务没有完成")
+	ErrNoPR            = msg.Err("这个讨论串还没有 PR")
+	ErrNotInReview     = msg.Err("这个讨论串现在不在等待验收（PR 可能已经合并或关闭，或者讨论串已经回到进行中），请刷新后再看")
 	ErrTaskNotReady    = errors.New("任务还不能进合并队列（需要成员先 complete_task）")
 	ErrNotPushed       = errors.New("这个仓库没有可合并的改动")
-	ErrBadURL          = errors.New("交付物链接必须是 http:// 或 https:// 开头的网址")
-	ErrPRKind          = errors.New("PR 由平台在讨论串上自动跟踪，不是交付物，不能用 kind=pr 发布")
+	ErrBadURL          = msg.Err("交付物链接必须是 http:// 或 https:// 开头的网址")
+	ErrPRKind          = msg.Err("PR 由平台在讨论串上自动跟踪，不是交付物，不能用 kind=pr 发布")
 )
 
 // mergeChannel relays merge queue hints between replicas.

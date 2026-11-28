@@ -1,4 +1,5 @@
 // State rules (office-layout.md §4.9): first matching rule wins.
+import { statusBubble } from "@/lib/bubble";
 import type { BubbleKind, EmployeeStatus, OfficeEmployee, SceneEvent, Sequence, StateRule } from "./types";
 
 export interface RuleSubject {
@@ -49,7 +50,7 @@ export interface Bubble {
 export function bubbleFor(status: EmployeeStatus, rule: StateRule, now: number, ttlMs: number): Bubble | undefined {
   const fromSetStatus = (status.cause ?? "").startsWith("set_status");
   const fresh = status.bubble && !(fromSetStatus && expired(status.since, now, ttlMs));
-  const text = fresh ? status.bubble! : rule.bubble ?? "";
+  const text = fresh ? statusBubble(status.bubble) : rule.bubble ?? "";
   if (!text) return undefined;
   const given = status.bubble_kind && status.bubble_kind !== "plain" ? status.bubble_kind : undefined;
   return { text, kind: given ?? rule.bubbleKind ?? "plain" };

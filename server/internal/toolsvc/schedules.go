@@ -52,7 +52,7 @@ func ptr[T any](v T) *T { return &v }
 
 func scheduleErr(err error) error {
 	if bad, ok := timers.IsInvalid(err); ok {
-		return refuse("%s", bad.Message)
+		return refuse("%s", bad.Text.String())
 	}
 	return err
 }

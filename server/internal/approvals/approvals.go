@@ -20,6 +20,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -28,8 +29,8 @@ import (
 // Errors for the REST layer.
 var (
 	ErrNotApproval = errors.New("这不是审批卡片")
-	ErrAnswered    = errors.New("已经处理过了")
-	ErrBadAnswer   = errors.New("审批只能回答 allow、allow_always 或 deny")
+	ErrAnswered    = msg.Err("已经处理过了")
+	ErrBadAnswer   = msg.Err("审批只能回答 allow、allow_always 或 deny")
 )
 
 // decided_by values must match the protocol pattern (user:… | policy:thread_auto |

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Forward limits: messages per forward, attachments they may carry in all, and how long a
@@ -23,10 +24,10 @@ const (
 
 // Forward errors (422 for the REST layer, explanations for the coordinator).
 var (
-	ErrForwardEmpty   = errors.New("请选择要转发的消息")
-	ErrForwardNotUser = errors.New("只能转发你自己在这个项目对话里发的消息")
-	ErrForwardTooMany = fmt.Errorf("一次最多转发 %d 条消息", MaxForwardMessages)
-	ErrForwardFiles   = fmt.Errorf("所选消息一共带了太多附件（最多 %d 个），请少选几条", MaxForwardAttachments)
+	ErrForwardEmpty   = msg.Err("请选择要转发的消息")
+	ErrForwardNotUser = msg.Err("只能转发你自己在这个项目对话里发的消息")
+	ErrForwardTooMany = msg.Err("一次最多转发 {n} 条消息", "n", MaxForwardMessages)
+	ErrForwardFiles   = msg.Err("所选消息一共带了太多附件（最多 {n} 个），请少选几条", "n", MaxForwardAttachments)
 )
 
 // ForwardRequest forwards the user's own project-chat messages to a thread's lead.

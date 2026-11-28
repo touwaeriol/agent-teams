@@ -2,12 +2,12 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -111,7 +111,7 @@ func (o *Orchestrator) ProjectRepo(ctx context.Context, projectID, repo string) 
 }
 
 // ErrUnknownRepo means a tool named a repository the project does not bind.
-var ErrUnknownRepo = errors.New("项目没有绑定这个仓库")
+var ErrUnknownRepo = msg.Err("项目没有绑定这个仓库")
 
 func matchRepo(p store.Project, repo string) (string, error) {
 	want := strings.TrimSuffix(strings.Trim(strings.TrimSpace(repo), "/"), ".git")

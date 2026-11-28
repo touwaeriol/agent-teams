@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -33,7 +34,7 @@ func (r *Runner) Update(ctx context.Context, tx *core.Tx, cur Schedule, in Sched
 // Cancel ends an active schedule (an agent's schedule_cancel); its pending job does nothing.
 func (r *Runner) Cancel(ctx context.Context, tx *core.Tx, s Schedule) error {
 	if s.Status != StatusActive {
-		return ErrInvalid{"status", "这个定时任务已经结束了"}
+		return invalid("status", "这个定时任务已经结束了")
 	}
 	return endSchedule(ctx, tx, s, StatusCancelled, r.Now())
 }
@@ -48,7 +49,7 @@ func (r *Runner) Fire(ctx context.Context, s Schedule, owner string) error {
 		p, err := r.deliver(ctx, tx, cur, owner, r.Now(), false)
 		var skip skipped
 		if errors.As(err, &skip) {
-			return ErrInvalid{"id", skip.Error()}
+			return ErrInvalid{"id", msg.T(string(skip))}
 		}
 		if err != nil {
 			return err
@@ -136,14 +137,14 @@ func (r *Runner) tryDeliver(ctx context.Context, tx *core.Tx, s Schedule, planne
 		return posted{}, err
 	}
 	if archived {
-		return posted{}, skipped("项目已归档，没有发出")
+		return posted{}, skipped(msg.K("项目已归档，没有发出"))
 	}
 	pending, err := previousPending(ctx, tx, s.ID, now)
 	if err != nil {
 		return posted{}, err
 	}
 	if pending {
-		return posted{}, skipped("上一次的消息还没送到，这次合并跳过")
+		return posted{}, skipped(msg.K("上一次的消息还没送到，这次合并跳过"))
 	}
 	var p posted
 	err = tx.Savepoint(ctx, func(sub *core.Tx) error {
@@ -246,9 +247,9 @@ func (r *Runner) deliverLead(ctx context.Context, tx *core.Tx, s Schedule, text,
 	}
 	switch {
 	case t.Status == "archived":
-		return posted{ended: s.CreatedBy == ByLead}, skipped("讨论串已归档，没有唤醒组长")
+		return posted{ended: s.CreatedBy == ByLead}, skipped(msg.K("讨论串已归档，没有唤醒组长"))
 	case (t.Status == "done" || t.Status == "failed") && s.CreatedBy == ByLead:
-		return posted{ended: true}, skipped("讨论串已结束，组长自己设的唤醒取消")
+		return posted{ended: true}, skipped(msg.K("讨论串已结束，组长自己设的唤醒取消"))
 	}
 	if err := r.orch.Reopen(ctx, tx, t, orchestrator.ReopenBySchedule); err != nil {
 		return posted{}, err

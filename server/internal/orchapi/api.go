@@ -181,15 +181,14 @@ func fail(err error, notFound string) error {
 	}
 	for _, m := range errorMap {
 		if errors.Is(err, m.err) {
-			detail := err.Error()
 			if m.status == 404 {
-				detail = notFound
+				return httpapi.Fail(m.status, m.code, notFound)
 			}
-			return httpapi.Fail(m.status, m.code, detail)
+			return httpapi.FailErr(m.status, m.code, err)
 		}
 	}
 	if ghops.Status(err) > 0 {
-		return httpapi.Fail(http.StatusBadGateway, "github", err.Error())
+		return httpapi.FailErr(http.StatusBadGateway, "github", err)
 	}
 	return err
 }

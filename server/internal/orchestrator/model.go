@@ -7,6 +7,7 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -30,7 +31,7 @@ type ModelChange struct {
 
 // ErrFixedModel refuses /model for the coordinator and thread leads: their model is set in their
 // role or in the project (Model).
-var ErrFixedModel = errors.New("统筹和组长不能用 /model 切换模型，请在岗位配置或项目设置里改")
+var ErrFixedModel = msg.Err("统筹和组长不能用 /model 切换模型，请在岗位配置或项目设置里改")
 
 // ModelResult lists the employees changed and the ones left alone.
 type ModelResult struct {

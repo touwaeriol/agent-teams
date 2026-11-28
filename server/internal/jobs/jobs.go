@@ -12,7 +12,6 @@ package jobs
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/riverqueue/river"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -68,7 +68,7 @@ type Job struct {
 }
 
 // ErrUnknown is a job name nobody registered.
-var ErrUnknown = errors.New("没有这个后台任务")
+var ErrUnknown = msg.Err("没有这个后台任务")
 
 // Registry holds the tasks of this process and the River client that runs them (and the other
 // River jobs, whose workers are added through Workers before Build).

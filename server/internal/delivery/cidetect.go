@@ -2,7 +2,6 @@ package delivery
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Workflow is one .github/workflows file and its push branch filters.
@@ -39,7 +39,7 @@ type Detection struct {
 }
 
 // ErrNoWorkflow means there is no workflow with a push trigger to extend.
-var ErrNoWorkflow = errors.New("仓库里没有带 push 触发的 workflow，无法自动加触发条件")
+var ErrNoWorkflow = msg.Err("仓库里没有带 push 触发的 workflow，无法自动加触发条件")
 
 // ciRepo picks the repository a CI request is about ("" = the project's first one) and its default branch.
 func (e *Engine) ciRepo(ctx context.Context, projectID, slug string) (ghops.Repo, string, error) {

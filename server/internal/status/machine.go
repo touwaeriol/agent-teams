@@ -4,7 +4,11 @@
 // the project's event seq and pushed as SSE "status" events.
 package status
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
+)
 
 // Facts are what the state is derived from.
 type Facts struct {
@@ -93,14 +97,14 @@ func Category(tool string) string {
 func defaultBubble(d Decision, summary, taskID string) (string, string) {
 	switch d.State {
 	case "raising_hand":
-		return "等你处理", "ask"
+		return msg.K("等你处理"), "ask"
 	case "broken":
-		return "出错了", "error"
+		return msg.K("出错了"), "error"
 	case "queued":
 		if d.Substate == SubstateNoRuntime {
 			return d.Note, "ask"
 		}
-		return "排队等工位", "plain"
+		return msg.K("排队等工位"), "plain"
 	case "claiming":
 		return "领取 " + taskID, "plain"
 	case "typing", "reading", "running":

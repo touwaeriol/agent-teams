@@ -35,9 +35,9 @@ for (const f of files) {
 }
 
 // Server messages: Chinese string literals inside calls of the error / message helpers, in
-// server/internal/httpapi and in any Go file that imports internal/msg. A small Go tokenizer
+// server/internal/httpapi and in any Go file that imports internal/msg or internal/httpapi. A small Go tokenizer
 // (comments, raw strings, runes) tracks which call or composite literal each string sits in.
-const GO_HELPERS = new Set(["fail", "failf", "failMsg", "invalid", "invalidf", "invalidField", "storeErr", "storeErrMsg", "FieldError", "problem", "prob", "msg.T", "msg.Err", "msg.Wrap", "msg.K"]);
+const GO_HELPERS = new Set(["fail", "failf", "failMsg", "invalid", "invalidf", "invalidField", "storeErr", "storeErrMsg", "FieldError", "problem", "prob", "msg.T", "msg.Err", "msg.Wrap", "msg.K", "httpapi.Fail", "httpapi.Failf", "httpapi.Invalid", "httpapi.Invalidf", "httpapi.StoreError"]);
 const HAN = /[\u4e00-\u9fff]/;
 const serverRoot = path.resolve(import.meta.dirname, "../../server/internal");
 
@@ -96,7 +96,7 @@ if (fs.existsSync(serverRoot)) walkGo(serverRoot);
 else console.log("server/ not found: server messages skipped");
 for (const f of goFiles) {
   const src = fs.readFileSync(f, "utf8");
-  if (!f.includes(`${path.sep}httpapi${path.sep}`) && !src.includes('internal/msg"')) continue;
+  if (!f.includes(`${path.sep}httpapi${path.sep}`) && !src.includes('internal/msg"') && !src.includes('internal/httpapi"')) continue;
   for (const k of goKeys(src)) keys.add(k);
 }
 

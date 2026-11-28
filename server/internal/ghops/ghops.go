@@ -19,6 +19,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
 	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -36,7 +37,7 @@ const (
 )
 
 // ErrNoRepo means the project has no GitHub repository with a connection.
-var ErrNoRepo = errors.New("项目没有关联 GitHub 仓库")
+var ErrNoRepo = msg.Err("项目没有关联 GitHub 仓库")
 
 // ErrPATNarrow means a PAT cannot be narrowed to the read-only scope.
 var ErrPATNarrow = errors.New("个人令牌无法缩小为只读权限（建议改用 GitHub App 连接）")

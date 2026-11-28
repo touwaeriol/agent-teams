@@ -47,7 +47,7 @@ func (a *API) sessionProject(ctx context.Context, pid string) (store.User, store
 		return u, p, err
 	}
 	if p.Kind != "session" {
-		return u, p, httpapi.Fail(409, "not_session", orchestrator.ErrNotSession.Error())
+		return u, p, httpapi.FailErr(409, "not_session", orchestrator.ErrNotSession)
 	}
 	return u, p, nil
 }
@@ -81,7 +81,7 @@ func (a *API) setControls(ctx context.Context, in *setControlsInput) (*controlsO
 		Model: b.Model, Effort: b.Effort})
 	var bad *orchestrator.ControlError
 	if errors.As(err, &bad) {
-		return nil, httpapi.Invalid(bad.Field, bad.Message)
+		return nil, httpapi.InvalidMsg(bad.Field, bad.Text)
 	}
 	if err != nil {
 		return nil, fail(err, "没有这个会话")
@@ -116,11 +116,11 @@ func (a *API) sessionOptions(ctx context.Context, in *sessionOptionsInput) (*ses
 	}
 	i := slices.IndexFunc(roles, func(r store.Role) bool { return r.Tier == "member" && (in.Role == "" || r.Role == in.Role) })
 	if i < 0 {
-		return nil, httpapi.Invalid("role", "没有这个岗位："+in.Role)
+		return nil, httpapi.Invalidf("role", "没有这个岗位：{role}", "role", in.Role)
 	}
 	rt := strings.TrimSpace(in.Runtime)
 	if rt != "" && !slices.Contains(roles[i].RuntimeList(), rt) {
-		return nil, httpapi.Invalid("runtime", "这个岗位没有配置这个 agent："+rt)
+		return nil, httpapi.Invalidf("runtime", "这个岗位没有配置这个 agent：{runtime}", "runtime", rt)
 	}
 	out, err := a.e.Orch.SessionOptionsFor(ctx, u.ID, roles[i], rt, strings.TrimSpace(in.Model))
 	if err != nil {

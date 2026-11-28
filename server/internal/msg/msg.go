@@ -72,14 +72,18 @@ func Wrap(cause error, key string, kv ...any) error { return &Error{Text: T(key,
 func K(key string) string { return key }
 
 // Of returns the translatable message an error carries, or the error text as a plain key
-// (the web app shows an unknown key as it is).
+// (the web app shows an unknown key as it is). A message wrapped with more context
+// (fmt.Errorf("…: %w", e)) counts only when it is the whole text, so the context is never lost.
 func Of(err error) Text {
 	var e *Error
-	if errors.As(err, &e) {
+	if errors.As(err, &e) && e.Error() == err.Error() {
 		return e.Text
 	}
-	var m interface{ Msg() Text }
-	if errors.As(err, &m) {
+	var m interface {
+		error
+		Msg() Text
+	}
+	if errors.As(err, &m) && m.Error() == err.Error() {
 		return m.Msg()
 	}
 	return Text{Key: err.Error()}

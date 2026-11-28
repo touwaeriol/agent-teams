@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/touwaeriol/agent-teams/server/internal/msg"
@@ -39,5 +40,18 @@ func TestInvalidFieldCarriesText(t *testing.T) {
 	err := invalidField("role", msg.T("没有这个岗位：{role}", "role", "dev")).(*APIError)
 	if err.Detail != "没有这个岗位：dev" || err.Fields[0].Text == nil || err.Fields[0].Text.Params["role"] != "dev" {
 		t.Fatalf("got %+v", err)
+	}
+}
+
+// The helpers for extension routes (orchapi) carry the message key too.
+func TestExportedHelpersCarryText(t *testing.T) {
+	var e *APIError
+	if !errors.As(Invalidf("refs", "没有讨论串 #{no}", "no", 3), &e) || e.Message.Key != "没有讨论串 #{no}" ||
+		e.Detail != "没有讨论串 #3" || e.Fields[0].Text == nil {
+		t.Fatalf("Invalidf = %+v", e)
+	}
+	sentinel := msg.Err("节点不在线")
+	if !errors.As(FailErr(409, "node_offline", sentinel), &e) || e.Message.Key != "节点不在线" || e.Code != "node_offline" {
+		t.Fatalf("FailErr = %+v", e)
 	}
 }

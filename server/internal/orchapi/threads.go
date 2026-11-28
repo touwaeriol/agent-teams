@@ -335,7 +335,7 @@ func (a *API) changeStatus(ctx context.Context, tx *core.Tx, t core.Thread, next
 	case next == "archived":
 		return a.e.Orch.Archive(ctx, tx, t)
 	}
-	return httpapi.Fail(http.StatusConflict, "bad_state", "讨论串现在是 "+t.Status+"，不能改成 "+next)
+	return httpapi.Failf(http.StatusConflict, "bad_state", "讨论串现在是 {status}，不能改成 {next}", "status", t.Status, "next", next)
 }
 
 func (a *API) archiveThread(ctx context.Context, in *tidInput) (*threadOutput, error) {

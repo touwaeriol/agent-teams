@@ -2,7 +2,7 @@
 // 管理后台 · 后台任务: every scheduled task the console runs (all on River; built-in ones cannot be
 // deleted), its state and last run; run now, pause / resume, change the period (an interval or a
 // cron schedule); a job's recorded runs below it.
-import { $t } from "@/i18n";
+import { $t, serverText } from "@/i18n";
 import { computed, ref } from "vue";
 import { jobs as jobActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -58,9 +58,9 @@ const toggle = (name: string) => (open.value = open.value === name ? null : name
 <template>
   <AdminPage :title="$t('后台任务')" :description="$t('控制面板的定时任务，都在 River 上运行，由任意一个副本执行、同一时刻只跑一份。内置任务不能删除，可以暂停或修改周期（间隔或 cron）；暂停后只在手动运行时执行。')">
     <Loading v-if="list.isLoading.value" />
-    <Card v-for="j in jobs" :key="j.name" class="gap-2" :aria-label="j.title" data-job="">
+    <Card v-for="j in jobs" :key="j.name" class="gap-2" :aria-label="serverText({ key: j.title }, j.title)" data-job="">
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span class="text-[15px] font-semibold">{{ j.title }}</span>
+        <span class="text-[15px] font-semibold">{{ serverText({ key: j.title }, j.title) }}</span>
         <el-tag :type="jobState(j).type" size="small" disable-transitions>{{ jobState(j).label }}</el-tag>
         <el-tag v-if="j.kind === 'builtin'" type="info" size="small" effect="plain" disable-transitions>{{ $t("内置") }}</el-tag>
         <span class="text-xs text-muted-foreground">
@@ -71,7 +71,7 @@ const toggle = (name: string) => (open.value = open.value === name ? null : name
         <el-button size="small" :disabled="pause.isPending.value" @click="pause.mutate(j)">{{ j.paused ? $t("恢复") : $t("暂停") }}</el-button>
         <el-button size="small" @click="editPeriod(j)">{{ $t("修改周期") }}</el-button>
       </div>
-      <p class="text-[13px] leading-5 text-muted-foreground">{{ j.description }}</p>
+      <p class="text-[13px] leading-5 text-muted-foreground">{{ serverText({ key: j.description }, j.description) }}</p>
       <dl class="grid grid-cols-[84px_1fr] gap-y-1 text-[13px]">
         <dt class="text-muted-foreground">{{ $t("上次运行") }}</dt>
         <dd>
@@ -112,7 +112,7 @@ const toggle = (name: string) => (open.value = open.value === name ? null : name
 
     <FormDialog
       v-model:open="dialogOpen"
-      :title="$t('修改周期：{n}', { n: editing?.title ?? '' })"
+      :title="$t('修改周期：{n}', { n: editing ? serverText({ key: editing.title }, editing.title) : '' })"
       :submit-label="$t('保存')"
       :busy="setPeriod.isPending.value"
       @submit="save"

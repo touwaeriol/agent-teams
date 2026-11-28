@@ -2,9 +2,9 @@ package nodegw
 
 import (
 	"context"
-	"errors"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
 )
 
@@ -13,7 +13,7 @@ import (
 const FeatureContextDetail = "context_detail"
 
 // ErrContextDetailUnsupported: the session's node runs a daemon without context_detail.
-var ErrContextDetailUnsupported = errors.New("节点的守护进程版本太旧，不支持读取上下文细分：请先更新守护进程")
+var ErrContextDetailUnsupported = msg.Err("节点的守护进程版本太旧，不支持读取上下文细分：请先更新守护进程")
 
 // ContextDetailSupported reports whether the node is online with a daemon that reports context breakdowns.
 func (g *Gateway) ContextDetailSupported(nodeID string) bool {
