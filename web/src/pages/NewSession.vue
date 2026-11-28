@@ -5,6 +5,7 @@
 // the user's nodes), role (a template only), agent (one of the role's runtimes) and model, then
 // effort and permission mode. Node, role and agent are fixed once the session starts.
 // Enter sends (Shift+Enter: new line). The choices are remembered for the next session.
+import { $t } from "@/i18n";
 import { ChevronDown, FolderGit2 } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -103,9 +104,9 @@ const create = useAction(
 );
 function submit() {
   if (!message.value.trim() || create.isPending.value) return;
-  if (files.uploading.value) return void toast.warning("附件还在上传，传完再发送");
-  if (files.items.value.some((x) => x.error)) return void toast.error("有附件没有传上去，先移除它再发送");
-  if (!role.value) return void toast.error("团队里还没有成员岗位，先在 设置 → 团队 里添加一个");
+  if (files.uploading.value) return void toast.warning($t("附件还在上传，传完再发送"));
+  if (files.items.value.some((x) => x.error)) return void toast.error($t("有附件没有传上去，先移除它再发送"));
+  if (!role.value) return void toast.error($t("团队里还没有成员岗位，先在 设置 → 团队 里添加一个"));
   if (!validModel(model.value)) return void toast.error(MODEL_FORMAT_HINT);
   create.mutate();
 }
@@ -133,7 +134,7 @@ const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.valu
 <template>
   <div class="flex h-full min-h-0 flex-col bg-panel">
     <div class="flex flex-1 items-center justify-center px-6 text-center">
-      <p class="text-[15px] text-muted-foreground" data-testid="new-session-hint">要做点什么？可以选仓库，也可以不选，员工直接在节点上的本地文件夹里干。</p>
+      <p class="text-[15px] text-muted-foreground" data-testid="new-session-hint">{{ $t("要做点什么？可以选仓库，也可以不选，员工直接在节点上的本地文件夹里干。") }}</p>
     </div>
     <form class="mx-auto w-full max-w-[780px] shrink-0 px-4 pb-6" data-testid="new-session" @submit.prevent="submit">
       <div
@@ -147,8 +148,8 @@ const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.valu
           :autosize="{ minRows: 2, maxRows: 10 }"
           resize="none"
           autofocus
-          placeholder="描述任务或提出问题"
-          aria-label="要做什么"
+          :placeholder="$t('描述任务或提出问题')"
+          :aria-label="$t('要做什么')"
           class="at-bare-textarea px-1"
           @keydown="onKey"
         />
@@ -158,30 +159,30 @@ const reposText = computed(() => (branch.value.trim() ? `${reposLabel(repos.valu
             type="button"
             class="inline-flex h-7 min-w-0 max-w-[60%] items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
             data-testid="repos-chip"
-            :title="`仓库：${reposText}`"
+            :title="$t('仓库：{reposText}', { reposText })"
             @click="reposOpen = true"
           >
             <FolderGit2 class="size-3.5 shrink-0" />
             <span class="truncate">{{ reposText }}</span>
             <ChevronDown class="size-3 shrink-0" />
           </button>
-          <SendButton label="发送" class="ml-auto" :busy="create.isPending.value" :disabled="!ready" />
+          <SendButton :label="$t('发送')" class="ml-auto" :busy="create.isPending.value" :disabled="!ready" />
         </div>
       </div>
       <NewSessionOptions v-model:node="node" v-model:role="role" v-model:agent="agent" v-model:model="model" :nodes="nodeList" :roles="members" :auto="AUTO" class="mt-1.5 px-1">
         <NewSessionControls v-model:mode="mode" v-model:effort="effort" :role="role" :agent="agent" :model="model" />
       </NewSessionOptions>
     </form>
-    <el-dialog v-model="reposOpen" title="仓库" width="600px" class="at-dialog w-[calc(100%-2rem)] max-w-[600px]" append-to-body>
+    <el-dialog v-model="reposOpen" :title="$t('仓库')" width="600px" class="at-dialog w-[calc(100%-2rem)] max-w-[600px]" append-to-body>
       <div class="flex flex-col gap-4">
-        <p class="text-[13px] leading-5 text-muted-foreground">每个仓库是工作目录下的一个子文件夹，员工从选的分支切出自己的会话分支（session/…），改完推上去、开 PR。会话里随时可以增删。</p>
-        <p class="text-[13px] leading-5 text-muted-foreground" data-testid="repos-optional">仓库是可选的：一个都不选时，员工在节点上为这个会话建的本地文件夹里干活，文件只在那台机器上，会话固定在那台节点，点“已解决”后文件夹也保留，删除会话时才清理。</p>
+        <p class="text-[13px] leading-5 text-muted-foreground">{{ $t("每个仓库是工作目录下的一个子文件夹，员工从选的分支切出自己的会话分支（session/…），改完推上去、开 PR。会话里随时可以增删。") }}</p>
+        <p class="text-[13px] leading-5 text-muted-foreground" data-testid="repos-optional">{{ $t("仓库是可选的：一个都不选时，员工在节点上为这个会话建的本地文件夹里干活，文件只在那台机器上，会话固定在那台节点，点“已解决”后文件夹也保留，删除会话时才清理。") }}</p>
         <SessionRepos v-model="repos" />
-        <Field v-slot="{ id }" label="工作分支名（可选）" hint="不填就取标题里的英文，标题全是中文时用仓库名">
-          <el-input :id="id" v-model="branch" maxlength="60" placeholder="例如：fix-login-redirect" />
+        <Field v-slot="{ id }" :label="$t('工作分支名（可选）')" :hint="$t('不填就取标题里的英文，标题全是中文时用仓库名')">
+          <el-input :id="id" v-model="branch" maxlength="60" :placeholder="$t('例如：fix-login-redirect')" />
         </Field>
       </div>
-      <template #footer><el-button type="primary" @click="reposOpen = false">完成</el-button></template>
+      <template #footer><el-button type="primary" @click="reposOpen = false">{{ $t("完成") }}</el-button></template>
     </el-dialog>
   </div>
 </template>

@@ -1,5 +1,6 @@
 // Repositories of a project (shared by NewProject and the project settings): pure helpers for the
 // ordered list, the picker and each repository's start branch.
+import { $t } from "@/i18n";
 import type { GitConnectionView, GitRepoView, RepoItem } from "@/api/views";
 
 /** A project repository: a GitHub one (git_connection_id) or a standalone Git repository (git_repo_id,
@@ -16,7 +17,7 @@ export interface RepoRef {
 /** The picker's source value for standalone repositories (beside the GitHub connection ids). */
 export const STANDALONE = "standalone";
 
-export const REPOS_HINT = "起点分支：讨论串从这个分支开始，PR 也合回这里。新加的仓库用它的默认分支（保存时自动获取并记下来），可以随时改成别的分支，例如 develop。";
+export const REPOS_HINT = $t("起点分支：讨论串从这个分支开始，PR 也合回这里。新加的仓库用它的默认分支（保存时自动获取并记下来），可以随时改成别的分支，例如 develop。");
 
 /** owner/repo from a pasted GitHub URL or the text as typed. */
 export function normalizeRepo(text: string): string {
@@ -70,13 +71,13 @@ export function reposPayload(list: RepoRef[]): RepoRef[] {
 export function sourceLabel(item: RepoRef, connections: Pick<GitConnectionView, "id" | "login" | "name">[], gitRepos: Pick<GitRepoView, "id" | "provider">[]): string {
   if (item.git_repo_id) {
     const g = gitRepos.find((r) => r.id === item.git_repo_id);
-    return g ? `${PROVIDERS[g.provider] ?? "Git"} · 单独添加` : "仓库已删除";
+    return g ? $t("{n} · 单独添加", { n: PROVIDERS[g.provider] ?? "Git" }) : $t("仓库已删除");
   }
   const c = connections.find((x) => x.id === item.git_connection_id);
-  return c ? connectionLabel(c) : "连接已删除";
+  return c ? connectionLabel(c) : $t("连接已删除");
 }
 
-const PROVIDERS: Record<string, string> = { github: "GitHub", gitlab: "GitLab", gitea: "Gitea", bitbucket: "Bitbucket", generic: "自建 Git" };
+const PROVIDERS: Record<string, string> = { github: "GitHub", gitlab: "GitLab", gitea: "Gitea", bitbucket: "Bitbucket", generic: $t("自建 Git") };
 
 /** Picker rows for standalone repositories not already listed. */
 export function standaloneOptions(items: GitRepoView[], value: RepoRef[], currentProject?: string): RepoOption[] {
@@ -84,7 +85,7 @@ export function standaloneOptions(items: GitRepoView[], value: RepoRef[], curren
     .filter((g) => !value.some((v) => v.git_repo_id === g.id || same(v.repo, g.slug)))
     .map((g) => {
       const used = (g.projects ?? []).filter((p) => p.id !== currentProject);
-      const note = used.length ? `已被 ${used.map((p) => p.name).join("、")} 使用` : g.access === "read" ? "只读" : "";
+      const note = used.length ? $t("已被 {used} 使用", { used: used.map((p) => p.name).join("、") }) : g.access === "read" ? $t("只读") : "";
       return { value: g.slug, usedBy: note, private: false, keywords: `${g.name} ${g.url}` };
     });
 }
@@ -103,7 +104,7 @@ export function isPatConnection(c: Pick<GitConnectionView, "kind"> | undefined):
  * short-lived token. Shown on the PAT connection card and when a project picks a PAT connection.
  */
 export const PAT_WARNING =
-  "使用 PAT 连接时，这个 PAT 会原样交给项目里的每个 AI 会话（组长和成员）用于 git/gh 操作。请使用只授权到本项目仓库、设置了过期时间的 fine-grained PAT；需要更严格的隔离请改用 GitHub App 连接（会话只拿到收窄过的短期令牌）。";
+  $t("使用 PAT 连接时，这个 PAT 会原样交给项目里的每个 AI 会话（组长和成员）用于 git/gh 操作。请使用只授权到本项目仓库、设置了过期时间的 fine-grained PAT；需要更严格的隔离请改用 GitHub App 连接（会话只拿到收窄过的短期令牌）。");
 
 export interface RepoOption {
   value: string;
@@ -119,7 +120,7 @@ export function repoOptions(items: RepoItem[], value: RepoRef[], currentProject?
     .filter((r) => !value.some((v) => same(v.repo, r.full_name)))
     .map((r) => {
       const used = (r.used_by_projects ?? []).filter((p) => p.id !== currentProject);
-      return { value: r.full_name, usedBy: used.length ? `已被 ${used.map((p) => p.name).join("、")} 使用` : "", private: Boolean(r.private), keywords: r.description ?? "" };
+      return { value: r.full_name, usedBy: used.length ? $t("已被 {used} 使用", { used: used.map((p) => p.name).join("、") }) : "", private: Boolean(r.private), keywords: r.description ?? "" };
     });
 }
 

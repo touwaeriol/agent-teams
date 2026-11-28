@@ -2,6 +2,7 @@
 // One role template: name and tier, count, menu (编辑详情 / 删除岗位), runtime, model (every tier,
 // typed by hand; "" = the project setting, then the built-in default) and nodes, the rule line,
 // look, skills, plugins and (members) permission mode. Emits patches; the page keeps the draft.
+import { $t } from "@/i18n";
 import { MoreHorizontal } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import type { RoleView } from "@/api/views";
@@ -30,7 +31,7 @@ const runtimeList = computed(() => roleRuntimes(props.role));
 function setRuntimes(list: Runtime[]) {
   if (!member.value) return;
   const patch = runtimesPatch(props.role, list);
-  if (!patch) return toast.info("至少选一种 agent");
+  if (!patch) return toast.info($t("至少选一种 agent"));
   emit("change", patch);
 }
 function save(r: RoleView) {
@@ -47,17 +48,17 @@ function save(r: RoleView) {
           <span class="text-base font-semibold">{{ roleName(role) }}</span>
           <span class="rounded-full px-2 py-0.5 text-[11px]" :style="{ background: level.bg, color: level.fg }">{{ level.label }}</span>
         </span>
-        <span class="text-[13px] leading-[21px] text-[#4A4843]">{{ role.description || "还没有职责说明。" }}</span>
+        <span class="text-[13px] leading-[21px] text-[#4A4843]">{{ role.description || $t("还没有职责说明。") }}</span>
       </div>
       <span class="flex items-center gap-1">
         <span class="whitespace-nowrap text-xs text-muted-foreground">{{ countText(role) }}</span>
         <DropdownMenu placement="bottom-end" @command="(c: string) => COMMANDS[c]?.()">
-          <button type="button" :aria-label="`${roleName(role)} 的菜单`" class="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-raised">
+          <button type="button" :aria-label="$t('{role} 的菜单', { role: roleName(role) })" class="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-raised">
             <MoreHorizontal class="size-4" />
           </button>
           <template #menu>
-            <el-dropdown-item command="edit">编辑详情</el-dropdown-item>
-            <el-dropdown-item v-if="member" command="remove" class="is-destructive">删除岗位</el-dropdown-item>
+            <el-dropdown-item command="edit">{{ $t("编辑详情") }}</el-dropdown-item>
+            <el-dropdown-item v-if="member" command="remove" class="is-destructive">{{ $t("删除岗位") }}</el-dropdown-item>
           </template>
         </DropdownMenu>
       </span>
@@ -68,17 +69,17 @@ function save(r: RoleView) {
         <el-select :model-value="runtimeList" multiple :disabled="!member" class="at-select-36 at-text-13" aria-label="agent" @update:model-value="setRuntimes">
           <el-option v-for="r in runtimesFor(role.tier)" :key="r.id" :value="r.id" :label="r.label" />
         </el-select>
-        <span v-if="runtimeList.length > 1" class="text-[11px] leading-4 text-muted-foreground">新会话按用量和会话数在几种 agent 间分摊</span>
+        <span v-if="runtimeList.length > 1" class="text-[11px] leading-4 text-muted-foreground">{{ $t("新会话按用量和会话数在几种 agent 间分摊") }}</span>
       </span>
       <span class="flex min-w-0 flex-col gap-1">
-        <span class="text-xs text-muted-foreground">模型</span>
+        <span class="text-xs text-muted-foreground">{{ $t("模型") }}</span>
         <span v-for="rt in runtimeList" :key="rt" class="flex min-w-0 flex-col gap-0.5">
           <span v-if="runtimeList.length > 1" class="text-[11px] text-muted-foreground">{{ runtimeLabel(rt) }}</span>
           <RoleModelSelect :runtime="rt" :roles="roles" :model-value="modelOf(role, rt)" @update:model-value="(model: string) => emit('change', modelPatch(role, rt, model))" />
         </span>
       </span>
       <span class="flex min-w-0 flex-col gap-1">
-        <span class="text-xs text-muted-foreground">可用节点</span>
+        <span class="text-xs text-muted-foreground">{{ $t("可用节点") }}</span>
         <NodePicker :model-value="role.node_ids ?? []" @update:model-value="(ids: string[]) => emit('change', { node_ids: ids })" />
       </span>
     </div>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** Read-only text to copy (commands, tokens). */
 import { Check, Copy } from "lucide-vue-next";
 import { ref } from "vue";
@@ -10,7 +11,7 @@ const copied = ref(false);
 async function copy() {
   await navigator.clipboard.writeText(props.text);
   copied.value = true;
-  toast.success("已复制");
+  toast.success($t("已复制"));
   setTimeout(() => (copied.value = false), 1500);
 }
 </script>
@@ -20,7 +21,7 @@ async function copy() {
     <pre class="scroll-thin overflow-x-auto whitespace-pre-wrap break-all p-3 pr-12 font-mono text-xs leading-5">{{ text }}</pre>
     <button
       type="button"
-      aria-label="复制"
+      :aria-label="$t('复制')"
       class="absolute right-1.5 top-1.5 flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-raised hover:text-foreground"
       @click="copy"
     >

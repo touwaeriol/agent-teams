@@ -1,6 +1,7 @@
 // Forwarding the user's own project-chat messages to a thread: the selection (shared by the
 // chat column and the bar that replaces the composer), the picker's groups and search, and
 // how a forwarded copy is drawn in the thread chat. Pure parts are unit-tested.
+import { $t } from "@/i18n";
 import { reactive } from "vue";
 import type { MessageView, ThreadView } from "@/api/views";
 import { groupThreads, type ListGroup } from "./threadList";
@@ -66,7 +67,7 @@ export function titleFrom(messages: Pick<MessageView, "content">[]): string {
     const line = m.content.split("\n").map((l) => l.trim()).find(Boolean);
     if (line) return [...line].slice(0, 40).join("");
   }
-  return "转发的消息";
+  return $t("转发的消息");
 }
 
 /** meta.forwarded_from of a copy in a thread chat. */
@@ -84,8 +85,8 @@ export interface ForwardedFrom {
 export function forwardLine(m: Pick<MessageView, "meta">): { text: string; note: string; anchor: number } | null {
   const f = m.meta?.forwarded_from;
   if (!f || f.index !== f.count - 1) return null;
-  const by = f.by === "coordinator" ? "（统筹转发）" : "";
-  return { text: `已从项目对话转发 ${f.count} 条消息${by}`, note: f.note ?? "", anchor: f.message_ids[0] ?? f.message_id };
+  const by = f.by === "coordinator" ? $t("（统筹转发）") : "";
+  return { text: $t("已从项目对话转发 {count} 条消息{by}", { count: f.count, by }), note: f.note ?? "", anchor: f.message_ids[0] ?? f.message_id };
 }
 
 /** The DOM id of a message in the chat column (the forward line links to it). */

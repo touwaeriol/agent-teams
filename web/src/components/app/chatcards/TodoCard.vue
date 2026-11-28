@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** The employee's TodoWrite checklist, updated in place; a spinner marks the item in progress. */
 import { ChevronDown, ChevronRight, Circle, CircleCheck, ListTodo } from "lucide-vue-next";
 import { computed, ref } from "vue";
@@ -14,18 +15,18 @@ const open = ref(true);
 </script>
 
 <template>
-  <section aria-label="待办清单" :class="cn(CARD, 'flex flex-col px-4 py-3')">
+  <section :aria-label="$t('待办清单')" :class="cn(CARD, 'flex flex-col px-4 py-3')">
     <button type="button" :aria-expanded="open" class="flex items-center gap-2 text-left text-[13px] text-muted-foreground" @click="open = !open">
       <ListTodo aria-hidden="true" class="size-4" :stroke-width="1.8" />
-      <span class="flex-1">{{ message.meta.employee ?? message.author }} 的待办 · {{ done }}/{{ todos.length }}{{ done === todos.length ? " 已完成" : "" }}</span>
+      <span class="flex-1">{{ message.meta.employee ?? message.author }} {{ $t("的待办 · {done}/{todosCount}", { done, todosCount: todos.length }) }}{{ done === todos.length ? $t(" 已完成") : "" }}</span>
       <ChevronDown v-if="open" class="size-3.5" />
       <ChevronRight v-else class="size-3.5" />
     </button>
     <ul v-if="open" class="mt-2.5 flex flex-col gap-1.5">
       <li v-for="(t, i) in todos" :key="i" class="flex items-start gap-2.5 text-sm leading-6">
-        <CircleCheck v-if="t.status === 'completed'" aria-label="已完成" class="mt-1 size-4 shrink-0 text-[#2E7D4F]" :stroke-width="1.8" />
-        <Spin v-else-if="t.status === 'in_progress'" color="#2F6FDB" :size="14" class="mt-[5px] shrink-0" label="进行中" />
-        <Circle v-else aria-label="未开始" class="mt-1 size-4 shrink-0 text-[#B7B3AA]" :stroke-width="1.8" />
+        <CircleCheck v-if="t.status === 'completed'" :aria-label="$t('已完成')" class="mt-1 size-4 shrink-0 text-[#2E7D4F]" :stroke-width="1.8" />
+        <Spin v-else-if="t.status === 'in_progress'" color="#2F6FDB" :size="14" class="mt-[5px] shrink-0" :label="$t('进行中')" />
+        <Circle v-else :aria-label="$t('未开始')" class="mt-1 size-4 shrink-0 text-[#B7B3AA]" :stroke-width="1.8" />
         <span :class="cn(t.status === 'completed' && 'text-muted-foreground line-through decoration-[#C9C5BC]', t.status === 'in_progress' && 'font-medium')">
           {{ t.status === "in_progress" && t.active_form ? t.active_form : t.content }}
         </span>

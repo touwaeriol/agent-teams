@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** A project model field: "" follows the roles, else any typed id (suggestions: the roles' models and common ids). */
 import ModelPicker from "@/components/app/models/ModelPicker.vue";
 import type { Runtime } from "@/lib/models";
 
-withDefaults(defineProps<{ value: string; label: string; runtime: Runtime; placeholder?: string }>(), { placeholder: "跟随岗位配置" });
+withDefaults(defineProps<{ value: string; label: string; runtime: Runtime; placeholder?: string }>(), { placeholder: $t("跟随岗位配置") });
 const emit = defineEmits<{ change: [value: string] }>();
 </script>
 

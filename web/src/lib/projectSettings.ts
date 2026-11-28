@@ -1,12 +1,13 @@
 // 项目设置 dialog: sections, the instructions limit, worktree choice, model and effort choices, usage numbers.
+import { $t } from "@/i18n";
 import { modelName } from "./models";
 
 export const SETTINGS_SECTIONS = [
-  { id: "general", label: "通用" },
-  { id: "memory", label: "记忆" },
-  { id: "environment", label: "环境" },
-  { id: "usage", label: "使用情况" },
-  { id: "advanced", label: "高级" },
+  { id: "general", label: $t("通用") },
+  { id: "memory", label: $t("记忆") },
+  { id: "environment", label: $t("环境") },
+  { id: "usage", label: $t("使用情况") },
+  { id: "advanced", label: $t("高级") },
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["id"];
@@ -20,8 +21,8 @@ export const INSTRUCTIONS_MAX = 16000;
 
 /** 环境 → 工作树: the two work modes the daemon implements (git worktree, or a full clone each). */
 export const WORKTREE_CHOICES = [
-  { value: "worktree" as const, label: "开启，使用工作树", desc: "每个节点克隆一份仓库，讨论串和每个成员各开一个 worktree：省磁盘、开工快，并行互不干扰。" },
-  { value: "clone" as const, label: "关闭，直接在检出目录工作", desc: "不用 worktree：每个员工一份完整克隆，直接在自己的检出目录里工作。最稳，但占磁盘。" },
+  { value: "worktree" as const, label: $t("开启，使用工作树"), desc: $t("每个节点克隆一份仓库，讨论串和每个成员各开一个 worktree：省磁盘、开工快，并行互不干扰。") },
+  { value: "clone" as const, label: $t("关闭，直接在检出目录工作"), desc: $t("不用 worktree：每个员工一份完整克隆，直接在自己的检出目录里工作。最稳，但占磁盘。") },
 ];
 
 export type WorkMode = (typeof WORKTREE_CHOICES)[number]["value"];
@@ -32,17 +33,17 @@ export function worktreeChoice(mode: string) {
 
 /** "跟随岗位设置" for an empty model override, else the model's name. */
 export function modelLabel(id: string): string {
-  if (!id) return "跟随岗位设置";
+  if (!id) return $t("跟随岗位设置");
   return modelName(id);
 }
 
 export const EFFORTS = [
-  { value: "", label: "跟随岗位" },
-  { value: "low", label: "低" },
-  { value: "medium", label: "中等" },
-  { value: "high", label: "高" },
-  { value: "xhigh", label: "超高" },
-  { value: "max", label: "最高" },
+  { value: "", label: $t("跟随岗位") },
+  { value: "low", label: $t("低") },
+  { value: "medium", label: $t("中等") },
+  { value: "high", label: $t("高") },
+  { value: "xhigh", label: $t("超高") },
+  { value: "max", label: $t("最高") },
 ] as const;
 
 export function effortLabel(value: string): string {

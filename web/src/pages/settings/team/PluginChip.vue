@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** A plugin to tick for a role; once ticked, a version picker (latest, or pin one). */
 import { Check } from "lucide-vue-next";
 import { computed } from "vue";
@@ -11,7 +12,7 @@ import { versionText } from "./team";
 const props = defineProps<{ plugin: PluginView; entry?: PluginRef }>();
 const emit = defineEmits<{ toggle: []; pin: [version: number] }>();
 const gone = computed(() => Boolean(props.entry) && resolvedVersion(props.plugin, props.entry!) === undefined);
-const label = computed(() => `${props.plugin.name}${props.plugin.builtin ? " · 内置" : ""}${props.plugin.enabled ? "" : " · 已停用"}`);
+const label = computed(() => $t("{name}{n}{n2}", { name: props.plugin.name, n: props.plugin.builtin ? $t(" · 内置") : "", n2: props.plugin.enabled ? "" : $t(" · 已停用") }));
 </script>
 
 <template>
@@ -20,13 +21,13 @@ const label = computed(() => `${props.plugin.name}${props.plugin.builtin ? " · 
     <el-select
       v-if="entry"
       :model-value="String(entry.version)"
-      :aria-label="`${plugin.name} 的版本`"
+      :aria-label="$t('{name} 的版本', { name: plugin.name })"
       :class="cn('at-select-28 at-select-fit', gone && 'at-select-bad')"
       popper-class="at-select-popper"
       @update:model-value="(v: string) => emit('pin', Number(v))"
     >
       <template #label>{{ versionText(entry.version, plugin.latest, gone) }}</template>
-      <el-option value="0" :label="`最新（v${plugin.latest}）`" />
+      <el-option value="0" :label="$t('最新（v{latest}）', { latest: plugin.latest })" />
       <el-option v-for="v in plugin.versions ?? []" :key="v.version" :value="String(v.version)" :label="`v${v.version}${v.manifest_version ? ` · ${v.manifest_version}` : ''}`" />
     </el-select>
   </span>

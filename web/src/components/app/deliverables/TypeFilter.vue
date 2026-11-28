@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { ChevronDown } from "lucide-vue-next";
 import DropdownMenu from "@/components/common/DropdownMenu.vue";
 import { cn } from "@/lib/utils";
@@ -11,7 +12,7 @@ const emit = defineEmits<{ change: [value: string] }>();
 <template>
   <DropdownMenu @command="(c: string) => emit('change', c)">
     <button type="button" class="flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] font-medium hover:bg-raised aria-expanded:bg-raised">
-      {{ value ? typeName(value) : "类型" }}
+      {{ value ? typeName(value) : $t("类型") }}
       <ChevronDown class="size-3.5 text-muted-foreground" />
     </button>
     <template #menu>

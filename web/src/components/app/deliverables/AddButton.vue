@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** “+ 添加”: pick files to upload into the library. */
 import { Plus } from "lucide-vue-next";
 import { ref } from "vue";
@@ -16,6 +17,6 @@ function picked(e: Event) {
 </script>
 
 <template>
-  <el-button type="primary" size="small" @click="input?.click()"><Plus /> 添加</el-button>
-  <input ref="input" type="file" multiple :accept="LIBRARY_ACCEPT" class="hidden" aria-label="选择要添加的文件" @change="picked" />
+  <el-button type="primary" size="small" @click="input?.click()"><Plus /> {{ $t("添加") }}</el-button>
+  <input ref="input" type="file" multiple :accept="LIBRARY_ACCEPT" class="hidden" :aria-label="$t('选择要添加的文件')" @change="picked" />
 </template>

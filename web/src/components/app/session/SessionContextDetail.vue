@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * The breakdown under the 上下文 bar of a session (Claude only, design #53 预设 3): a coloured bar
  * of what fills the window, the categories with tokens and share, then below the divider the
@@ -32,7 +33,7 @@ const swatch = (r: CategoryRow) => swatchStyle(r.kind, r.color);
         :title="s.label"
       />
     </div>
-    <div class="mt-2 text-xs text-muted-foreground">按类别</div>
+    <div class="mt-2 text-xs text-muted-foreground">{{ $t("按类别") }}</div>
     <ul class="flex flex-col gap-px text-[13px]" data-testid="context-categories">
       <template v-for="r in [...rows.used, null, ...rows.rest]" :key="r?.key ?? 'divider'">
         <li v-if="!r" class="my-1.5 h-px bg-border" data-testid="context-divider" />
@@ -50,7 +51,7 @@ const swatch = (r: CategoryRow) => swatchStyle(r.kind, r.color);
               <span class="truncate">{{ r.label }}</span>
               <template v-if="r.tools.length">
                 <ChevronRight :class="cn('size-3 shrink-0 text-muted-foreground transition-transform', open[r.key] && 'rotate-90')" />
-                <span class="shrink-0 text-[11.5px] text-muted-foreground">{{ r.tools.length }} 个</span>
+                <span class="shrink-0 text-[11.5px] text-muted-foreground">{{ $t("{toolsCount} 个", { toolsCount: r.tools.length }) }}</span>
               </template>
             </span>
             <span class="min-w-12 text-right tabular-nums">{{ r.tokensText }}</span>

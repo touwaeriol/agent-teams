@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** A permission request: 放行 / 总是允许 / 拒绝 (with an optional reason sent to the employee). */
 import { computed, ref } from "vue";
 import type { QuestionView } from "@/api/views";
@@ -18,10 +19,10 @@ const pending = (a: string) => answer.isPending.value && answer.variables.value?
 </script>
 
 <template>
-  <CardFrame :variant="variant" :code="approvalCommand(question)" :label="`${question.asker} 请求权限`">
+  <CardFrame :variant="variant" :code="approvalCommand(question)" :label="$t('{asker} 请求权限', { asker: question.asker })">
     <template #head>
       <span>
-        <span class="font-mono">{{ question.asker }}</span> 请求权限<span v-if="question.detail.tool_name" class="text-muted-foreground"> · {{ question.detail.tool_name }}</span>
+        <span class="font-mono">{{ question.asker }}</span> {{ $t("请求权限") }}<span v-if="question.detail.tool_name" class="text-muted-foreground"> · {{ question.detail.tool_name }}</span>
       </span>
       <span v-if="variant !== 'mobile'" class="shrink-0 text-xs text-[#B4530B]">{{ approvalCardStatus(question) }}</span>
     </template>
@@ -29,16 +30,16 @@ const pending = (a: string) => answer.isPending.value && answer.variables.value?
     <p v-if="question.detail.description" class="text-xs leading-5 text-muted-foreground">{{ question.detail.description }}</p>
     <ReasonBox
       v-if="denying"
-      placeholder="拒绝理由（可选，会发给员工）"
-      confirm="确认拒绝"
+      :placeholder="$t('拒绝理由（可选，会发给员工）')"
+      :confirm="$t('确认拒绝')"
       :busy="answer.isPending.value"
       @cancel="denying = false"
       @submit="(reason) => answer.mutate({ answer: 'deny', reason: reason || undefined })"
     />
     <CardActions v-else :variant="variant" :count="3">
-      <CardButton kind="primary" :variant="variant" :busy="pending('allow')" @click="answer.mutate({ answer: 'allow' })">放行</CardButton>
-      <CardButton kind="outline" :variant="variant" :busy="pending('allow_always')" @click="answer.mutate({ answer: 'allow_always' })">总是允许</CardButton>
-      <CardButton kind="danger" :variant="variant" @click="denying = true">拒绝</CardButton>
+      <CardButton kind="primary" :variant="variant" :busy="pending('allow')" @click="answer.mutate({ answer: 'allow' })">{{ $t("放行") }}</CardButton>
+      <CardButton kind="outline" :variant="variant" :busy="pending('allow_always')" @click="answer.mutate({ answer: 'allow_always' })">{{ $t("总是允许") }}</CardButton>
+      <CardButton kind="danger" :variant="variant" @click="denying = true">{{ $t("拒绝") }}</CardButton>
     </CardActions>
   </CardFrame>
 </template>

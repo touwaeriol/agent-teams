@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { Square } from "lucide-vue-next";
 import { computed } from "vue";
 import { conversations } from "@/api/actions";
@@ -19,7 +20,7 @@ const draft = computed(() => draftKey(me.data.value?.id ?? (me.isError.value ? "
 const attachments = useAttachments(() => props.pid, undefined, draft);
 // The message shows in the chat at once (api/pending.ts); the box does not wait for the server.
 const send = useSendMessage(() => cid.value, { draft: () => draft.value, attachments, assist: () => ({ scope: "coordinator", pid: props.pid, cid: cid.value }) });
-const stop = useAction(() => conversations.interrupt(cid.value), { success: "已让统筹停下" });
+const stop = useAction(() => conversations.interrupt(cid.value), { success: $t("已让统筹停下") });
 const name = computed(() => props.coordinator?.employee.name ?? "leader");
 </script>
 
@@ -28,9 +29,9 @@ const name = computed(() => props.coordinator?.employee.name ?? "leader");
     <Composer
       id="boss"
       class="mx-auto max-w-[700px]"
-      :label="`给 ${name} 发消息`"
-      :placeholder="`说需求或问进度，${name} 会开讨论串去做；/ 命令，@ 引用文件和讨论串`"
-      :hint="`${name} 只分派、不改代码`"
+      :label="$t('给 {name} 发消息', { name })"
+      :placeholder="$t('说需求或问进度，{name} 会开讨论串去做；/ 命令，{at} 引用文件和讨论串', { name, at: '@' })"
+      :hint="$t('{name} 只分派、不改代码', { name })"
       :attachments="attachments"
       :on-send="send"
       :assist="{ pid, cid, scope: 'coordinator' }"
@@ -40,7 +41,7 @@ const name = computed(() => props.coordinator?.employee.name ?? "leader");
         <button
           v-if="coordinatorBusy(coordinator)"
           type="button"
-          aria-label="停止"
+          :aria-label="$t('停止')"
           class="flex size-8 items-center justify-center rounded-lg border border-input bg-white dark:bg-well"
           @click="stop.mutate()"
         >

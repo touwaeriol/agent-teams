@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * A plan as a checklist card (like Claude's todo card): one line per step with its status
  * icon. Collapsed, it shows only the current step (first doing, else first todo; when nothing
@@ -97,7 +98,7 @@ const progress = computed(() => stepsProgress(props.steps).label);
       data-plan-hidden-above
       @click="setShowAll(true)"
     >
-      前面还有 {{ hiddenAbove }} 条已折叠
+      {{ $t("前面还有 {hiddenAbove} 条已折叠", { hiddenAbove }) }}
     </button>
     <ul v-if="isOpen" :class="cn('scroll-thin flex flex-col gap-2 overflow-y-auto px-4 pb-1', hiddenAbove > 0 ? 'pt-1.5' : 'pt-3', !collapsible && !overLimit && 'pb-3', listClass)">
       <li v-for="s in shown" :key="s.id" class="flex items-start gap-2.5" :data-status="stepLook(s.status).status">
@@ -113,7 +114,7 @@ const progress = computed(() => stepsProgress(props.steps).label);
         data-plan-more
         @click="setShowAll(!allShown)"
       >
-        {{ allShown ? `收起（只显示 ${limit} 条）` : `查看更多（还有 ${hiddenCount} 条）` }}
+        {{ allShown ? $t("收起（只显示 {limit} 条）", { limit }) : $t("查看更多（还有 {hiddenCount} 条）", { hiddenCount }) }}
       </button>
     </div>
     <div v-if="!isOpen" class="flex items-start gap-2.5 px-4 pb-1 pt-3" data-current>
@@ -122,15 +123,15 @@ const progress = computed(() => stepsProgress(props.steps).label);
         <span :class="cn('min-w-0 flex-1 truncate', stepLook(current.status).textClass)" :title="current.title">{{ current.title }}</span>
       </template>
       <template v-else>
-        <CircleDone v-if="allDone" :size="16" class="mt-0.5 shrink-0 text-muted-foreground" aria-label="已完成" />
-        <CircleSlash v-else :size="16" class="mt-0.5 shrink-0 text-muted-foreground" aria-label="已结束" role="img" />
-        <span class="min-w-0 flex-1 text-muted-foreground" :data-finished="allDone ? 'done' : 'ended'">{{ allDone ? "全部完成" : "已结束" }}</span>
+        <CircleDone v-if="allDone" :size="16" class="mt-0.5 shrink-0 text-muted-foreground" :aria-label="$t('已完成')" />
+        <CircleSlash v-else :size="16" class="mt-0.5 shrink-0 text-muted-foreground" :aria-label="$t('已结束')" role="img" />
+        <span class="min-w-0 flex-1 text-muted-foreground" :data-finished="allDone ? 'done' : 'ended'">{{ allDone ? $t("全部完成") : $t("已结束") }}</span>
       </template>
     </div>
     <div v-if="collapsible" class="flex items-center justify-between px-4 pb-2 pt-0.5 text-[12px] text-muted-foreground">
       <span class="tabular-nums" data-plan-progress>{{ progress }}</span>
       <button type="button" class="rounded px-1 py-0.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" :aria-expanded="isOpen" @click="toggle">
-        {{ isOpen ? "收起" : "展开" }}
+        {{ isOpen ? $t("收起") : $t("展开") }}
       </button>
     </div>
   </section>

@@ -1,4 +1,5 @@
 // Pure helpers of the 交付物 view (web/src/components/app/ThreadViews.tsx, Delivery).
+import { $t } from "@/i18n";
 import type { ThreadView } from "@/api/views";
 import { checkLook, mergeLook, onePRLook, prLook, threadPRs, type Look } from "@/lib/present";
 import { safeHref } from "@/lib/safeurl";
@@ -40,7 +41,7 @@ export function queueLines(thread: Pick<ThreadView, "branch">, queue: QueueEntry
 /** One line per PR (per repo), or a placeholder line for the thread PR to come. */
 export function prLines(thread: ThreadView): DeliveryLine[] {
   const prs = threadPRs(thread);
-  if (prs.length === 0) return [{ key: "pr", branch: `${thread.branch || "讨论串分支"} → 基准分支`, what: "讨论串 PR", look: prLook(thread) }];
+  if (prs.length === 0) return [{ key: "pr", branch: $t("{n} → 基准分支", { n: thread.branch || $t("讨论串分支") }), what: $t("讨论串 PR"), look: prLook(thread) }];
   return prs.map((p) => ({
     key: String(p.url ?? p.number),
     branch: `${p.repo ? `${p.repo} · ` : ""}${thread.branch} → ${p.base}`,

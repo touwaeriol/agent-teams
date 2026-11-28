@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { ref } from "vue";
 import { useAudit } from "@/api/queries";
 import Card from "@/components/app/Card.vue";
@@ -12,9 +13,9 @@ const audit = useAudit();
 <template>
   <Card class="gap-3">
     <CardTitle>
-      审计日志
+      {{ $t("审计日志") }}
       <template #action>
-        <button type="button" class="text-[13px] text-muted-foreground hover:text-foreground" @click="open = !open">{{ open ? "收起" : "展开" }}</button>
+        <button type="button" class="text-[13px] text-muted-foreground hover:text-foreground" @click="open = !open">{{ open ? $t("收起") : $t("展开") }}</button>
       </template>
     </CardTitle>
     <template v-if="open">

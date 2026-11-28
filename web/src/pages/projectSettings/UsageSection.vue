@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // 使用情况: cost and tokens over 7 or 30 days, per day, per thread and per employee.
+import { $t } from "@/i18n";
 import { computed, ref } from "vue";
 import { useProjectUsage } from "@/api/queries";
 import Loading from "@/components/common/Loading.vue";
@@ -18,10 +19,10 @@ const stats = computed(() => {
   const x = u.value;
   if (!x) return [];
   return [
-    { label: "费用（估算）", value: formatUSD(x.cost_usd_est) },
-    { label: "输入 tokens", value: formatTokens(inputTokens(x.tokens)) },
-    { label: "输出 tokens", value: formatTokens(x.tokens.output) },
-    { label: "回合", value: String(x.turns) },
+    { label: $t("费用（估算）"), value: formatUSD(x.cost_usd_est) },
+    { label: $t("输入 tokens"), value: formatTokens(inputTokens(x.tokens)) },
+    { label: $t("输出 tokens"), value: formatTokens(x.tokens.output) },
+    { label: $t("回合"), value: String(x.turns) },
   ];
 });
 </script>
@@ -29,17 +30,17 @@ const stats = computed(() => {
 <template>
   <div class="flex flex-col gap-3">
     <Heading>
-      使用情况
+      {{ $t("使用情况") }}
       <template #action>
-        <span role="group" aria-label="时间范围" class="flex gap-0.5 rounded-lg bg-raised p-0.5 text-[13px]">
+        <span role="group" :aria-label="$t('时间范围')" class="flex gap-0.5 rounded-lg bg-raised p-0.5 text-[13px]">
           <button v-for="d in [7, 30]" :key="d" type="button" :aria-pressed="days === d" :class="cn('h-7 rounded-md px-2.5', days === d ? 'bg-panel shadow-sm' : 'text-muted-foreground')" @click="days = d">
-            最近 {{ d }} 天
+            {{ $t("最近 {d} 天", { d }) }}
           </button>
         </span>
       </template>
     </Heading>
     <Loading v-if="usage.isLoading.value" />
-    <p v-if="u && u.turns === 0" class="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">最近 {{ days }} 天没有用量记录。</p>
+    <p v-if="u && u.turns === 0" class="rounded-xl border border-dashed p-6 text-center text-[13px] text-muted-foreground">{{ $t("最近 {days} 天没有用量记录。", { days }) }}</p>
     <template v-if="u && u.turns > 0">
       <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <div v-for="s in stats" :key="s.label" class="flex flex-col gap-1 rounded-xl border px-3.5 py-3">
@@ -48,9 +49,9 @@ const stats = computed(() => {
         </div>
       </div>
       <DayBars :by-day="u.by_day ?? []" :days="days" />
-      <UsageTable title="按讨论串" :rows="threadRows(u)" />
-      <UsageTable title="按员工" :rows="employeeRows(u)" />
-      <p class="text-xs text-muted-foreground">费用来自 Claude 每个回合结束时报告的数字，订阅账号下是按 API 价格的估算。输入含缓存读写。</p>
+      <UsageTable :title="$t('按讨论串')" :rows="threadRows(u)" />
+      <UsageTable :title="$t('按员工')" :rows="employeeRows(u)" />
+      <p class="text-xs text-muted-foreground">{{ $t("费用来自 Claude 每个回合结束时报告的数字，订阅账号下是按 API 价格的估算。输入含缓存读写。") }}</p>
     </template>
   </div>
 </template>

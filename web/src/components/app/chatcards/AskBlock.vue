@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** One question of an open AskCard: lettered options (推荐, descriptions) and a free 其他 line. */
 import { Check } from "lucide-vue-next";
 import type { AskChoice, AskItem } from "@/api/views";
@@ -16,9 +17,9 @@ const emit = defineEmits<{ pick: [label: string]; other: [text: string] }>();
       <span>
         <span v-if="item.header" class="mr-2 rounded-md bg-[#F1EFEA] px-1.5 py-0.5 align-[2px] text-[11px] text-muted-foreground">{{ item.header }}</span>{{ item.question }}
       </span>
-      <span v-if="who" class="shrink-0 pt-0.5 text-xs text-[#B4530B]">{{ who }} · 等你回答</span>
+      <span v-if="who" class="shrink-0 pt-0.5 text-xs text-[#B4530B]">{{ $t("{who} · 等你回答", { who }) }}</span>
     </legend>
-    <span v-if="item.multi_select" class="-mt-1 mb-1 text-xs text-muted-foreground">可多选</span>
+    <span v-if="item.multi_select" class="-mt-1 mb-1 text-xs text-muted-foreground">{{ $t("可多选") }}</span>
     <button
       v-for="(o, i) in item.options"
       :key="o.label"
@@ -32,7 +33,7 @@ const emit = defineEmits<{ pick: [label: string]; other: [text: string] }>();
       <span class="flex min-w-0 flex-1 flex-col gap-0.5">
         <span class="flex flex-wrap items-center gap-2 text-sm font-medium">
           {{ o.label }}
-          <span v-if="o.recommended" class="rounded-md bg-[#ECEAE4] px-1.5 py-px text-[11px] font-normal text-[#5E5B54]">推荐</span>
+          <span v-if="o.recommended" class="rounded-md bg-[#ECEAE4] px-1.5 py-px text-[11px] font-normal text-[#5E5B54]">{{ $t("推荐") }}</span>
         </span>
         <span v-if="o.description" class="text-[13px] leading-5 text-muted-foreground">{{ o.description }}</span>
       </span>
@@ -42,8 +43,8 @@ const emit = defineEmits<{ pick: [label: string]; other: [text: string] }>();
       <LetterBadge>{{ letter(item.options.length) }}</LetterBadge>
       <input
         :value="choice.other ?? ''"
-        placeholder="其他（自己写）"
-        :aria-label="`其他回答：${item.question}`"
+        :placeholder="$t('其他（自己写）')"
+        :aria-label="$t('其他回答：{question}', { question: item.question })"
         class="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/80"
         @input="emit('other', ($event.target as HTMLInputElement).value)"
       />

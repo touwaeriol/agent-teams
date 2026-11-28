@@ -1,6 +1,7 @@
 // The right panel's thread list before a thread is opened: status groups, the row's mark and
 // line, search and filters, relative times, and which groups the viewer folded (per user,
 // in localStorage). Pure and unit-tested.
+import { $t } from "@/i18n";
 import type { QuestionView, ThreadView } from "@/api/views";
 import { liveLine } from "./live";
 import { readLocal, writeLocal } from "./persist";
@@ -78,10 +79,10 @@ export function threadNodes(t: Pick<ThreadView, "members">): { state: NodeState;
   const by = new Map<string, { id: string; name: string; online: boolean }>();
   for (const m of t.members) if (m.node && !by.has(m.node.id)) by.set(m.node.id, m.node);
   const nodes = [...by.values()];
-  if (nodes.length === 0) return { state: "none", nodes, label: "还没有分配节点" };
+  if (nodes.length === 0) return { state: "none", nodes, label: $t("还没有分配节点") };
   const up = nodes.filter((n) => n.online).length;
   const state: NodeState = up === nodes.length ? "online" : up === 0 ? "offline" : "partial";
-  return { state, nodes, label: nodes.map((n) => `${n.name} ${n.online ? "在线" : "离线"}`).join(" · ") };
+  return { state, nodes, label: nodes.map((n) => $t("{name} {n}", { name: n.name, n: n.online ? $t("在线") : $t("离线") })).join(" · ") };
 }
 
 /** When anything last happened in the thread (servers before last_activity_at: its last update or lead reply). */
@@ -161,7 +162,7 @@ export function rowLine(t: ThreadView, open?: QuestionView): string {
   if (!open && t.counts.waiting > 0 && t.status !== "review") return liveLine(t) || firstLine(threadLine(t));
   if (!open) {
     const p = threadPhase(t);
-    if (p.id === "replied") return t.lead_last?.text ? `组长已回复：${firstLine(t.lead_last.text)}` : p.note;
+    if (p.id === "replied") return t.lead_last?.text ? $t("组长已回复：{text}", { text: firstLine(t.lead_last.text) }) : p.note;
     if (p.id === "tasks" || p.id === "reading" || p.id === "lead_queued" || p.id === "lead_waiting" || p.id === "lead_down") return p.note;
   }
   return firstLine(threadLine(t, open));
@@ -195,14 +196,14 @@ export function shortAgo(iso: string, now: number = Date.now()): string {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return "";
   const m = Math.floor(Math.max(0, now - t) / 60_000);
-  if (m < 1) return "刚刚";
-  if (m < 60) return `${m}分钟`;
+  if (m < 1) return $t("刚刚");
+  if (m < 60) return $t("{m}分钟", { m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}小时`;
+  if (h < 24) return $t("{h}小时", { h });
   const d = Math.floor(h / 24);
-  if (d <= 30) return `${d}天`;
+  if (d <= 30) return $t("{d}天", { d });
   const date = new Date(t);
-  return `${date.getMonth() + 1}月${date.getDate()}日`;
+  return $t("{month}月{day}日", { month: date.getMonth() + 1, day: date.getDate() });
 }
 
 /** Folded sections of the list ("deliverables" plus the group ids); 已归档 starts folded. */
@@ -257,7 +258,7 @@ export function neighbours(order: number[], no: number): { prev: number | null; 
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
-const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+const WEEKDAYS = [$t("周日"), $t("周一"), $t("周二"), $t("周三"), $t("周四"), $t("周五"), $t("周六")];
 const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 
 /** "今天 18:00" / "明天 09:00" / "周一 09:00" (within a week) / "11月20日 09:00", local time. */
@@ -266,10 +267,10 @@ export function reminderLabel(iso: string, now: number = Date.now()): string {
   if (Number.isNaN(at.getTime())) return "";
   const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
   const days = Math.round((dayStart(at) - dayStart(new Date(now))) / 86_400_000);
-  if (days === 0) return `今天 ${time}`;
-  if (days === 1) return `明天 ${time}`;
+  if (days === 0) return $t("今天 {time}", { time });
+  if (days === 1) return $t("明天 {time}", { time });
   if (days > 1 && days < 7) return `${WEEKDAYS[at.getDay()]} ${time}`;
-  return `${at.getMonth() + 1}月${at.getDate()}日 ${time}`;
+  return $t("{month}月{day}日 {time}", { month: at.getMonth() + 1, day: at.getDate(), time });
 }
 
 export type ReminderPreset = "hour" | "later" | "tomorrow" | "monday";
@@ -284,9 +285,9 @@ export function reminderPresets(now: Date = new Date()): { id: ReminderPreset; l
   const later = evening.getTime() - now.getTime() >= 3 * 3_600_000 ? evening : new Date(now.getTime() + 3 * 3_600_000);
   const toMonday = ((8 - now.getDay()) % 7) || 7;
   return [
-    { id: "hour", label: "1 小时后", at: new Date(now.getTime() + 3_600_000) },
-    { id: "later", label: "今天晚些时候", at: later },
-    { id: "tomorrow", label: "明天上午 9 点", at: at(1, 9) },
-    { id: "monday", label: "下周一 9 点", at: at(toMonday, 9) },
+    { id: "hour", label: $t("1 小时后"), at: new Date(now.getTime() + 3_600_000) },
+    { id: "later", label: $t("今天晚些时候"), at: later },
+    { id: "tomorrow", label: $t("明天上午 9 点"), at: at(1, 9) },
+    { id: "monday", label: $t("下周一 9 点"), at: at(toMonday, 9) },
   ];
 }

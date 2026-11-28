@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // A design or any file published with publish_file, shown full size, with a version switcher,
 // comments, "新窗口打开" and "通过，按这个做" (tells the lead to go ahead).
+import { $t } from "@/i18n";
 import { ArrowLeft, ExternalLink } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
@@ -27,7 +28,7 @@ const shown = computed<number | undefined>(() => files.data.value?.version ?? (p
 const label = computed(() => deliverableKind(props.item.kind).label);
 const approve = useAction(() => conversations.send(props.thread?.id ?? "", approvalText(label.value, props.item.title, shown.value)), {
   invalidate: () => [keys.messages(props.thread?.id ?? "")],
-  success: "已告诉组长按这个做",
+  success: $t("已告诉组长按这个做"),
 });
 const sub = computed(() => viewerSubtitle(props.thread, author.value, props.item.updated_at));
 const external = computed(() => (hosted.value ? files.data.value?.entry_url : safeHref(props.item.url)));
@@ -36,7 +37,7 @@ const external = computed(() => (hosted.value ? files.data.value?.entry_url : sa
 <template>
   <div class="flex min-h-full flex-col bg-[#ECEAE5] dark:bg-background">
     <header class="flex min-h-[52px] flex-wrap items-center gap-x-4 gap-y-2.5 border-b bg-panel px-4 py-2">
-      <RouterLink :to="`/projects/${pid}/deliverables`" aria-label="返回交付物" class="flex size-9 items-center justify-center rounded-lg hover:bg-raised">
+      <RouterLink :to="`/projects/${pid}/deliverables`" :aria-label="$t('返回交付物')" class="flex size-9 items-center justify-center rounded-lg hover:bg-raised">
         <ArrowLeft class="size-[18px]" :stroke-width="1.8" />
       </RouterLink>
       <span class="flex min-w-0 flex-[1_1_260px] flex-col">
@@ -45,12 +46,12 @@ const external = computed(() => (hosted.value ? files.data.value?.entry_url : sa
       </span>
       <span class="flex flex-wrap items-center gap-1.5">
         <VersionPicker v-if="hosted && files.data.value" :files="files.data.value" :thread-no="item.thread_no" @pick="(v) => (version = v)" />
-        <el-button tag="a" size="small" :href="external" target="_blank" rel="noreferrer noopener" class="!ml-0">新窗口打开 <ExternalLink /></el-button>
-        <el-button type="primary" size="small" class="!ml-0" :disabled="!thread || approve.isPending.value" @click="approve.mutate()">通过，按这个做</el-button>
+        <el-button tag="a" size="small" :href="external" target="_blank" rel="noreferrer noopener" class="!ml-0">{{ $t("新窗口打开") }} <ExternalLink /></el-button>
+        <el-button type="primary" size="small" class="!ml-0" :disabled="!thread || approve.isPending.value" @click="approve.mutate()">{{ $t("通过，按这个做") }}</el-button>
       </span>
     </header>
     <div class="flex flex-1 flex-wrap">
-      <section aria-label="内容" class="flex min-w-0 flex-[999_1_640px] p-4 sm:px-12 sm:py-10">
+      <section :aria-label="$t('内容')" class="flex min-w-0 flex-[999_1_640px] p-4 sm:px-12 sm:py-10">
         <HostedContent v-if="hosted" :title="item.title" :files="files.data.value" :loading="files.isLoading.value" :failed="files.isError.value" />
         <LinkFrame v-else :item="item" />
       </section>

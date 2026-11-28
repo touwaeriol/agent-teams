@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * Attachments of a sent message: images as thumbnails that open the in-page preview; PDFs and any
  * other file as a card (icon, name, type, size) with download and "存到项目文件". An attachment whose
@@ -52,7 +53,7 @@ function save(x: Item) {
       type="button"
       :class="cn('block cursor-zoom-in overflow-hidden border bg-raised', small ? 'size-14 rounded-lg' : 'size-24 rounded-xl')"
       :title="x.name"
-      :aria-label="`查看图片 ${x.name}`"
+      :aria-label="$t('查看图片 {name}', { name: x.name })"
       @click="viewing = i"
     >
       <img :src="urls[i]" :alt="x.name" loading="lazy" class="size-full object-cover" @error="imageFailed(x)" />
@@ -69,7 +70,7 @@ function save(x: Item) {
       <span class="flex min-w-0 flex-1 flex-col">
         <span class="truncate font-medium">{{ x.name }}</span>
         <span class="truncate text-[11px] text-muted-foreground">
-          <template v-if="isExpired(x)"><span class="text-destructive">已过期</span> · 超过保留期已删除</template>
+          <template v-if="isExpired(x)"><span class="text-destructive">{{ $t("已过期") }}</span> {{ $t("· 超过保留期已删除") }}</template>
           <template v-else>{{ typeLabel(x.content_type, x.name) }}<template v-if="x.size"> · {{ formatBytes(x.size) }}</template></template>
         </span>
       </span>
@@ -77,8 +78,8 @@ function save(x: Item) {
         <a
           :href="attachmentDownloadUrl(x.id)"
           class="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-raised hover:text-foreground"
-          :aria-label="`下载 ${x.name}`"
-          title="下载"
+          :aria-label="$t('下载 {name}', { name: x.name })"
+          :title="$t('下载')"
         >
           <Download class="size-4" :stroke-width="1.8" />
         </a>
@@ -86,8 +87,8 @@ function save(x: Item) {
           v-if="saveable"
           type="button"
           class="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-raised hover:text-foreground"
-          :aria-label="`把 ${x.name} 存到项目文件`"
-          title="存到项目文件"
+          :aria-label="$t('把 {name} 存到项目文件', { name: x.name })"
+          :title="$t('存到项目文件')"
           @click="save(x)"
         >
           <FolderInput class="size-4" :stroke-width="1.8" />

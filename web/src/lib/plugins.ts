@@ -1,5 +1,6 @@
 // Plugin library helpers (pure): role entries are "name" (follows the latest version) or
 // "name@3" (pinned), mirroring server/internal/plugins.ParseRef.
+import { $t } from "@/i18n";
 import type { PluginContents, PluginView, RoleView } from "@/api/views";
 import { roleRuntimes, runtimeLabel } from "@/lib/runtimes";
 
@@ -39,9 +40,9 @@ export function pinPlugin(refs: string[] | null | undefined, name: string, versi
 export function contentsText(c: PluginContents | undefined): string {
   if (!c) return "";
   const parts = [
-    count("技能", c.skills),
-    count("命令", c.commands),
-    count("子代理", c.agents),
+    count($t("技能"), c.skills),
+    count($t("命令"), c.commands),
+    count($t("子代理"), c.agents),
     c.hooks ? "hooks" : "",
     count("MCP", c.mcp_servers),
   ];
@@ -67,7 +68,7 @@ export function missingRefs(refs: string[] | null | undefined, library: PluginVi
 export function runtimeNote(role: Pick<RoleView, "runtime"> & Partial<Pick<RoleView, "runtimes">>): string {
   const others = roleRuntimes(role).filter((rt) => rt !== "claude");
   if (!others.length) return "";
-  return `${others.map(runtimeLabel).join(" / ")} 员工只用插件里的技能、命令（作为说明文字）和 MCP 服务器；子代理和 hooks 只在 Claude Code 下生效。`;
+  return $t("{others} 员工只用插件里的技能、命令（作为说明文字）和 MCP 服务器；子代理和 hooks 只在 Claude Code 下生效。", { others: others.map(runtimeLabel).join(" / ") });
 }
 
 /** My plugins first, then the built-ins, each by name. */

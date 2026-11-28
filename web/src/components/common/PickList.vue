@@ -1,5 +1,6 @@
 <script setup lang="ts" generic="T">
 // A scrollable list where one item can be picked. The default slot renders an item: `{ item, picked }`.
+import { $t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 defineProps<{ items: T[]; itemKey: (item: T) => string; selected?: string; empty?: string; loading?: boolean; error?: string; class?: string }>();
@@ -8,7 +9,7 @@ const emit = defineEmits<{ pick: [item: T] }>();
 
 <template>
   <div :class="cn('scroll-thin max-h-56 overflow-y-auto rounded-lg border bg-well', $props.class)">
-    <div v-if="loading" class="p-3 text-xs text-muted-foreground">加载中……</div>
+    <div v-if="loading" class="p-3 text-xs text-muted-foreground">{{ $t("加载中……") }}</div>
     <div v-if="error" class="p-3 text-xs text-destructive">{{ error }}</div>
     <div v-if="!loading && !error && items.length === 0 && empty" class="p-3 text-xs text-muted-foreground">{{ empty }}</div>
     <button

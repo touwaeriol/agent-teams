@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 团队岗位: role templates (coordinator → lead → members) edited as one draft and saved together,
 // presets, a YAML view, then the skill and plugin libraries. Each role names its model by hand.
+import { $t } from "@/i18n";
 import { computed, ref, watch } from "vue";
 import { roles as roleActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -32,7 +33,7 @@ const client = useQueryClient();
 // Saving also brings the coordinators' and the open threads' leads' models in line: refresh what the chat boxes show.
 const save = useAction(() => roleActions.save(ordered(draft.value ?? [])), {
   invalidate: [keys.roles],
-  success: "岗位模板已保存",
+  success: $t("岗位模板已保存"),
   onSuccess: () => void client.invalidateQueries(conversationModels),
 });
 const layout = useOfficeLayout();
@@ -65,38 +66,38 @@ const PILL = "rounded-full px-2.5 py-1";
         <div class="flex items-start gap-1">
           <NavButton />
           <div class="flex flex-col gap-1.5">
-            <h1 class="text-2xl font-semibold">团队岗位</h1>
-            <p class="max-w-[640px] text-[13px] leading-[22px] text-muted-foreground">每个项目有一个项目统筹；每开一个讨论串配一个组长；成员按下面的岗位人数常驻每个项目，所有讨论串共用。</p>
+            <h1 class="text-2xl font-semibold">{{ $t("团队岗位") }}</h1>
+            <p class="max-w-[640px] text-[13px] leading-[22px] text-muted-foreground">{{ $t("每个项目有一个项目统筹；每开一个讨论串配一个组长；成员按下面的岗位人数常驻每个项目，所有讨论串共用。") }}</p>
           </div>
         </div>
         <div class="flex gap-2">
-          <el-button text class="h-[38px]" @click="yaml = !yaml">{{ yaml ? "卡片视图" : "YAML" }}</el-button>
+          <el-button text class="h-[38px]" @click="yaml = !yaml">{{ yaml ? $t("卡片视图") : "YAML" }}</el-button>
           <template v-if="!yaml">
             <PresetMenu @pick="addPreset" />
-            <el-button class="!ml-0 h-[38px]" @click="add">添加岗位</el-button>
+            <el-button class="!ml-0 h-[38px]" @click="add">{{ $t("添加岗位") }}</el-button>
             <el-button type="primary" class="!ml-0 h-[38px]" :disabled="!dirty || problems.length > 0 || save.isPending.value" @click="onSave">
-              <Spinner v-if="save.isPending.value" /> 保存
+              <Spinner v-if="save.isPending.value" /> {{ $t("保存") }}
             </el-button>
           </template>
         </div>
       </header>
       <section class="flex flex-wrap items-center gap-2 rounded-xl border bg-panel px-3.5 py-3 text-[13px]">
-        <span class="font-semibold">层级</span>
-        <span :class="PILL" :style="{ background: LEVEL.coordinator.bg, color: LEVEL.coordinator.fg }">项目统筹 · 每项目 1 个</span>
+        <span class="font-semibold">{{ $t("层级") }}</span>
+        <span :class="PILL" :style="{ background: LEVEL.coordinator.bg, color: LEVEL.coordinator.fg }">{{ $t("项目统筹 · 每项目 1 个") }}</span>
         <span class="text-[#8A877F]">→</span>
-        <span :class="PILL" :style="{ background: LEVEL.lead.bg, color: LEVEL.lead.fg }">组长 · 每讨论串 1 个</span>
+        <span :class="PILL" :style="{ background: LEVEL.lead.bg, color: LEVEL.lead.fg }">{{ $t("组长 · 每讨论串 1 个") }}</span>
         <span class="text-[#8A877F]">→</span>
-        <span :class="PILL" :style="{ background: LEVEL.member.bg, color: LEVEL.member.fg }">成员 · 每项目按岗位编制</span>
-        <span class="basis-full text-xs text-muted-foreground">成员是项目的固定编制：岗位人数就是每个项目配几个，所有讨论串共用、轮流领任务队列里的活；人手不够就加人数。</span>
+        <span :class="PILL" :style="{ background: LEVEL.member.bg, color: LEVEL.member.fg }">{{ $t("成员 · 每项目按岗位编制") }}</span>
+        <span class="basis-full text-xs text-muted-foreground">{{ $t("成员是项目的固定编制：岗位人数就是每个项目配几个，所有讨论串共用、轮流领任务队列里的活；人手不够就加人数。") }}</span>
       </section>
       <Callout v-for="w in warnings" :key="`${w.role}-${w.message}`" tone="warn">{{ w.role ? `${w.role}：` : "" }}{{ w.message }}</Callout>
       <Callout v-if="dirty && problems.length > 0" tone="warn">{{ problems.join("；") }}</Callout>
       <StaffPanel v-if="!yaml" :roles="draft" :saved="saved" @add="addStaff" />
       <ConfirmAction
         v-model:open="confirmStaff"
-        title="改成员编制"
+        :title="$t('改成员编制')"
         :description="saveImpact(staffChanges, (projects.data.value ?? []).length)"
-        confirm-label="保存"
+        :confirm-label="$t('保存')"
         @confirm="save.mutate()"
       />
       <YamlEditor v-if="yaml" />

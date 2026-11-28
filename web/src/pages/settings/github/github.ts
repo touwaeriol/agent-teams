@@ -1,20 +1,21 @@
 // GitHub connections helpers (pure).
+import { $t, intlLocale } from "@/i18n";
 import type { GitConnectionView, RepoItem } from "@/api/views";
 
 export const REPOS_SHOWN = 4;
 
 /** 组织 / 个人账号 / 个人令牌（PAT）: an App installed on an organization links to its org settings. */
 export function connectionKind(c: Pick<GitConnectionView, "kind" | "installation_settings_url">): string {
-  if (c.kind === "token") return "个人令牌（PAT）";
-  return c.installation_settings_url?.includes("/organizations/") ? "组织" : "个人账号";
+  if (c.kind === "token") return $t("个人令牌（PAT）");
+  return c.installation_settings_url?.includes("/organizations/") ? $t("组织") : $t("个人账号");
 }
 
 export function shortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
+  return new Date(iso).toLocaleDateString(intlLocale(), { month: "long", day: "numeric" });
 }
 
 export function usedText(r: Pick<RepoItem, "used_by_projects">): string {
-  return r.used_by_projects?.length ? `项目 ${r.used_by_projects.map((p) => p.name).join("、")}` : "未使用";
+  return r.used_by_projects?.length ? $t("项目 {used_by_projects}", { used_by_projects: r.used_by_projects.map((p) => p.name).join("、") }) : $t("未使用");
 }
 
 /** GitHub's manifest flow: the browser posts the manifest to github.com. */

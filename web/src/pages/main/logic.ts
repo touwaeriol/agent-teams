@@ -1,3 +1,4 @@
+import { $t } from "@/i18n";
 import type { CoordinatorView, QuestionView, ThreadView } from "@/api/views";
 import type { ThreadViewId } from "@/components/app/threadMenu";
 import { awaitsAcceptance } from "@/lib/present";
@@ -23,9 +24,9 @@ export function threadPath(pid: string, no: number, view?: ThreadViewId | null):
 
 export function coordinatorState(c: CoordinatorView | undefined): { tone: string; text: string } {
   const name = c?.employee.name ?? "leader";
-  if (!c?.employee.node) return { tone: "#B7B3AA", text: `${name} 待命` };
-  if (!c.employee.node.online) return { tone: "#B42318", text: `${name} 离线` };
-  return { tone: "#2E7D4F", text: `${name} 在线` };
+  if (!c?.employee.node) return { tone: "#B7B3AA", text: $t("{name} 待命", { name }) };
+  if (!c.employee.node.online) return { tone: "#B42318", text: $t("{name} 离线", { name }) };
+  return { tone: "#2E7D4F", text: $t("{name} 在线", { name }) };
 }
 
 /** Threads waiting on the user (open questions + PRs to accept) and the first such thread. */
@@ -43,9 +44,9 @@ export function coordinatorBusy(c: CoordinatorView | undefined): boolean {
 export type OverviewTab = "threads" | "library" | "schedules";
 
 export const OVERVIEW_TABS: { id: OverviewTab; label: string }[] = [
-  { id: "threads", label: "讨论串" },
-  { id: "library", label: "资料库" },
-  { id: "schedules", label: "定时任务" },
+  { id: "threads", label: $t("讨论串") },
+  { id: "library", label: $t("资料库") },
+  { id: "schedules", label: $t("定时任务") },
 ];
 
 /** The open overview tab, or null when the overview is closed. */

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 import type { ThreadView } from "@/api/views";
@@ -25,11 +26,11 @@ const progress = computed(() => mainProgress(props.thread));
     <span class="text-[13px] leading-[21px] text-[#4A4843]">{{ thread.summary || thread.lead_last?.text || thread.brief }}</span>
     <span class="flex items-center gap-2.5">
       <ProgressBar :pct="progress.pct" :tone="look.tone" />
-      <span class="whitespace-nowrap text-xs text-muted-foreground">主要任务 {{ progress.text }}</span>
+      <span class="whitespace-nowrap text-xs text-muted-foreground">{{ $t("主要任务 {text}", { text: progress.text }) }}</span>
     </span>
     <span class="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-      <span>组长 {{ leadOf(thread)?.name ?? "—" }}</span>
-      <span>成员 {{ teamText(thread) }}</span>
+      <span>{{ $t("组长") }} {{ leadOf(thread)?.name ?? "—" }}</span>
+      <span>{{ $t("成员 {thread}", { thread: teamText(thread) }) }}</span>
       <span v-if="thread.branch" class="font-mono">{{ thread.branch }}</span>
       <span>{{ prText(thread) }}</span>
       <span>{{ timeAgo(thread.updated_at) }}</span>

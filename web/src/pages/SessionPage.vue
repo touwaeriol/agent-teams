@@ -3,6 +3,7 @@
 // 上下文) on the right, closed by default and toggled from the header (a collapsible side panel on
 // wide screens, a drawer on narrow ones). A finished round reads 已完成 and asks 问题解决了吗？
 // under the last reply; 已解决 completes the thread (the next message reopens it).
+import { $t } from "@/i18n";
 import { CodeXml, PanelRight, X } from "lucide-vue-next";
 import { computed, nextTick, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
@@ -48,7 +49,7 @@ watch(
   (now, before) => before && now !== before && void qc.invalidateQueries({ queryKey: keys.projects }),
 );
 const invalidate = () => (thread.value ? [keys.threads(pid.value), keys.thread(thread.value.id), keys.projects] : []);
-const resolve = useAction(() => threadActions.complete(thread.value!.id), { invalidate, success: "已标记为已解决，之后发消息可以继续" });
+const resolve = useAction(() => threadActions.complete(thread.value!.id), { invalidate, success: $t("已标记为已解决，之后发消息可以继续") });
 /** 还没有，继续说: the cursor goes to the message box. */
 function goOn() {
   void nextTick(() => document.getElementById(`lead-${thread.value?.id}`)?.focus());
@@ -57,10 +58,10 @@ function goOn() {
 
 <template>
   <Loading v-if="project.isLoading.value || isLoading" class="h-full" />
-  <EmptyState v-else-if="!project.data.value || !thread || !view" title="找不到这个会话" description="它可能已被删除。">
+  <EmptyState v-else-if="!project.data.value || !thread || !view" :title="$t('找不到这个会话')" :description="$t('它可能已被删除。')">
     <template #action>
       <RouterLink v-slot="{ href, navigate }" to="/sessions/new" custom>
-        <el-button tag="a" :href="href" type="primary" @click="navigate">新建会话</el-button>
+        <el-button tag="a" :href="href" type="primary" @click="navigate">{{ $t("新建会话") }}</el-button>
       </RouterLink>
     </template>
   </EmptyState>
@@ -73,8 +74,8 @@ function goOn() {
         <div class="ml-auto flex items-center gap-1.5">
           <button
             type="button"
-            :aria-label="panel ? '隐藏会话信息' : '显示会话信息'"
-            :title="panel ? '隐藏会话信息' : '显示会话信息'"
+            :aria-label="panel ? $t('隐藏会话信息') : $t('显示会话信息')"
+            :title="panel ? $t('隐藏会话信息') : $t('显示会话信息')"
             :aria-pressed="panel"
             :class="['flex size-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground', panel && wide ? 'bg-accent text-foreground' : '']"
             data-testid="panel-toggle"
@@ -96,10 +97,10 @@ function goOn() {
       </div>
       <LeadComposer :pid="pid" :thread="thread" session class="at-reading px-3 pb-3 sm:px-6 sm:pb-5" />
     </div>
-    <aside v-if="wide && panel" aria-label="会话信息" class="flex w-[340px] shrink-0 flex-col border-l bg-sidebar" data-testid="session-panel">
+    <aside v-if="wide && panel" :aria-label="$t('会话信息')" class="flex w-[340px] shrink-0 flex-col border-l bg-sidebar" data-testid="session-panel">
       <div class="flex h-14 shrink-0 items-center justify-between border-b px-4">
-        <h2 class="text-[13px] font-semibold">会话信息</h2>
-        <button type="button" aria-label="关闭会话信息" title="关闭" class="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" @click="panel = false">
+        <h2 class="text-[13px] font-semibold">{{ $t("会话信息") }}</h2>
+        <button type="button" :aria-label="$t('关闭会话信息')" :title="$t('关闭')" class="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" @click="panel = false">
           <X class="size-4" />
         </button>
       </div>
@@ -107,7 +108,7 @@ function goOn() {
         <SessionWorkspace :project="project.data.value" :thread="view" />
       </div>
     </aside>
-    <el-drawer v-if="!wide" v-model="panel" title="会话信息" size="min(340px, 90vw)">
+    <el-drawer v-if="!wide" v-model="panel" :title="$t('会话信息')" size="min(340px, 90vw)">
       <SessionWorkspace :project="project.data.value" :thread="view" />
     </el-drawer>
   </div>

@@ -16,13 +16,14 @@ type UserView struct {
 	MaxNodes           *int      `json:"max_nodes"`
 	MustChangePassword bool      `json:"must_change_password"`
 	CreatedAt          time.Time `json:"created_at"`
+	Locale             string    `json:"locale" enum:",zh-CN,en,ko,ja" doc:"Interface language; empty = follow the browser"`
 }
 
 // userView shows an account with its role (from the Casbin enforcer: Server.role).
 func userView(u store.User, role string) UserView {
 	return UserView{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName, Role: role, Active: u.Active,
 		MaxNodes: u.MaxNodes, MustChangePassword: u.MustChangePassword,
-		CreatedAt: u.CreatedAt}
+		CreatedAt: u.CreatedAt, Locale: u.Locale}
 }
 
 // AdminUserView adds the admin list's columns.

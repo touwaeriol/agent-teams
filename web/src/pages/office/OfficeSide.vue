@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** The dark “调度看板”: live / replay switch, what waits, the selected person, recent events, legend. */
 import { computed } from "vue";
 import { useWaiting } from "@/api/queries";
@@ -18,19 +19,19 @@ const roster = computed(() => new Map(props.snapshot.employees.map((e) => [e.id,
 const recent = computed(() =>
   recentEvents(props.events, roster.value, props.focus).map((e) => {
     const who = roster.value.get(String(e.employee));
-    return { e, where: who?.thread_no ? `#${who.thread_no}` : "统筹", name: who?.name ?? String(e.employee), color: whoColor(who), what: e.status.bubble || STATE_LABELS[e.status.state] || e.status.state };
+    return { e, where: who?.thread_no ? `#${who.thread_no}` : $t("统筹"), name: who?.name ?? String(e.employee), color: whoColor(who), what: e.status.bubble || STATE_LABELS[e.status.state] || e.status.state };
   }),
 );
 const btn = (on: boolean) => ({ height: "30px", padding: "0 10px", borderRadius: "8px", border: on ? "none" : "1px solid #4A4D59", background: on ? "#C8622A" : "transparent", color: on ? "#FFFFFF" : "#E6E3DC", fontSize: "12px" });
 </script>
 
 <template>
-  <aside aria-label="事件流" class="flex min-h-screen min-w-0 max-w-[380px] flex-[1_1_320px] flex-col gap-3.5 border-l p-[18px]" :style="{ background: DARK.panel, borderColor: DARK.line }">
+  <aside :aria-label="$t('事件流')" class="flex min-h-screen min-w-0 max-w-[380px] flex-[1_1_320px] flex-col gap-3.5 border-l p-[18px]" :style="{ background: DARK.panel, borderColor: DARK.line }">
     <span class="flex items-center justify-between">
-      <span class="text-base font-semibold">调度看板</span>
+      <span class="text-base font-semibold">{{ $t("调度看板") }}</span>
       <span class="flex gap-1.5">
-        <button type="button" :style="btn(!replaying)" @click="emit('replaying', false)">实时</button>
-        <button type="button" :style="btn(replaying)" @click="emit('replaying', true)">回放…</button>
+        <button type="button" :style="btn(!replaying)" @click="emit('replaying', false)">{{ $t("实时") }}</button>
+        <button type="button" :style="btn(replaying)" @click="emit('replaying', true)">{{ $t("回放…") }}</button>
       </span>
     </span>
     <div class="flex flex-col gap-1.5 rounded-[10px] border px-3 py-2.5 text-xs" :style="{ background: DARK.page, borderColor: DARK.line }">
@@ -39,16 +40,16 @@ const btn = (on: boolean) => ({ height: "30px", padding: "0 10px", borderRadius:
         <span :style="{ color: DARK.soft }">{{ board.count }}</span>
       </span>
       <span class="flex h-1" :style="{ background: DARK.line }"><span :style="{ width: board.pct, background: '#5FD08A' }" /></span>
-      <span v-if="items.length === 0" :style="{ color: DARK.soft }">现在没有等待中的事</span>
+      <span v-if="items.length === 0" :style="{ color: DARK.soft }">{{ $t("现在没有等待中的事") }}</span>
       <span v-for="i in items" :key="i.state + i.text" class="flex gap-2 leading-[18px]">
         <span class="min-w-10" :style="{ color: i.color }">{{ i.state }}</span>
         <span :style="{ color: DARK.text }">{{ i.text }}</span>
       </span>
     </div>
     <EmployeeCard :id="selected" />
-    <span class="text-xs" :style="{ color: DARK.soft }">点人物看他在做什么；点工作组门牌聚焦那个讨论串。</span>
+    <span class="text-xs" :style="{ color: DARK.soft }">{{ $t("点人物看他在做什么；点工作组门牌聚焦那个讨论串。") }}</span>
     <div class="flex min-h-[120px] flex-1 flex-col gap-2.5 overflow-y-auto">
-      <span v-if="recent.length === 0" class="text-xs text-[#7E8190]">等待事件…</span>
+      <span v-if="recent.length === 0" class="text-xs text-[#7E8190]">{{ $t("等待事件…") }}</span>
       <div v-for="r in recent" :key="r.e.seq" class="flex flex-col gap-0.5 text-xs leading-[18px]">
         <span class="font-mono text-[#7E8190]">{{ hhmmss(r.e.at) }} · {{ r.where }}</span>
         <span :style="{ color: DARK.text }"><span class="font-mono" :style="{ color: r.color }">{{ r.name }}</span> {{ r.what }}</span>

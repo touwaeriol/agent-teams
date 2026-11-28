@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 服务器: remote machines employees may reach over SSH through the console (not 节点, which run the
 // agents). Configured here once; each project picks some and grants them to roles (项目设置 → 环境).
+import { $t } from "@/i18n";
 import { computed, ref } from "vue";
 import { useServers } from "@/api/queries";
 import type { ServerView } from "@/api/views";
@@ -27,16 +28,16 @@ function openDialog(s: ServerView | null) {
         <div class="flex items-start gap-1">
           <NavButton />
           <div class="flex flex-col gap-1.5">
-            <h1 class="text-2xl font-semibold">服务器</h1>
+            <h1 class="text-2xl font-semibold">{{ $t("服务器") }}</h1>
             <p class="max-w-[640px] text-[13px] leading-[22px] text-muted-foreground">
-              员工可以 ssh 上去部署、排查的远程机器。在这里配置一次，再到项目设置 → 环境里选用并按岗位授权。员工的会话经主节点登录，节点上拿不到密码或私钥；每次连接和命令都有访问记录。
+              {{ $t("员工可以 ssh 上去部署、排查的远程机器。在这里配置一次，再到项目设置 → 环境里选用并按岗位授权。员工的会话经主节点登录，节点上拿不到密码或私钥；每次连接和命令都有访问记录。") }}
             </p>
           </div>
         </div>
-        <el-button type="primary" class="h-[38px]" @click="openDialog(null)">添加服务器</el-button>
+        <el-button type="primary" class="h-[38px]" @click="openDialog(null)">{{ $t("添加服务器") }}</el-button>
       </header>
       <Loading v-if="servers.isLoading.value" />
-      <EmptyState v-if="servers.data.value && list.length === 0" title="还没有服务器" description="点“添加服务器”，填主机、用户和密码或私钥，然后测试连接。" />
+      <EmptyState v-if="servers.data.value && list.length === 0" :title="$t('还没有服务器')" :description="$t('点“添加服务器”，填主机、用户和密码或私钥，然后测试连接。')" />
       <ServerCard v-for="s in list" :key="s.id" :server="s" @edit="openDialog(s)" />
     </div>
     <ServerDialog v-model:open="dialog" :server="editing" />

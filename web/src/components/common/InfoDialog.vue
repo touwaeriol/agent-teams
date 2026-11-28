@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** A dialog that only shows information, closed with one button. */
 import { cn } from "@/lib/utils";
 
@@ -16,7 +17,7 @@ const open = defineModel<boolean>("open", { required: true });
     </template>
     <slot />
     <template #footer>
-      <el-button type="primary" @click="open = false">完成</el-button>
+      <el-button type="primary" @click="open = false">{{ $t("完成") }}</el-button>
     </template>
   </el-dialog>
 </template>

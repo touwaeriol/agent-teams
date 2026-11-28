@@ -1,5 +1,6 @@
 // Maps the office snapshot / SSE status frames (api.md §3.11) onto the
 // <Office/> renderer's props (web/src/office). Pure, unit-tested.
+import { $t } from "@/i18n";
 import type { StatusFrame } from "@/api/events";
 import type { CheckView, NodeBrief, OfficeSnapshot, ReplayEvent, ThreadView } from "@/api/views";
 import type { EmployeeStatus, OfficeEmployee, OfficeStatusEvent, OfficeThread, OfficeWidgetData } from "@/office";
@@ -63,7 +64,7 @@ export function staffSummary(employees: OfficeEmployee[], statuses: Map<string, 
 }
 
 export function staffSummaryText(s: StaffSummary): string {
-  return `编制 ${s.headcount} 人 · 干活 ${s.working} · 空闲 ${s.idle} · 讨论串 ${s.threads} 个进行中`;
+  return $t("编制 {headcount} 人 · 干活 {working} · 空闲 {idle} · 讨论串 {threads} 个进行中", { headcount: s.headcount, working: s.working, idle: s.idle, threads: s.threads });
 }
 
 export function toOfficeThreads(threads: ThreadView[]): OfficeThread[] {
@@ -122,8 +123,8 @@ export function boardSummary(threads: ThreadView[], focus: number | null): Board
   const total = scope.reduce((n, t) => n + t.counts.tasks_total, 0);
   const one = focus === null ? undefined : scope[0];
   return {
-    title: one ? `#${one.no} ${one.title}` : `全项目 · ${scope.length} 个讨论串`,
-    count: one ? `${done} / ${total}` : `小任务 ${done} / ${total}`,
+    title: one ? `#${one.no} ${one.title}` : $t("全项目 · {scopeCount} 个讨论串", { scopeCount: scope.length }),
+    count: one ? `${done} / ${total}` : $t("小任务 {done} / {total}", { done, total }),
     pct: total ? `${Math.round((done / total) * 100)}%` : "0%",
   };
 }

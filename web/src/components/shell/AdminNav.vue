@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // Admin console sidebar: back to the user side, then the admin pages.
+import { $t } from "@/i18n";
 import { ArrowLeft, Boxes, FileClock, Github, MessageSquareText, SlidersHorizontal, Timer, Users } from "lucide-vue-next";
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
@@ -11,29 +12,29 @@ import { cn } from "@/lib/utils";
 const props = defineProps<{ me: UserView }>();
 const emit = defineEmits<{ navigate: [] }>();
 const ITEMS = [
-  { to: "/admin/users", label: "用户", hint: "账号、角色和节点", icon: Users },
-  { to: "/admin/platform", label: "平台设置", hint: "注册、限额和语音输入", icon: SlidersHorizontal },
-  { to: "/admin/library", label: "内置命令和插件", hint: "内置命令、插件、技能", icon: Boxes },
-  { to: "/admin/feedback", label: "反馈", hint: "用户提交的反馈", icon: MessageSquareText },
-  { to: "/admin/jobs", label: "后台任务", hint: "定时运行的任务和运行记录", icon: Timer },
-  { to: "/admin/github-app", label: "GitHub App", hint: "平台 App 的创建和状态", icon: Github },
-  { to: "/admin/audit", label: "审计日志", hint: "管理操作记录", icon: FileClock },
+  { to: "/admin/users", label: $t("用户"), hint: $t("账号、角色和节点"), icon: Users },
+  { to: "/admin/platform", label: $t("平台设置"), hint: $t("注册、限额和语音输入"), icon: SlidersHorizontal },
+  { to: "/admin/library", label: $t("内置命令和插件"), hint: $t("内置命令、插件、技能"), icon: Boxes },
+  { to: "/admin/feedback", label: $t("反馈"), hint: $t("用户提交的反馈"), icon: MessageSquareText },
+  { to: "/admin/jobs", label: $t("后台任务"), hint: $t("定时运行的任务和运行记录"), icon: Timer },
+  { to: "/admin/github-app", label: $t("GitHub App"), hint: $t("平台 App 的创建和状态"), icon: Github },
+  { to: "/admin/audit", label: $t("审计日志"), hint: $t("管理操作记录"), icon: FileClock },
 ];
 const name = computed(() => props.me.display_name || props.me.email.split("@")[0]);
 </script>
 
 <template>
-  <nav aria-label="管理后台" class="flex h-full w-[264px] shrink-0 flex-col border-r bg-sidebar">
+  <nav :aria-label="$t('管理后台')" class="flex h-full w-[264px] shrink-0 flex-col border-r bg-sidebar">
     <div class="flex h-14 items-center gap-2.5 px-[18px] font-semibold">
       <Logo class="size-5" />
-      管理后台
+      {{ $t("管理后台") }}
     </div>
     <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3">
       <RouterLink to="/projects" class="flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-foreground/80 hover:bg-accent/60" @click="emit('navigate')">
         <ArrowLeft class="size-4" :stroke-width="1.8" />
-        返回用户端
+        {{ $t("返回用户端") }}
       </RouterLink>
-      <span class="block px-2.5 pb-1.5 pt-4 text-xs text-muted-foreground">管理</span>
+      <span class="block px-2.5 pb-1.5 pt-4 text-xs text-muted-foreground">{{ $t("管理") }}</span>
       <RouterLink v-for="i in ITEMS" :key="i.to" v-slot="{ href, navigate, isActive }" :to="i.to" custom>
         <a
           :href="href"
@@ -58,7 +59,7 @@ const name = computed(() => props.me.display_name || props.me.email.split("@")[0
       <Initial :name="name" bg="#F4E3D7" fg="#A24E1E" :size="32" round />
       <span class="flex flex-col">
         <span class="text-[13px]">{{ name }}</span>
-        <span class="text-[11px] text-muted-foreground">管理员</span>
+        <span class="text-[11px] text-muted-foreground">{{ $t("管理员") }}</span>
       </span>
     </div>
   </nav>

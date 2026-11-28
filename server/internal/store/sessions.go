@@ -27,7 +27,8 @@ const sessionCols = `s.token_hash, s.user_id, s.expires_at, s.created_at, s.last
 const sessionUserCols = `u.id AS u_id, u.email AS u_email, u.active AS u_active,
 	u.max_nodes AS u_max_nodes, u.created_at AS u_created_at,
 	u.display_name AS u_display_name, u.max_running_threads AS u_max_running_threads,
-	u.must_change_password AS u_must_change_password, u.last_login_at AS u_last_login_at`
+	u.must_change_password AS u_must_change_password, u.last_login_at AS u_last_login_at,
+	u.locale AS u_locale`
 
 func (s *Store) sessions(ctx context.Context) *gorm.DB { return s.g(ctx).Table("at_sessions s") }
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Login board (登录 / 注册 tabs). A successful login writes the user into the `me` query, which
 // switches the router to the app (router.ts guards on it).
+import { $t } from "@/i18n";
 import { useQueryClient } from "@tanstack/vue-query";
 import { ref } from "vue";
 import { auth } from "@/api/actions";
@@ -34,9 +35,9 @@ async function submit() {
 </script>
 
 <template>
-  <AuthShell subtitle="把需求交给项目统筹，看团队在你的机器上把活干完。">
+  <AuthShell :subtitle="$t('把需求交给项目统筹，看团队在你的机器上把活干完。')">
     <form class="flex flex-col gap-4 rounded-2xl border bg-panel p-6" @submit.prevent="submit">
-      <div role="tablist" aria-label="登录或注册" class="grid grid-cols-2 gap-1 rounded-[10px] bg-sidebar p-1">
+      <div role="tablist" :aria-label="$t('登录或注册')" class="grid grid-cols-2 gap-1 rounded-[10px] bg-sidebar p-1">
         <button
           v-for="m in ['login', 'register'] as Mode[]"
           :key="m"
@@ -46,15 +47,15 @@ async function submit() {
           :class="cn('h-[34px] rounded-lg', mode === m ? 'bg-white font-semibold shadow-[0_1px_2px_rgba(0,0,0,0.08)] dark:bg-raised' : '')"
           @click="mode = m"
         >
-          {{ m === "login" ? "登录" : "注册" }}
+          {{ m === "login" ? $t("登录") : $t("注册") }}
         </button>
       </div>
       <label class="flex flex-col gap-1.5">
-        <span class="text-[13px] font-medium">邮箱</span>
+        <span class="text-[13px] font-medium">{{ $t("邮箱") }}</span>
         <input v-model="email" type="email" required autocomplete="email" placeholder="you@example.com" :class="AUTH_INPUT" />
       </label>
       <label class="flex flex-col gap-1.5">
-        <span class="text-[13px] font-medium">密码</span>
+        <span class="text-[13px] font-medium">{{ $t("密码") }}</span>
         <input
           v-model="password"
           type="password"
@@ -63,12 +64,12 @@ async function submit() {
           :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
           :class="AUTH_INPUT"
         />
-        <span v-if="mode === 'register'" class="text-xs text-muted-foreground">至少 8 位。第一个注册的账号自动成为管理员。</span>
+        <span v-if="mode === 'register'" class="text-xs text-muted-foreground">{{ $t("至少 8 位。第一个注册的账号自动成为管理员。") }}</span>
       </label>
       <p v-if="error" role="alert" class="text-[13px] text-destructive">{{ error }}</p>
       <button type="submit" :disabled="busy" :class="AUTH_SUBMIT">
         <Spinner v-if="busy" />
-        {{ mode === "login" ? "登录" : "注册并登录" }}
+        {{ mode === "login" ? $t("登录") : $t("注册并登录") }}
       </button>
     </form>
   </AuthShell>

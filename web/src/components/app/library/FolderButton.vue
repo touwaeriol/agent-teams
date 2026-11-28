@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** "选择文件夹": picks a folder and emits its text files (hidden files left out). */
 import { FolderUp } from "lucide-vue-next";
 import { ref } from "vue";
@@ -19,5 +20,5 @@ async function picked(e: Event) {
 
 <template>
   <input ref="input" type="file" multiple hidden webkitdirectory directory @change="picked" />
-  <el-button size="small" class="!ml-0" :disabled="pending" @click="input?.click()"><FolderUp /> 选择文件夹</el-button>
+  <el-button size="small" class="!ml-0" :disabled="pending" @click="input?.click()"><FolderUp /> {{ $t("选择文件夹") }}</el-button>
 </template>

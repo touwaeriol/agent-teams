@@ -63,7 +63,7 @@ afterEach(() => {
 
 const created = (over: Partial<AdminUserView> = {}): AdminUserView => ({
   id: "u9", email: "new@example.com", display_name: "", role: "user", active: true, max_nodes: null, must_change_password: true,
-  created_at: "2026-11-23T00:00:00Z", nodes: 0, running_tasks: 0, max_running_threads: null, last_login_at: null, ...over,
+  created_at: "2026-11-23T00:00:00Z", nodes: 0, running_tasks: 0, max_running_threads: null, last_login_at: null, locale: "", ...over,
 });
 
 describe("new user form (pure)", () => {

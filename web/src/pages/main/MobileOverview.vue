@@ -3,6 +3,7 @@
 // control 讨论串 / 资料库 / 定时任务 on top with ✕ on the left and search on the right; under
 // it the thread list (交付物, 等你处理, 进行中, then compact 已暂停 / 已完成 / 已归档), the library or
 // the scheduled tasks.
+import { $t } from "@/i18n";
 import { Search, X } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import type { ThreadView } from "@/api/views";
@@ -27,11 +28,11 @@ function toggleSearch() {
 </script>
 
 <template>
-  <section aria-label="项目概览" class="fixed inset-0 z-30 flex flex-col bg-panel lg:hidden">
+  <section :aria-label="$t('项目概览')" class="fixed inset-0 z-30 flex flex-col bg-panel lg:hidden">
     <header class="flex h-14 shrink-0 items-center gap-2 border-b border-[#EFEDE8] px-2.5">
-      <IconButton label="关闭" @click="emit('close')"><X :stroke-width="1.8" /></IconButton>
+      <IconButton :label="$t('关闭')" @click="emit('close')"><X :stroke-width="1.8" /></IconButton>
       <div class="flex min-w-0 flex-1 justify-center">
-        <div role="tablist" aria-label="项目概览" class="flex h-9 items-center rounded-full bg-raised p-[3px]">
+        <div role="tablist" :aria-label="$t('项目概览')" class="flex h-9 items-center rounded-full bg-raised p-[3px]">
           <button
             v-for="t in OVERVIEW_TABS"
             :key="t.id"
@@ -45,7 +46,7 @@ function toggleSearch() {
           </button>
         </div>
       </div>
-      <IconButton v-if="tab !== 'schedules'" :label="tab === 'threads' ? '搜索讨论串' : '搜索资料库'" :active="searching" @click="toggleSearch"><Search :stroke-width="1.8" /></IconButton>
+      <IconButton v-if="tab !== 'schedules'" :label="tab === 'threads' ? $t('搜索讨论串') : $t('搜索资料库')" :active="searching" @click="toggleSearch"><Search :stroke-width="1.8" /></IconButton>
       <span v-else class="size-8 shrink-0" aria-hidden="true" />
     </header>
     <div v-if="tab === 'threads'" class="flex min-h-0 flex-1 flex-col">

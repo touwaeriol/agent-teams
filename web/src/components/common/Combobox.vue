@@ -2,6 +2,7 @@
 // A select you can type into (the React Combobox): the list filters as you type (`filter`, default
 // "value contains the text"), arrows and Enter pick, and with `allow-custom` whatever was typed can
 // be used as is. Emits `pick` with the chosen value; rich rows go in the `option` / `hint` slots.
+import { $t } from "@/i18n";
 import { ChevronsUpDown } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import { cn } from "@/lib/utils";
@@ -19,13 +20,13 @@ const props = withDefaults(
     id?: string;
     class?: string;
   }>(),
-  { modelValue: "", filter: undefined, placeholder: undefined, empty: "没有匹配的选项", id: undefined, class: undefined },
+  { modelValue: "", filter: undefined, placeholder: undefined, empty: $t("没有匹配的选项"), id: undefined, class: undefined },
 );
 const emit = defineEmits<{ pick: [value: string] }>();
 const text = ref("");
 const contains = (o: O, t: string) => o.value.toLowerCase().includes(t.trim().toLowerCase());
 const shown = computed(() => props.options.filter((o) => (props.filter ?? contains)(o, text.value)).slice(0, 100));
-const noMatch = computed(() => (props.allowCustom && text.value.trim() ? `按 Enter 使用“${text.value.trim()}”` : props.empty));
+const noMatch = computed(() => (props.allowCustom && text.value.trim() ? $t("按 Enter 使用“{text}”", { text: text.value.trim() }) : props.empty));
 
 function pick(v: unknown) {
   const value = String(v ?? "").trim();
@@ -45,7 +46,7 @@ function pick(v: unknown) {
     default-first-option
     :filter-method="(t: string) => (text = t)"
     :loading="loading"
-    loading-text="加载中……"
+    :loading-text="$t('加载中……')"
     :no-match-text="noMatch"
     :no-data-text="noMatch"
     :placeholder="placeholder"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** The role's look: palette, outfit, accessory, or a random one, with the avatar preview. */
 import { computed } from "vue";
 import { roles as roleActions } from "@/api/actions";
@@ -24,12 +25,12 @@ const random = useAction(() => roleActions.randomLook(props.role.role), { onSucc
     </div>
     <div class="flex min-w-0 flex-1 flex-col gap-2">
       <span class="flex flex-wrap items-center gap-1.5">
-        <span class="w-[30px] text-xs text-muted-foreground">颜色</span>
+        <span class="w-[30px] text-xs text-muted-foreground">{{ $t("颜色") }}</span>
         <button
           v-for="hex in layout.looks.colors"
           :key="hex"
           type="button"
-          :aria-label="`颜色 ${hex}`"
+          :aria-label="$t('颜色 {hex}', { hex })"
           :aria-pressed="look.color === hex"
           class="size-5 rounded-full border-2 p-0"
           :style="{ background: hex, borderColor: look.color === hex ? '#1F1E1C' : '#FFFFFF' }"
@@ -37,15 +38,15 @@ const random = useAction(() => roleActions.randomLook(props.role.role), { onSucc
         />
       </span>
       <span class="flex flex-wrap items-center gap-1.5">
-        <span class="w-[30px] text-xs text-muted-foreground">衣着</span>
+        <span class="w-[30px] text-xs text-muted-foreground">{{ $t("衣着") }}</span>
         <ToggleChip v-for="(piece, key) in layout.looks.outfits" :key="key" :on="look.outfit === key" @click="set({ outfit: String(key) })">{{ piece.label }}</ToggleChip>
       </span>
       <span class="flex flex-wrap items-center gap-1.5">
-        <span class="w-[30px] text-xs text-muted-foreground">配饰</span>
+        <span class="w-[30px] text-xs text-muted-foreground">{{ $t("配饰") }}</span>
         <ToggleChip v-for="(piece, key) in layout.looks.accessories" :key="key" :on="look.accessory === key" @click="set({ accessory: String(key) })">{{ piece.label }}</ToggleChip>
-        <button type="button" :disabled="random.isPending.value" class="ml-auto h-6 rounded-md border border-dashed border-[#C9C5BC] bg-white px-2 text-xs" @click="random.mutate()">随机一个</button>
+        <button type="button" :disabled="random.isPending.value" class="ml-auto h-6 rounded-md border border-dashed border-[#C9C5BC] bg-white px-2 text-xs" @click="random.mutate()">{{ $t("随机一个") }}</button>
       </span>
-      <span class="text-[11px] text-[#8A877F]">同岗位的成员衣着一致，发色和编号自动区分（{{ tags[0] }}、{{ tags[1] }}…）</span>
+      <span class="text-[11px] text-[#8A877F]">{{ $t("同岗位的成员衣着一致，发色和编号自动区分（{n}、{n2}…）", { n: tags[0], n2: tags[1] }) }}</span>
     </div>
   </div>
 </template>

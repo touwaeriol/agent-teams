@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** Which nodes a role may run on: a multi-pick menu that stays open; empty = any node. */
 import { Check, ChevronDown } from "lucide-vue-next";
 import { computed, ref } from "vue";
@@ -27,13 +28,13 @@ function command(c: string) {
     </button>
     <template #dropdown>
       <el-dropdown-menu>
-        <div v-if="list.length === 0" class="px-2 py-1.5 text-xs text-muted-foreground">还没有节点</div>
+        <div v-if="list.length === 0" class="px-2 py-1.5 text-xs text-muted-foreground">{{ $t("还没有节点") }}</div>
         <el-dropdown-item v-for="n in list" :key="n.id" :command="n.id">
           <span class="flex size-4 items-center justify-center"><Check v-if="value.includes(n.id)" /></span>
           <span class="font-mono">{{ n.name }}</span>
-          <span class="ml-auto pl-4 text-xs text-muted-foreground">{{ n.online ? "在线" : "离线" }}</span>
+          <span class="ml-auto pl-4 text-xs text-muted-foreground">{{ n.online ? $t("在线") : $t("离线") }}</span>
         </el-dropdown-item>
-        <el-dropdown-item v-if="value.length > 0" command="">不限节点</el-dropdown-item>
+        <el-dropdown-item v-if="value.length > 0" command="">{{ $t("不限节点") }}</el-dropdown-item>
       </el-dropdown-menu>
     </template>
   </el-dropdown>
