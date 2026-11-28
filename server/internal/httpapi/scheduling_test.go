@@ -47,3 +47,38 @@ func TestSchedulingSettings(t *testing.T) {
 		t.Fatalf("anonymous = %d", r.Status)
 	}
 }
+
+// TestMyLocale: empty until set, a round trip through PUT and /api/me, per-user storage, unknown
+// languages refused (422), and no access without signing in.
+func TestMyLocale(t *testing.T) {
+	h := newHarness(t)
+	a, _ := h.signUp("a@example.com")
+	b, _ := h.signUp("b@example.com")
+	var me UserView
+	a.must(200, "GET", "/api/me", nil, &me)
+	if me.Locale != "" {
+		t.Fatalf("default %q", me.Locale)
+	}
+	a.must(200, "PUT", "/api/me/locale", map[string]string{"locale": "ja"}, &me)
+	if me.Locale != "ja" {
+		t.Fatalf("put %q", me.Locale)
+	}
+	a.must(200, "GET", "/api/me", nil, &me)
+	if me.Locale != "ja" {
+		t.Fatalf("after put %q", me.Locale)
+	}
+	b.must(200, "GET", "/api/me", nil, &me)
+	if me.Locale != "" {
+		t.Fatalf("another user's locale changed: %q", me.Locale)
+	}
+	if r := a.do("PUT", "/api/me/locale", map[string]string{"locale": "fr"}); r.Status != 422 {
+		t.Fatalf("fr = %d %s", r.Status, r.Body)
+	}
+	a.must(200, "PUT", "/api/me/locale", map[string]string{"locale": ""}, &me)
+	if me.Locale != "" {
+		t.Fatalf("reset %q", me.Locale)
+	}
+	if r := h.client().do("PUT", "/api/me/locale", map[string]string{"locale": "en"}); r.Status != 401 {
+		t.Fatalf("anonymous = %d", r.Status)
+	}
+}

@@ -1,12 +1,13 @@
 // How a new node is started: host install script, docker run, or docker compose.
+import { $t } from "@/i18n";
 import type { Enrollment } from "@/api/views";
 
 export type EnrollMode = "host" | "docker" | "compose";
 
 export const enrollModes: { id: EnrollMode; label: string; field: "install" | "docker" | "compose"; hint: string; exec: string }[] = [
-  { id: "host", label: "宿主机", field: "install", exec: "", hint: "在 Linux 机器上直接运行，装成 systemd 用户服务，用机器上已登录的 Claude Code / Codex。" },
-  { id: "docker", label: "Docker", field: "docker", exec: "docker exec -it <容器名>", hint: "装了 Docker 的机器上运行这条命令。镜像里带好了守护进程、Claude Code、Codex、git 和 gh。" },
-  { id: "compose", label: "Docker Compose", field: "compose", exec: "docker compose exec node", hint: "保存为 compose.yml（含令牌，建议 chmod 600），在同一目录执行 docker compose up -d。代理、授权、资源上限的写法在注释里。" },
+  { id: "host", label: $t("宿主机"), field: "install", exec: "", hint: $t("在 Linux 机器上直接运行，装成 systemd 用户服务，用机器上已登录的 Claude Code / Codex。") },
+  { id: "docker", label: "Docker", field: "docker", exec: $t("docker exec -it <容器名>"), hint: $t("装了 Docker 的机器上运行这条命令。镜像里带好了守护进程、Claude Code、Codex、git 和 gh。") },
+  { id: "compose", label: "Docker Compose", field: "compose", exec: "docker compose exec node", hint: $t("保存为 compose.yml（含令牌，建议 chmod 600），在同一目录执行 docker compose up -d。代理、授权、资源上限的写法在注释里。") },
 ];
 
 const KEY = "at.nodes.enrollMode";

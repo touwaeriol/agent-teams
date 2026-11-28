@@ -254,13 +254,13 @@ func (s *Service) resign(ctx context.Context, tx *core.Tx, sessionID string, res
 func (s *Service) prepare(ctx context.Context, tx *core.Tx, m *protocol.ToolCall) (*call, Result) {
 	sc, err := core.SessionContextOf(ctx, tx, string(m.SessionID))
 	if err != nil {
-		return nil, failText("会话不存在")
+		return nil, failText("no such session")
 	}
 	if reason := s.unavailable(sc.Employee, m.Tool); reason != "" {
 		return nil, failText("%s", reason)
 	}
 	if err := s.validator.ValidateToolInput(m.Tool, m.Args); err != nil {
-		return nil, failText("参数不正确：%v", err)
+		return nil, failText("invalid arguments: %v", err)
 	}
 	th, err := callThread(ctx, tx, sc)
 	if err != nil {
@@ -270,7 +270,7 @@ func (s *Service) prepare(ctx context.Context, tx *core.Tx, m *protocol.ToolCall
 	if th != nil {
 		t, err := core.ThreadByID(ctx, tx, *th)
 		if err != nil {
-			return nil, failText("讨论串不存在")
+			return nil, failText("no such thread")
 		}
 		c.thread = &t
 		if c.sc.Employee.ProjectMember() {
@@ -298,13 +298,13 @@ func callThread(ctx context.Context, q core.DB, sc core.SessionContext) (*string
 func (s *Service) unavailable(e core.Employee, tool string) string {
 	meta, ok := protocol.Tools[tool]
 	if !ok || s.handlers[tool] == nil {
-		return "没有这个平台工具：" + tool
+		return "no such platform tool: " + tool
 	}
 	if !meta.AvailableTo(protocol.Tier(e.Tier)) {
-		return fmt.Sprintf("%s 不能使用 %s", e.Tier, tool)
+		return fmt.Sprintf("a %s cannot use %s", e.Tier, tool)
 	}
 	if meta.Requires == "can_delegate" && !e.Spec.CanDelegate {
-		return "这个岗位没有派子任务的权限"
+		return "this role may not assign subtasks"
 	}
 	return ""
 }
@@ -337,7 +337,7 @@ func (s *Service) ignoreUserErrors(err error) error {
 
 func failure(err error) Result {
 	if errors.Is(err, core.ErrNotFound) {
-		return failText("没有找到")
+		return failText("not found")
 	}
 	return failText("%s", err.Error())
 }
@@ -485,7 +485,7 @@ func (s *Service) refreshThread(ctx context.Context, tx *core.Tx, threadID *stri
 
 func requireThread(c *call) (core.Thread, error) {
 	if c.thread == nil {
-		return core.Thread{}, refuse("这个工具只能在讨论串里使用")
+		return core.Thread{}, refuse("this tool works only in a thread")
 	}
 	return *c.thread, nil
 }

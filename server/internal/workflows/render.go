@@ -6,15 +6,15 @@ import (
 )
 
 var kindText = map[string]string{
-	"work":       "做事",
-	"review":     "审查",
-	"decision":   "决策",
-	approvalKind: "等用户确认",
+	"work":       "work",
+	"review":     "review",
+	"decision":   "decision",
+	approvalKind: "user approval",
 }
 
-const renderGuide = `拆任务、指派岗位时按流程图来：每个步骤建成交给对应岗位的任务，用 depends_on 体现先后；一个步骤“然后”指向几个步骤时，这几个步骤并行（各自只依赖前一步，不要串起来），一个步骤有几条“然后”指进来时，要等它们全部完成（depends_on 写全）；一个步骤连出几条“条件分支”时只走其中一条：按线上的条件判断走哪条，没走的分支上的步骤不建任务，汇合处只依赖实际走过的那条；审查、决策步骤不通过时，按“不通过退回”的连线给被退回的步骤开返工任务，再重新走后面的步骤；“等用户确认”的步骤用 ask_user 请用户确认后再继续；岗位是组长（lead）的步骤由你自己做。流程是参考：遇到流程没覆盖的情况可以调整或加任务，但要在回复里说明原因。`
+const renderGuide = `Split tasks and assign roles by the flow chart: make each step a task for its role and express the order with depends_on. When a step has several "then" arrows, those steps run in parallel (each depends only on the step before; do not chain them); when several "then" arrows point into a step, it waits for all of them (list them all in depends_on). When a step has several "branch" arrows, take only one: choose by the condition on the line, create no tasks for the steps of the branches not taken, and at the join depend only on the branch actually taken. When a review or decision step fails, follow its "reject" arrow: open a rework task for the step it points to, then run the later steps again. For a "user approval" step, ask the user with ask_user and continue only after they approve. Steps whose role is the lead are yours to do. The flow is a reference: you may adjust it or add tasks for cases it does not cover, but say why in your reply.`
 
-const multiGuide = `这个项目配了 %d 个工作流程，适用于不同的事。拆每个任务前，先按任务的性质挑最合适的一个流程（必要时组合几个），在回复里说明这次按哪个流程走，然后照它拆任务。每个流程内部的规则：`
+const multiGuide = `This project has %d workflows, each for a different kind of work. Before splitting each task, pick the flow that best fits it (combine several if needed), say in your reply which flow you are following, then split the task by it. Rules inside every flow:`
 
 // RenderAll is the lead's system prompt section for the project's flows: one flow as Render, several
 // under one heading with a note to pick the flow that fits each task.
@@ -23,9 +23,9 @@ func RenderAll(flows []Flow, titles map[string]string) string {
 		return Render(flows[0], titles)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "## 工作流程（%d 个）\n"+multiGuide+"%s\n", len(flows), len(flows), renderGuide)
+	fmt.Fprintf(&b, "## Workflows (%d)\n"+multiGuide+" %s\n", len(flows), len(flows), renderGuide)
 	for _, w := range flows {
-		b.WriteString("\n### 流程：" + w.Name + "\n")
+		b.WriteString("\n### Flow: " + w.Name + "\n")
 		writeFlow(&b, w, titles)
 		b.WriteString("\n")
 	}
@@ -36,26 +36,26 @@ func RenderAll(flows []Flow, titles map[string]string) string {
 // their titles (a key missing there is a role no longer in the team).
 func Render(w Flow, titles map[string]string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "## 工作流程：%s\n%s\n", w.Name, renderGuide)
+	fmt.Fprintf(&b, "## Workflow: %s\n%s\n", w.Name, renderGuide)
 	writeFlow(&b, w, titles)
 	return strings.TrimRight(b.String(), "\n")
 }
 
 func writeFlow(b *strings.Builder, w Flow, titles map[string]string) {
 	if w.Description != "" {
-		b.WriteString("流程说明（用户编写）：\n" + w.Description + "\n")
+		b.WriteString("Flow description (written by the user):\n" + w.Description + "\n")
 	}
 	byID := map[string]FlowStep{}
 	for _, s := range w.Steps {
 		byID[s.ID] = s
 	}
-	b.WriteString("\n流程图（Mermaid；实线 = 然后，带条件的实线 = 条件分支，虚线 = 不通过退回）：\n")
+	b.WriteString("\nFlow chart (Mermaid; solid = then, solid with a condition = branch, dashed = reject):\n")
 	b.WriteString(Mermaid(w, titles))
-	b.WriteString("\n\n每一步的详细说明（按先后排列）：\n")
+	b.WriteString("\n\nEach step in detail (in flow order):\n")
 	for i, s := range Ordered(w) {
-		fmt.Fprintf(b, "%d. %s（%s，%s）\n", i+1, s.Name, roleText(s, titles), kindText[s.Kind])
+		fmt.Fprintf(b, "%d. %s (%s, %s)\n", i+1, s.Name, roleText(s, titles), kindText[s.Kind])
 		if s.Instructions != "" {
-			b.WriteString("   说明：" + indent(s.Instructions) + "\n")
+			b.WriteString("   Instructions: " + indent(s.Instructions) + "\n")
 		}
 		if out := outgoing(w, s.ID, byID); out != "" {
 			b.WriteString("   " + out + "\n")
@@ -76,7 +76,7 @@ func Mermaid(w Flow, titles map[string]string) string {
 		from, to := ids[e.From], ids[e.To]
 		switch {
 		case e.Kind == rejectEdge:
-			fmt.Fprintf(&b, "  %s -.->|\"%s\"| %s\n", from, mermaidText(firstNonEmpty(e.Label, "不通过退回")), to)
+			fmt.Fprintf(&b, "  %s -.->|\"%s\"| %s\n", from, mermaidText(firstNonEmpty(e.Label, "reject")), to)
 		case e.Label != "":
 			fmt.Fprintf(&b, "  %s -->|\"%s\"| %s\n", from, mermaidText(e.Label), to)
 		default:
@@ -90,9 +90,9 @@ func Mermaid(w Flow, titles map[string]string) string {
 func shortRole(s FlowStep, titles map[string]string) string {
 	switch {
 	case s.Role == "":
-		return "用户"
+		return "user"
 	case s.Role == leadRole:
-		return "组长"
+		return "lead"
 	}
 	if t := titles[s.Role]; t != "" {
 		return t
@@ -115,17 +115,17 @@ func firstNonEmpty(a, b string) string {
 func roleText(s FlowStep, titles map[string]string) string {
 	switch {
 	case s.Role == "":
-		return "用户"
+		return "the user"
 	case s.Role == leadRole:
-		return "组长，你自己"
+		return "the lead: you"
 	}
 	if t, ok := titles[s.Role]; ok && t != "" && t != s.Role {
-		return "岗位 " + t + "（" + s.Role + "）"
+		return "role " + t + " (" + s.Role + ")"
 	}
 	if _, ok := titles[s.Role]; ok {
-		return "岗位 " + s.Role
+		return "role " + s.Role
 	}
-	return "岗位 " + s.Role + "，已不在团队里，换一个合适的岗位"
+	return "role " + s.Role + ", no longer on the team: use a suitable role instead"
 }
 
 func outgoing(w Flow, from string, byID map[string]FlowStep) string {
@@ -137,9 +137,9 @@ func outgoing(w Flow, from string, byID map[string]FlowStep) string {
 		name := byID[e.To].Name
 		switch {
 		case e.Kind == branchEdge:
-			branch = append(branch, "如果"+e.Label+" → "+name)
+			branch = append(branch, "if "+e.Label+" → "+name)
 		case e.Label != "":
-			name += "（" + e.Label + "）"
+			name += " (" + e.Label + ")"
 		}
 		switch e.Kind {
 		case rejectEdge:
@@ -150,15 +150,15 @@ func outgoing(w Flow, from string, byID map[string]FlowStep) string {
 	}
 	var parts []string
 	if len(next) > 0 {
-		parts = append(parts, "然后 → "+strings.Join(next, "、"))
+		parts = append(parts, "then → "+strings.Join(next, ", "))
 	}
 	if len(branch) > 0 {
-		parts = append(parts, "按条件只走一条："+strings.Join(branch, "；"))
+		parts = append(parts, "take only one by condition: "+strings.Join(branch, "; "))
 	}
 	if len(back) > 0 {
-		parts = append(parts, "不通过退回 → "+strings.Join(back, "、"))
+		parts = append(parts, "on failure, back to → "+strings.Join(back, ", "))
 	}
-	return strings.Join(parts, "；")
+	return strings.Join(parts, "; ")
 }
 
 func indent(text string) string { return strings.ReplaceAll(text, "\n", "\n   ") }

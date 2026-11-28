@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** The last hour from /office/replay, played back with the same renderer. */
 import { useQuery } from "@tanstack/vue-query";
 import { computed } from "vue";
@@ -22,7 +23,7 @@ const barStyle = { background: DARK.panel, border: `1px solid ${DARK.line}`, bor
 </script>
 
 <template>
-  <div v-if="replay.error.value" class="text-sm text-[#F2A65E]">回放数据取不到：{{ errorText(replay.error.value) }}</div>
+  <div v-if="replay.error.value" class="text-sm text-[#F2A65E]">{{ $t("回放数据取不到：{error}", { error: errorText(replay.error.value) }) }}</div>
   <Loading v-else-if="!replay.data.value" />
   <template v-else>
     <ReplayBar :replay="r" :style="barStyle" />

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * Model · 思考强度: the models the session's CLI listed (each with its effort levels) and the
  * effort levels of the current model as chips. A runtime without a separate effort (Antigravity)
@@ -15,15 +16,15 @@ const rows = computed(() => (props.models.length ? props.models : props.model ? 
 function sub(m: ModelChoice): string {
   if (props.runtime === "antigravity") return m.description ?? "";
   const e = m.efforts ?? [];
-  const parts = [e.length ? `思考强度：${e.map(effortLabel).join(" / ")}` : ""];
-  if (props.runtime === "claude" && props.models.length && !m.supports_auto) parts.push("不支持自动模式");
+  const parts = [e.length ? $t("思考强度：{e}", { e: e.map(effortLabel).join(" / ") }) : ""];
+  if (props.runtime === "claude" && props.models.length && !m.supports_auto) parts.push($t("不支持自动模式"));
   return parts.filter(Boolean).join(" · ");
 }
 </script>
 
 <template>
   <div class="flex flex-col text-[13px]" data-testid="model-menu">
-    <div class="px-2.5 pb-1 pt-0.5 text-xs font-semibold text-foreground">模型</div>
+    <div class="px-2.5 pb-1 pt-0.5 text-xs font-semibold text-foreground">{{ $t("模型") }}</div>
     <div class="scroll-thin flex max-h-[min(40vh,320px)] flex-col overflow-y-auto">
       <button
         v-for="m in rows"
@@ -42,10 +43,10 @@ function sub(m: ModelChoice): string {
         </span>
         <Check v-if="m.id === model" class="mt-0.5 size-3.5 shrink-0" />
       </button>
-      <p v-if="!models.length" class="px-2.5 py-1 text-xs text-muted-foreground">会话在节点上打开后才能列出可选的模型。</p>
+      <p v-if="!models.length" class="px-2.5 py-1 text-xs text-muted-foreground">{{ $t("会话在节点上打开后才能列出可选的模型。") }}</p>
     </div>
-    <div class="mt-1 border-t px-2.5 pb-1 pt-2 text-xs font-semibold text-foreground">思考强度</div>
-    <p v-if="runtime === 'antigravity'" class="px-2.5 pb-1 text-xs text-muted-foreground">强度是模型的一部分：在上面选带 high / xhigh 的模型即可。</p>
+    <div class="mt-1 border-t px-2.5 pb-1 pt-2 text-xs font-semibold text-foreground">{{ $t("思考强度") }}</div>
+    <p v-if="runtime === 'antigravity'" class="px-2.5 pb-1 text-xs text-muted-foreground">{{ $t("强度是模型的一部分：在上面选带 high / xhigh 的模型即可。") }}</p>
     <div v-else-if="efforts.length" class="flex flex-wrap gap-1 px-2.5 pb-1.5" data-testid="effort-chips">
       <button
         v-for="e in efforts"
@@ -58,7 +59,7 @@ function sub(m: ModelChoice): string {
         @click="e !== effort && emit('effort', e)"
       >{{ effortLabel(e) }}</button>
     </div>
-    <p v-else class="px-2.5 pb-1 text-xs text-muted-foreground">这个模型没有可选的思考强度。</p>
-    <p class="mt-1 border-t px-2.5 pt-1.5 text-[11.5px] leading-[18px] text-muted-foreground">{{ note || "模型和思考强度只改这个会话，不改岗位设置。" }}</p>
+    <p v-else class="px-2.5 pb-1 text-xs text-muted-foreground">{{ $t("这个模型没有可选的思考强度。") }}</p>
+    <p class="mt-1 border-t px-2.5 pt-1.5 text-[11.5px] leading-[18px] text-muted-foreground">{{ note || $t("模型和思考强度只改这个会话，不改岗位设置。") }}</p>
   </div>
 </template>

@@ -1,6 +1,7 @@
 package toolsvc
 
 import (
+	"strings"
 	"testing"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
@@ -35,7 +36,7 @@ func TestFirstFailureNamesRepo(t *testing.T) {
 	if !ok || f.Repo != "o/web" {
 		t.Fatalf("failure %+v", f)
 	}
-	if text := pushFailText(f, 2); text[:len("仓库 o/web：")] != "仓库 o/web：" {
+	if text := pushFailText(f, 2); !strings.HasPrefix(text, "repository o/web: ") {
 		t.Fatalf("text %q", text)
 	}
 }

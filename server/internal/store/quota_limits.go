@@ -1,6 +1,9 @@
 package store
 
-import "context"
+import (
+	"context"
+	"slices"
+)
 
 // Default scheduling thresholds (at_users.quota_*_pct NULL): a node whose 5-hour window has used
 // DefaultQuotaFiveHourPct percent, or any weekly window DefaultQuotaWeeklyPct, gets no new session
@@ -45,4 +48,15 @@ func (s *Store) UserQuotaLimits(ctx context.Context, userID string) (QuotaLimits
 func (s *Store) SaveUserQuotaLimits(ctx context.Context, userID string, l QuotaLimits) error {
 	return Changed(s.g(ctx).Table("at_users").Where("id = ?", userID).
 		Updates(map[string]any{"quota_five_hour_pct": l.FiveHourPct, "quota_weekly_pct": l.WeeklyPct}))
+}
+
+// Locales are the interface languages a user can pick ("" = follow the browser).
+var Locales = []string{"zh-CN", "en", "ko", "ja"}
+
+// ValidLocale reports whether l is "" or one of Locales.
+func ValidLocale(l string) bool { return l == "" || slices.Contains(Locales, l) }
+
+// SaveUserLocale stores the user's interface language (callers validate with ValidLocale).
+func (s *Store) SaveUserLocale(ctx context.Context, userID, locale string) error {
+	return Changed(s.g(ctx).Table("at_users").Where("id = ?", userID).Update("locale", locale))
 }

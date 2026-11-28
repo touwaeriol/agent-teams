@@ -1,4 +1,5 @@
 // Helpers for hosted deliverables (files published with publish_file), pure and unit-tested.
+import { $t } from "@/i18n";
 import type { DeliverableView } from "@/api/views";
 
 /** Published with publish_file: the console hosts its files and the viewer renders them. */
@@ -47,8 +48,8 @@ export function markdownUrl(baseUrl: string): (url: string) => string {
   };
 }
 
-const RENDER_LABEL: Record<string, string> = { html: "网页", markdown: "Markdown 文档", image: "图片", pdf: "PDF", text: "文本" };
+const RENDER_LABEL: Record<string, string> = { html: $t("网页"), markdown: $t("Markdown 文档"), image: $t("图片"), pdf: "PDF", text: $t("文本") };
 
 export function renderLabel(render: string | undefined): string {
-  return RENDER_LABEL[render ?? ""] ?? "文件";
+  return RENDER_LABEL[render ?? ""] ?? $t("文件");
 }

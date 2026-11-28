@@ -38,7 +38,7 @@ func (s *Service) listDeliverables(ctx context.Context, tx *core.Tx, c *call) (R
 	if in.Thread != nil {
 		t, err := core.ThreadByNo(ctx, tx, c.emp().ProjectID, *in.Thread)
 		if err != nil {
-			return Result{}, refuse("没有讨论串 #%d", *in.Thread)
+			return Result{}, refuse("no thread #%d", *in.Thread)
 		}
 		f.ThreadID = t.ID
 	}
@@ -57,9 +57,9 @@ func (s *Service) listDeliverables(ctx context.Context, tx *core.Tx, c *call) (R
 		lines = append(lines, summaryLine(sum))
 	}
 	if len(lines) == 0 {
-		return okJSON("这个项目还没有交付物。", out), nil
+		return okJSON("This project has no deliverables yet.", out), nil
 	}
-	text := strings.Join(lines, "\n") + "\n用 read_deliverable(deliverable_id) 把文件取到工作目录；改好后 publish_file 带同一个 deliverable_id 发布新版本。"
+	text := strings.Join(lines, "\n") + "\nFetch the files into your working directory with read_deliverable(deliverable_id); after changes, publish_file with the same deliverable_id publishes a new version."
 	return okJSON(text, out), nil
 }
 
@@ -85,7 +85,7 @@ func (s *Service) deliverableSummary(ctx context.Context, tx *core.Tx, d core.De
 }
 
 func summaryLine(d protocol.DeliverableSummary) string {
-	where := "项目"
+	where := "project"
 	if d.Thread != nil {
 		where = fmt.Sprintf("#%d", *d.Thread)
 	}
@@ -94,9 +94,9 @@ func summaryLine(d protocol.DeliverableSummary) string {
 		if d.URL != nil {
 			url = " · " + *d.URL
 		}
-		return fmt.Sprintf("- %s · %s ·「%s」· %s · %s%s（外部链接，不能取回文件）", d.ID, d.Kind, d.Title, where, d.PublishedBy, url)
+		return fmt.Sprintf("- %s · %s · %q · %s · %s%s (external link, no files to fetch)", d.ID, d.Kind, d.Title, where, d.PublishedBy, url)
 	}
-	return fmt.Sprintf("- %s · %s ·「%s」· %s · 第 %d 版（共 %d 版，最新由 %s 发布）· %s", d.ID, d.Kind, d.Title, where,
+	return fmt.Sprintf("- %s · %s · %q · %s · version %d (of %d, latest published by %s) · %s", d.ID, d.Kind, d.Title, where,
 		d.LatestVersion, d.Versions, d.PublishedBy, stamp(d.UpdatedAt))
 }
 
@@ -119,10 +119,10 @@ func (s *Service) readDeliverable(ctx context.Context, tx *core.Tx, c *call) (Re
 	}
 	version := pickVersion(versions, in.Version)
 	if version == 0 && in.Version != nil {
-		return Result{}, refuse("交付物 %s 没有第 %d 版", d.ID, *in.Version)
+		return Result{}, refuse("deliverable %s has no version %d", d.ID, *in.Version)
 	}
 	if version == 0 {
-		return Result{}, refuse("交付物 %s 没有托管的文件", d.ID)
+		return Result{}, refuse("deliverable %s has no hosted files", d.ID)
 	}
 	files, err := s.core.Artifacts().LoadVersion(ctx, tx, d.ID, version)
 	if err != nil {
@@ -144,10 +144,10 @@ func (s *Service) readDeliverable(ctx context.Context, tx *core.Tx, c *call) (Re
 func (s *Service) projectHosted(ctx context.Context, tx *core.Tx, c *call, id string) (core.Deliverable, error) {
 	d, err := core.DeliverableByID(ctx, tx, c.sc.OwnerID, id)
 	if errors.Is(err, core.ErrNotFound) || (err == nil && d.ProjectID != c.emp().ProjectID) {
-		return d, refuse("这个项目没有交付物 %s（用 list_deliverables 查看）", id)
+		return d, refuse("this project has no deliverable %s (see list_deliverables)", id)
 	}
 	if err == nil && d.Detail["hosted"] != true {
-		return d, refuse("交付物 %s 是外部链接（%s），没有可以取回的文件", id, d.URL)
+		return d, refuse("deliverable %s is an external link (%s), with no files to fetch", id, d.URL)
 	}
 	return d, err
 }
@@ -175,14 +175,14 @@ func (s *Service) sendDownload(ctx context.Context, tx *core.Tx, c *call, id str
 		return nil, err
 	}
 	if sess.NodeID == nil {
-		return nil, refuse("会话不在任何节点上")
+		return nil, refuse("the session is on no node")
 	}
 	ok, err := core.NodeHasFeature(ctx, tx, *sess.NodeID, FeatureFileDownload)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, refuse("节点守护进程需要升级到支持 read_deliverable 的版本")
+		return nil, refuse("the node daemon needs an upgrade to a version with read_deliverable")
 	}
 	dl := &protocol.ToolDownload{DownloadID: protocol.DownloadID(core.NewID("dn")), DeliverableID: id, Version: version,
 		Files: make([]protocol.DownloadFile, len(files))}
@@ -230,26 +230,26 @@ func readResult(d core.Deliverable, version int, files []artifacts.ArtifactFile,
 
 func readText(r protocol.ReadDeliverableResult) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "已把交付物「%s」（%s，%s）第 %d 版的 %d 个文件取到工作目录的 %s/（不会被 git 提交）：", r.Title, r.DeliverableID,
+	fmt.Fprintf(&b, "Fetched the %[5]d files of version %[4]d of deliverable %[1]q (%[2]s, %[3]s) into %[6]s/ of your working directory (never committed by git):", r.Title, r.DeliverableID,
 		r.Kind, r.Version, len(r.Files), r.Dir)
 	for _, f := range r.Files {
-		fmt.Fprintf(&b, "\n- %s（%d 字节）", f.Path, f.Size)
+		fmt.Fprintf(&b, "\n- %s (%d bytes)", f.Path, f.Size)
 	}
-	b.WriteString("\n版本历史：")
+	b.WriteString("\nVersion history:")
 	for _, v := range r.Versions {
 		who := v.PublishedBy
 		if v.Thread != nil {
-			who += fmt.Sprintf("（#%d）", *v.Thread)
+			who += fmt.Sprintf(" (#%d)", *v.Thread)
 		}
-		fmt.Fprintf(&b, "\n- 第 %d 版 · %s · %s", v.Version, who, stamp(v.CreatedAt))
+		fmt.Fprintf(&b, "\n- version %d · %s · %s", v.Version, who, stamp(v.CreatedAt))
 	}
 	if len(r.Comments) > 0 {
-		b.WriteString("\n用户批注：")
+		b.WriteString("\nUser comments:")
 	}
 	for _, c := range r.Comments {
 		version := ""
 		if c.Version != nil {
-			version = fmt.Sprintf("（第 %d 版）", *c.Version)
+			version = fmt.Sprintf(" (version %d)", *c.Version)
 		}
 		fmt.Fprintf(&b, "\n- %s%s %s", stamp(c.CreatedAt), version, c.Text)
 	}
@@ -257,7 +257,7 @@ func readText(r protocol.ReadDeliverableResult) string {
 	if len(r.Files) == 1 {
 		target = r.Dir + "/" + r.Entry
 	}
-	fmt.Fprintf(&b, "\n改稿：直接修改这些文件，然后 publish_file(path=%q, kind=%q, title=%q, deliverable_id=%q) 发布成新版本（组长不能改文件，就把改稿派给成员）。",
+	fmt.Fprintf(&b, "\nTo revise: edit these files in place, then publish a new version with publish_file(path=%q, kind=%q, title=%q, deliverable_id=%q) (a lead cannot change files, so assign the revision to a member).",
 		target, r.Kind, r.Title, r.DeliverableID)
 	return b.String()
 }

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // 节点: totals, then one card per machine. Adding a node or rotating its token shows the one-time
 // commands (host, docker run, compose).
+import { $t } from "@/i18n";
 import { computed, ref } from "vue";
-import { useNodes } from "@/api/queries";
+import { useNodeGuide, useNodes } from "@/api/queries";
 import type { Enrollment } from "@/api/views";
 import EmptyState from "@/components/common/EmptyState.vue";
 import Loading from "@/components/common/Loading.vue";
@@ -19,7 +20,9 @@ const list = computed(() => nodes.data.value ?? []);
 const stats = computed(() => nodeStats(list.value));
 const adding = ref(false);
 const enrollment = ref<{ title: string; data: Enrollment } | null>(null);
-const guide = dockerGuideUrl();
+// On the 节点注册地址 when one is set, else on this page's address.
+const nodeGuide = useNodeGuide();
+const guide = computed(() => nodeGuide.data.value?.url || dockerGuideUrl());
 const shown = computed({ get: () => Boolean(enrollment.value), set: (v: boolean) => !v && (enrollment.value = null) });
 </script>
 
@@ -30,13 +33,13 @@ const shown = computed({ get: () => Boolean(enrollment.value), set: (v: boolean)
         <div class="flex items-start gap-1">
           <NavButton />
           <div class="flex flex-col gap-1.5">
-            <h1 class="text-2xl font-semibold">节点</h1>
-            <p class="text-[13px] text-muted-foreground">每台机器跑一个守护进程主动连上来。统筹、组长和成员都运行在这里，用的是机器上 Claude Code / Codex / Antigravity 的登录。</p>
+            <h1 class="text-2xl font-semibold">{{ $t("节点") }}</h1>
+            <p class="text-[13px] text-muted-foreground">{{ $t("每台机器跑一个守护进程主动连上来。统筹、组长和成员都运行在这里，用的是机器上 Claude Code / Codex / Antigravity 的登录。") }}</p>
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <a :href="guide" target="_blank" rel="noopener" class="text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" title="公开文档，可以直接发给 AI">Docker 部署说明</a>
-          <el-button type="primary" class="h-[38px]" @click="adding = true">添加节点</el-button>
+          <a :href="guide" target="_blank" rel="noopener" class="text-[13px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" :title="$t('公开文档，可以直接发给 AI')">{{ $t("Docker 部署说明") }}</a>
+          <el-button type="primary" class="h-[38px]" @click="adding = true">{{ $t("添加节点") }}</el-button>
         </div>
       </header>
       <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -47,10 +50,10 @@ const shown = computed({ get: () => Boolean(enrollment.value), set: (v: boolean)
       </div>
       <Scheduling />
       <Loading v-if="nodes.isLoading.value" />
-      <EmptyState v-if="nodes.data.value && list.length === 0" title="还没有节点" description="点“添加节点”，在你的机器上运行一行安装命令，或用 Docker / Docker Compose 启动，守护进程会连上来。" />
-      <NodeCard v-for="n in list" :key="n.id" :node="n" @token="(data: Enrollment) => (enrollment = { title: `${n.name} 的新令牌`, data })" />
+      <EmptyState v-if="nodes.data.value && list.length === 0" :title="$t('还没有节点')" :description="$t('点“添加节点”，在你的机器上运行一行安装命令，或用 Docker / Docker Compose 启动，守护进程会连上来。')" />
+      <NodeCard v-for="n in list" :key="n.id" :node="n" @token="(data: Enrollment) => (enrollment = { title: $t('{name} 的新令牌', { name: n.name }), data })" />
     </div>
-    <AddNode v-model:open="adding" @created="(name: string, data: Enrollment) => (enrollment = { title: `节点 ${name} 已创建`, data })" />
+    <AddNode v-model:open="adding" @created="(name: string, data: Enrollment) => (enrollment = { title: $t('节点 {name} 已创建', { name }), data })" />
     <EnrollmentDialog v-model:open="shown" :title="enrollment?.title ?? ''" :data="enrollment?.data ?? null" />
   </main>
 </template>

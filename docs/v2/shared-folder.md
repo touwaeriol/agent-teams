@@ -200,7 +200,12 @@ user whose folder cannot be switched on counts as one failure. A later migration
 ## Consistency
 
 geesefs gives close-to-open consistency with a 5 s stat cache, and no hard links or file locks.
-Git repositories, SQLite databases and `node_modules` do not belong in the folder.
+Git repositories, live databases (a PostgreSQL / MySQL data directory, an SQLite or DuckDB file in
+use) and `node_modules` do not belong in the folder: without locks two nodes can corrupt them, and
+every small write re-uploads the whole object. Employees are told how the folder works rather than
+given rules (`sharedFolderPrompt` in `node/src/fs/session.ts`), with the usual way out as a hint:
+keep such things on the node's local disk and put a snapshot in the folder when another node needs
+it, to be copied back to a local disk before use.
 
 ## Not in v1
 

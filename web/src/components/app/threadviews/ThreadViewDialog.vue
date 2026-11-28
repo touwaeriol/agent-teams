@@ -2,6 +2,7 @@
 // The thread's side views, opened from the ⋯ menu over the chat: 任务 (main tasks with their
 // small tasks), 交付物 (PRs, merge queue, CI and published deliverables) and 成员 (who is in
 // the thread, where they run, stop buttons). The chat itself stays conversation only.
+import { $t } from "@/i18n";
 import { X } from "lucide-vue-next";
 import { computed } from "vue";
 import type { ThreadView } from "@/api/views";
@@ -22,7 +23,7 @@ const tab = (id: ThreadViewId) => cn("h-9 border-b-2 px-2 text-[13px]", props.vi
     <div class="flex max-h-[85vh] flex-col">
       <div class="flex shrink-0 flex-col gap-2 border-b px-5 pb-0 pt-4">
         <h2 class="truncate pr-8 text-[15px] font-semibold">#{{ thread.no }} {{ thread.title }}</h2>
-        <nav aria-label="讨论串视图" class="-mb-px flex gap-1">
+        <nav :aria-label="$t('讨论串视图')" class="-mb-px flex gap-1">
           <button v-for="[id, label] in THREAD_VIEWS" :key="id" type="button" :aria-pressed="view === id" :class="tab(id)" @click="emit('view', id)">{{ label }}</button>
         </nav>
       </div>
@@ -34,7 +35,7 @@ const tab = (id: ThreadViewId) => cn("h-9 border-b-2 px-2 text-[13px]", props.vi
     </div>
     <button type="button" class="absolute right-4 top-4 rounded-md p-1 text-muted-foreground hover:bg-raised hover:text-foreground" @click="open = false">
       <X class="size-4" />
-      <span class="sr-only">关闭</span>
+      <span class="sr-only">{{ $t("关闭") }}</span>
     </button>
   </el-dialog>
 </template>

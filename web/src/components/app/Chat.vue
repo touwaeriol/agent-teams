@@ -3,6 +3,7 @@
 // threads the speaker opened, chat cards (todos, plan, artifact, 会话已恢复), cards inserted
 // where they were asked (`inserts` + the `insert` slot), and scrolling that follows new
 // messages and comes back to where you were. Used by the coordinator chat and the thread panel.
+import { $t } from "@/i18n";
 import { computed, ref, watch } from "vue";
 import { pendingOf, prunePending, withPending } from "@/api/pending";
 import { flattenMessages, useMessages } from "@/api/queries";
@@ -61,7 +62,7 @@ useChatScroll(() => props.cid, end, () => messages.value.length + props.inserts.
   <Loading v-if="query.isLoading.value" class="py-16" />
   <div v-else :class="cn('at-wrap flex min-w-0 flex-col', compact ? 'gap-[18px]' : 'gap-7')">
     <button v-if="query.hasNextPage.value" type="button" class="self-center text-xs text-muted-foreground hover:text-foreground" @click="query.fetchNextPage()">
-      {{ query.isFetchingNextPage.value ? "加载中…" : "更早的消息" }}
+      {{ query.isFetchingNextPage.value ? $t("加载中…") : $t("更早的消息") }}
     </button>
     <!-- What came before the first message (a thread's brief): only once the oldest page is loaded. -->
     <slot v-if="!query.hasNextPage.value" name="before" />

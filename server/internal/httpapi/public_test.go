@@ -35,7 +35,7 @@ func TestStaticWebApp(t *testing.T) {
 func TestInstallScriptAndDist(t *testing.T) {
 	h := newHarness(t)
 	c := h.client()
-	r := c.must(200, "GET", "/install-node.sh", nil, nil)
+	r := c.must(200, "GET", "/install-node.sh", nil, nil, "Host", "console.test")
 	if !strings.Contains(string(r.Body), `release_version=""`) || !strings.Contains(string(r.Body), "http://console.test") {
 		t.Fatal("script without release should have an empty version")
 	}
@@ -57,7 +57,7 @@ func TestInstallScriptAndDist(t *testing.T) {
 
 func TestNodeDockerGuideIsPublic(t *testing.T) {
 	h := newHarness(t)
-	r := h.client().must(200, "GET", "/node-docker.md", nil, nil)
+	r := h.client().must(200, "GET", "/node-docker.md", nil, nil, "Host", "console.test")
 	body := string(r.Body)
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "text/markdown") || strings.Contains(body, "__") ||
 		!strings.Contains(body, "AGENT_TEAMS_CONSOLE=http://console.test") || !strings.Contains(body, "image: ghcr.io/example/node:test") {

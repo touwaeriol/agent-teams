@@ -2,6 +2,7 @@
 // pod plates, name tags, bubbles, timers, widget text — plus the click
 // targets. Same transform as the canvas (scene px × scale). Vue JSX port of
 // web/src/office/overlay.tsx: function components, styles through sx() (Vue adds no px).
+import { $t } from "@/i18n";
 import type { CSSProperties, VNode } from "vue";
 import { colorOr, type ColorContext } from "./color";
 import type { DeskInstance, PodInstance, Scene } from "./compile";
@@ -20,9 +21,9 @@ export type OfficeAction =
   | { type: "openThread"; threadNo: number };
 
 export const STATE_LABELS: Record<string, string> = {
-  typing: "写代码", reading: "看代码", running: "跑命令", thinking: "思考", walking_to_board: "去任务板",
-  claiming: "领任务", returning: "回工位", raising_hand: "举手", idle: "空闲", waiting: "等待",
-  queued: "排队等工位", offline: "离线", broken: "出错",
+  typing: $t("写代码"), reading: $t("看代码"), running: $t("跑命令"), thinking: $t("思考"), walking_to_board: $t("去任务板"),
+  claiming: $t("领任务"), returning: $t("回工位"), raising_hand: $t("举手"), idle: $t("空闲"), waiting: $t("等待"),
+  queued: $t("排队等工位"), offline: $t("离线"), broken: $t("出错"),
 };
 
 /** Person box of the design (40 × 80): name tag and bubble offsets are relative to it. */
@@ -131,7 +132,7 @@ function Plate({ pod, scene, focus, onPlate }: { pod: PodInstance } & OverlayPro
       disabled={!clickable}
       onClick={() => onPlate(pod.threadNo)}
       aria-pressed={focus === pod.threadNo}
-      aria-label={`讨论串 ${pod.plate.text}`}
+      aria-label={$t("讨论串 {text}", { text: pod.plate.text })}
       style={sx({
         position: "absolute", left: pod.plate.at[0], top: pod.plate.at[1], pointerEvents: "auto", cursor: clickable ? "pointer" : "default",
         ...textBox(l, pod.plate.style, { vars: { threadColor: pod.color } }),
@@ -278,7 +279,7 @@ export function cardText(cards: BoardCards, c: OfficeQueueCard): string {
 }
 
 function cardLabel(c: OfficeQueueCard): string {
-  return [`#${c.thread_no} ${c.id}`, c.locked ? "等依赖" : "", c.reserved_for ? `预留给 ${c.reserved_for}` : "", c.assignee ? `点名 ${c.assignee}` : ""].filter(Boolean).join("，");
+  return [`#${c.thread_no} ${c.id}`, c.locked ? $t("等依赖") : "", c.reserved_for ? $t("预留给 {reserved_for}", { reserved_for: c.reserved_for }) : "", c.assignee ? $t("点名 {assignee}", { assignee: c.assignee }) : ""].filter(Boolean).join("，");
 }
 
 function QueueCards({ widget: w, cards, scene, queue }: { widget: Widget; cards: BoardCards; scene: Scene; queue: OfficeQueueCard[] }) {
@@ -292,7 +293,7 @@ function QueueCards({ widget: w, cards, scene, queue }: { widget: Widget; cards:
   });
   const muted = token(l, "labelMuted");
   return (
-    <div role="list" aria-label="任务队列" style={sx({ position: "absolute", left: 0, top: 0 })}>
+    <div role="list" aria-label={$t("任务队列")} style={sx({ position: "absolute", left: 0, top: 0 })}>
       {cardSlots(w, cards, queue).map((s, i) =>
         s.card ? (
           <span role="listitem" key={`${s.card.thread_no}-${s.card.id}`} title={cardLabel(s.card)} aria-label={cardLabel(s.card)} style={sx({ ...box(s.at, colorOr(cards.color ?? "{threadColor}", { ...c, vars: { threadColor: scene.threadColors.get(s.card.thread_no) ?? muted } })), opacity: s.card.locked ? 0.75 : 1 })}>
@@ -300,7 +301,7 @@ function QueueCards({ widget: w, cards, scene, queue }: { widget: Widget; cards:
             {cardText(cards, s.card)}
           </span>
         ) : (
-          <span role="listitem" key={`more-${i}`} aria-label={`还有 ${s.more} 个`} style={sx({ ...box(s.at, muted), justifyContent: "center" })}>+{s.more}</span>
+          <span role="listitem" key={`more-${i}`} aria-label={$t("还有 {more} 个", { more: s.more })} style={sx({ ...box(s.at, muted), justifyContent: "center" })}>+{s.more}</span>
         ),
       )}
     </div>
@@ -361,7 +362,7 @@ function PipelinePanel({ widget: w, scene, data, clock, reducedMotion, onAction 
   };
   const click = w.click !== "none" && onAction ? () => onAction({ type: "openMergeQueue" }) : undefined;
   return (
-    <div style={sx(style)} onClick={click} role={click ? "button" : undefined} aria-label="合并队列与 CI">
+    <div style={sx(style)} onClick={click} role={click ? "button" : undefined} aria-label={$t("合并队列与 CI")}>
       {(w.sections ?? []).map((s, i) => (
         <PipelineSectionView key={i} section={s} first={i === 0} titleColor={colorOr(st.title, c, "#F2C14E")} layout={l} data={data} clock={clock} still={reducedMotion} />
       ))}
@@ -378,7 +379,7 @@ function PipelineSectionView(p: { section: PipelineSection; first: boolean; titl
     return (
       <>
         {title}
-        {rows.length === 0 && <span style={sx({ color: "#7E8190" })}>空</span>}
+        {rows.length === 0 && <span style={sx({ color: "#7E8190" })}>{$t("空")}</span>}
         {rows.map((r, i) => (
           <span key={i} style={sx({ display: "flex", justifyContent: "space-between", gap: 6 })}>
             <span>{fillTemplate(s.row ?? "#{threadNo} {employee}", { threadNo: r.thread_no, employee: r.employee, taskId: r.task_id })}</span>
@@ -393,7 +394,7 @@ function PipelineSectionView(p: { section: PipelineSection; first: boolean; titl
     <>
       {title}
       <span style={sx({ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" })}>
-        {checks.length === 0 && <span style={sx({ color: "#7E8190" })}>无</span>}
+        {checks.length === 0 && <span style={sx({ color: "#7E8190" })}>{$t("无")}</span>}
         {checks.map((ch) => {
           const key = ch.conclusion || (ch.status === "completed" ? "none" : ch.status) || "none";
           const blinking = (s.blink ?? []).includes(key) && !p.still && !blinkOn(0.5, p.clock);
@@ -420,11 +421,11 @@ function Pager({ scene, actors, onPage }: OverlayProps) {
   const { index, count } = scene.page;
   return (
     <span style={sx({ position: "absolute", right: scene.width - (ax + aw), top: ay - 26, display: "flex", alignItems: "center", gap: 4, padding: "1px 6px", background: token(scene.layout, "labelDark"), color: "#E6E3DC", fontSize: 10 })}>
-      {hand && <span title="其他页有人举手" style={sx({ width: 6, height: 6, background: "#F2A65E" })} />}
-      {hidden > 0 && <span style={sx({ color: "#A8A49B" })}>+{hidden} 人</span>}
-      <button type="button" style={sx(btn)} aria-label="上一页" disabled={index === 0} onClick={() => onPage(index - 1)}>‹</button>
+      {hand && <span title={$t("其他页有人举手")} style={sx({ width: 6, height: 6, background: "#F2A65E" })} />}
+      {hidden > 0 && <span style={sx({ color: "#A8A49B" })}>+{hidden}  {$t("人")}</span>}
+      <button type="button" style={sx(btn)} aria-label={$t("上一页")} disabled={index === 0} onClick={() => onPage(index - 1)}>‹</button>
       {index + 1}/{count}
-      <button type="button" style={sx(btn)} aria-label="下一页" disabled={index === count - 1} onClick={() => onPage(index + 1)}>›</button>
+      <button type="button" style={sx(btn)} aria-label={$t("下一页")} disabled={index === count - 1} onClick={() => onPage(index + 1)}>›</button>
     </span>
   );
 }
@@ -440,7 +441,7 @@ function ActorTag({ actor: a, scene, looks, focus, selected, registerActor, onSe
   const work = workTag(a);
   // Seated, the desk (its own `#18 · t5` tag, or the thread's table) says what it works for; away, the name tag does.
   const away = Boolean(work) && !a.atDesk;
-  const label = `${a.employee.name}，${work ? `在 ${work} ` : ""}${STATE_LABELS[a.status.state] ?? a.status.state}${a.bubble ? `：${a.bubble.text}` : ""}`;
+  const label = $t("{name}，{n}{n2}{n3}", { name: a.employee.name, n: work ? $t("在 {work} ", { work }) : "", n2: STATE_LABELS[a.status.state] ?? a.status.state, n3: a.bubble ? `：${a.bubble.text}` : "" });
   const isSel = selected === a.id;
   const desk = a.atDesk ? scene.staff.get(a.id) : undefined;
   const dark = token(l, "labelDark");

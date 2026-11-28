@@ -33,4 +33,6 @@ export default tseslint.config(
   },
   // The office renderer and tests define small render-function components next to each other.
   { files: ["src/office/**/*.tsx", "src/**/*.test.ts"], rules: { "vue/one-component-per-file": "off" } },
+  // Node scripts (i18n codemod / extraction).
+  { files: ["scripts/**/*.mjs"], languageOptions: { globals: globals.node } },
 );

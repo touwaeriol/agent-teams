@@ -1,3 +1,4 @@
+import { $t } from "@/i18n";
 import type { ProjectView } from "@/api/views";
 
 /** Pinned first, then most recently updated; archived projects only if nothing else. */
@@ -16,7 +17,7 @@ export function projectGroups(list: ProjectView[], q = "") {
     .filter((p) => !needle || [p.name, p.description, ...(p.repos ?? []).map((r) => r.repo)].some((s) => s.toLowerCase().includes(needle)))
     .sort((a, b) => Number(a.archived) - Number(b.archived) || Date.parse(b.updated_at) - Date.parse(a.updated_at));
   return [
-    { title: "已置顶", items: shown.filter((p) => p.pinned && !p.archived) },
-    { title: "其他项目", items: shown.filter((p) => !p.pinned || p.archived) },
+    { title: $t("已置顶"), items: shown.filter((p) => p.pinned && !p.archived) },
+    { title: $t("其他项目"), items: shown.filter((p) => !p.pinned || p.archived) },
   ].filter((g) => g.items.length > 0);
 }

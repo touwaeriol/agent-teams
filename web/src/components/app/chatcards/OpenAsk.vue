@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** An open question: pick (A/B/C…) or write 其他, then submit; single one-click questions answer on pick. */
 import { computed, ref } from "vue";
 import { conversations } from "@/api/actions";
@@ -31,7 +32,7 @@ const showSubmit = computed(() => !quick.value || Boolean(choices.value[0]?.othe
 </script>
 
 <template>
-  <section :aria-label="`${who ?? question.asker} 的提问`" :class="cn(CARD, 'flex flex-col gap-4 px-4 py-3.5')">
+  <section :aria-label="$t('{n} 的提问', { n: who ?? question.asker })" :class="cn(CARD, 'flex flex-col gap-4 px-4 py-3.5')">
     <AskBlock
       v-for="(item, i) in items"
       :key="i"
@@ -51,7 +52,7 @@ const showSubmit = computed(() => !quick.value || Boolean(choices.value[0]?.othe
         class="h-8 rounded-lg bg-primary px-3.5 text-[13px] text-primary-foreground disabled:opacity-40"
         @click="answer.mutate(choices)"
       >
-        提交
+        {{ $t("提交") }}
       </button>
     </div>
   </section>

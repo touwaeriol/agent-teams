@@ -1,5 +1,6 @@
 // How each plan step status looks in the checklist card (PlanChecklist.vue): the icon, its
 // colour and the title's style. Theme tokens only, so light and dark both work.
+import { $t } from "@/i18n";
 import { CircleDashed, CircleEllipsis, CircleSlash, CircleX } from "lucide-vue-next";
 import { defineComponent, h, type Component } from "vue";
 import { stepStatus, type StepStatus } from "@/lib/threadList";
@@ -29,11 +30,11 @@ export interface StepLook {
 }
 
 const LOOKS: Record<StepStatus, StepLook> = {
-  done: { status: "done", label: "已完成", icon: CircleDone, iconClass: "text-muted-foreground", textClass: "text-muted-foreground line-through" },
-  doing: { status: "doing", label: "进行中", icon: CircleEllipsis, iconClass: "text-foreground", textClass: "text-foreground" },
-  todo: { status: "todo", label: "未开始", icon: CircleDashed, iconClass: "text-muted-foreground", textClass: "text-foreground" },
-  failed: { status: "failed", label: "失败", icon: CircleX, iconClass: "text-bad", textClass: "text-foreground" },
-  skipped: { status: "skipped", label: "已跳过", icon: CircleSlash, iconClass: "text-muted-foreground", textClass: "text-muted-foreground" },
+  done: { status: "done", label: $t("已完成"), icon: CircleDone, iconClass: "text-muted-foreground", textClass: "text-muted-foreground line-through" },
+  doing: { status: "doing", label: $t("进行中"), icon: CircleEllipsis, iconClass: "text-foreground", textClass: "text-foreground" },
+  todo: { status: "todo", label: $t("未开始"), icon: CircleDashed, iconClass: "text-muted-foreground", textClass: "text-foreground" },
+  failed: { status: "failed", label: $t("失败"), icon: CircleX, iconClass: "text-bad", textClass: "text-foreground" },
+  skipped: { status: "skipped", label: $t("已跳过"), icon: CircleSlash, iconClass: "text-muted-foreground", textClass: "text-muted-foreground" },
 };
 
 /** The look of a status; unknown ones render as todo. */

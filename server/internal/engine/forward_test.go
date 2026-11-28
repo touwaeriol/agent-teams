@@ -231,7 +231,7 @@ func TestForwardToThreadTool(t *testing.T) {
 	res := coord.mustCall("forward_to_thread", map[string]any{"thread_no": tm.thread.No, "latest": 2, "note": "用户对登录页的补充"})
 	var out protocol.ForwardToThreadResult
 	_ = json.Unmarshal(*res.Structured, &out)
-	if int(out.No) != tm.thread.No || out.Count != 2 || out.Created || !strings.Contains(text(res), "原样转给 #1") {
+	if int(out.No) != tm.thread.No || out.Count != 2 || out.Created || !strings.Contains(text(res), "unchanged to the lead of #1") {
 		t.Fatalf("tool result %+v %q", out, text(res))
 	}
 	send := tm.lead.expectSend("项目统筹附言：用户对登录页的补充")
@@ -254,7 +254,7 @@ func TestForwardToThreadTool(t *testing.T) {
 	}
 	tm.b.must(200, "POST", "/api/threads/"+tm.thread.ID+"/archive", nil, nil)
 	r := coord.call("forward_to_thread", map[string]any{"thread_no": tm.thread.No, "message_ids": []int64{msgs[0].ID}})
-	if r.Ok || !strings.Contains(text(r), "取消归档") || !strings.Contains(text(r), "new_thread") {
+	if r.Ok || !strings.Contains(text(r), "unarchive") || !strings.Contains(text(r), "new_thread") {
 		t.Fatalf("archived forward = %v %q", r.Ok, text(r))
 	}
 	res = coord.mustCall("forward_to_thread", map[string]any{"new_thread": map[string]any{"title": "手机号登录"}, "message_ids": []int64{msgs[0].ID}})

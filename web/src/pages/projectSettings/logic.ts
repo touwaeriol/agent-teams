@@ -1,16 +1,17 @@
 // 项目设置 dialog helpers (pure): approval wording, lead timeouts, usage rows.
+import { $t } from "@/i18n";
 import type { ProjectView, ProjectUsage } from "@/api/views";
 import type { RepoRef } from "@/components/app/repo/repo";
 
 export const APPROVAL_ROUTING_DESC: Record<string, string> = {
-  lead_first: "成员的权限请求先交给讨论串的组长：放行、拒绝，或拿不准时转给你。组长自己的请求总是问你。",
-  user: "成员的每个权限请求都直接出卡片问你。",
+  lead_first: $t("成员的权限请求先交给讨论串的组长：放行、拒绝，或拿不准时转给你。组长自己的请求总是问你。"),
+  user: $t("成员的每个权限请求都直接出卡片问你。"),
 };
 
 export const LEAD_TIMEOUTS = [60, 120, 300, 600];
 
 export function leadTimeoutLabel(seconds: number): string {
-  return seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`;
+  return seconds % 60 === 0 ? $t("{n} 分钟", { n: seconds / 60 }) : $t("{seconds} 秒", { seconds });
 }
 
 /** The select value for "follow the role" (an empty string cannot be an option value everywhere). */
@@ -36,7 +37,7 @@ export type UsageRow = { key: string; name: string; cost: number; tokens: Tokens
 export const inputTokens = (t: Tokens): number => t.input + t.cache_read + t.cache_write;
 
 export function threadRows(u: Pick<ProjectUsage, "by_thread">): UsageRow[] {
-  return (u.by_thread ?? []).map((t) => ({ key: String(t.thread_no ?? "c"), name: t.thread_no ? `#${t.thread_no} ${t.title}` : "项目统筹", cost: t.cost_usd, tokens: t.tokens }));
+  return (u.by_thread ?? []).map((t) => ({ key: String(t.thread_no ?? "c"), name: t.thread_no ? `#${t.thread_no} ${t.title}` : $t("项目统筹"), cost: t.cost_usd, tokens: t.tokens }));
 }
 
 export function employeeRows(u: Pick<ProjectUsage, "by_employee">): UsageRow[] {

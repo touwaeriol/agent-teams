@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * One block of a chat: a card, the user's bubble, a centred line, or a speaker's Markdown turn.
  * In the project chat the user's bubbles can be forwarded to a thread (hover action, or a
@@ -65,7 +66,7 @@ const remove = () => local.value && dropPending(local.value.key);
       type="button"
       role="checkbox"
       :aria-checked="Boolean(selected)"
-      aria-label="选择这条消息"
+      :aria-label="$t('选择这条消息')"
       :class="cn('mt-2.5 flex size-5 shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors', selected ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-panel')"
       @click.stop="pick"
     >
@@ -74,8 +75,8 @@ const remove = () => local.value && dropPending(local.value.key);
     <button
       v-else-if="forwardable && !local"
       type="button"
-      aria-label="转发到讨论串"
-      title="转发到讨论串"
+      :aria-label="$t('转发到讨论串')"
+      :title="$t('转发到讨论串')"
       class="mt-1.5 flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-raised hover:text-foreground focus-visible:opacity-100 group-hover/msg:opacity-100"
       @click.stop="emit('forward', id)"
     >
@@ -95,16 +96,16 @@ const remove = () => local.value && dropPending(local.value.key);
           )
         "
       >{{ block.message.content }}</div>
-      <p v-if="local?.status === 'sending'" class="self-end text-xs text-muted-foreground delay-500 duration-300 animate-in fade-in fill-mode-both" role="status">发送中…</p>
+      <p v-if="local?.status === 'sending'" class="self-end text-xs text-muted-foreground delay-500 duration-300 animate-in fade-in fill-mode-both" role="status">{{ $t("发送中…") }}</p>
       <p v-else-if="local?.status === 'failed'" class="self-end text-right text-xs text-destructive" role="alert" :title="local.error">
-        发送失败 ·
-        <button type="button" class="font-medium underline-offset-2 hover:underline" @click.stop="retry">重试</button>
+        {{ $t("发送失败 ·") }}
+        <button type="button" class="font-medium underline-offset-2 hover:underline" @click.stop="retry">{{ $t("重试") }}</button>
         ·
-        <button type="button" class="hover:underline underline-offset-2" @click.stop="remove">删除</button>
+        <button type="button" class="hover:underline underline-offset-2" @click.stop="remove">{{ $t("删除") }}</button>
       </p>
       <p v-if="line && back" class="self-end text-right text-xs text-muted-foreground" data-forward-line>
         <RouterLink :to="back" class="hover:text-foreground hover:underline">{{ line.text }}</RouterLink>
-        <span v-if="line.note" class="block">附言：{{ line.note }}</span>
+        <span v-if="line.note" class="block">{{ $t("附言：{note}", { note: line.note }) }}</span>
       </p>
     </div>
   </div>
@@ -117,7 +118,7 @@ const remove = () => local.value && dropPending(local.value.key);
     <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
       <Dot :color="speakerColor" :size="8" />
       {{ speakerName || block.message.author || "leader" }} · {{ clock(block.message.created_at) }}
-      <span v-if="block.message.kind === 'interrupt'" class="text-[#B4530B]">· 插话</span>
+      <span v-if="block.message.kind === 'interrupt'" class="text-[#B4530B]">{{ $t("· 插话") }}</span>
     </span>
     <Markdown :source="block.message.content" :class="compact ? 'text-sm leading-[26px]' : 'text-[15px] leading-7'" />
     <MessageDeliverables :pid="pid" :source="block.message.content" />

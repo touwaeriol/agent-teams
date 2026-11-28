@@ -15,6 +15,7 @@
 // utterance itself: after speech followed by SILENCE_MS of quiet (or MAX_UTTERANCE_MS of talking)
 // it sends input_audio_buffer.commit, and once more when recording stops; the completed
 // transcript of each committed item then replaces its grey partial text.
+import { $t } from "@/i18n";
 import { micErrorText } from "./audio";
 import { CONNECT_TIMEOUT, ConnectError, type Connect, type RealtimeEvent, type Transport, type TransportHandlers, type VoiceSessionInfo } from "./openai";
 import { Transcript } from "./transcript";
@@ -51,7 +52,7 @@ export interface VoiceDeps {
 
 /** The microphone (permission prompt included) must open within this. */
 export const MIC_TIMEOUT = 15_000;
-export const micTimeoutText = (ms: number) => `麦克风 ${ms / 1000} 秒内没有打开，请检查浏览器的权限弹框或麦克风设备`;
+export const micTimeoutText = (ms: number) => $t("麦克风 {n} 秒内没有打开，请检查浏览器的权限弹框或麦克风设备", { n: ms / 1000 });
 
 export const SPEECH_LEVEL = 0.06;
 export const SILENCE_MS = 800;
@@ -111,7 +112,7 @@ export class VoiceController {
       t = await this.open(opts.language, mic, run);
     } catch (e) {
       if (run !== this.run) return;
-      this.fail(e instanceof Error ? e.message : "连不上语音服务");
+      this.fail(e instanceof Error ? e.message : $t("连不上语音服务"));
       this.run++; // a connection that still finishes is closed (open checks run)
       return;
     }
@@ -142,7 +143,7 @@ export class VoiceController {
           clearTimeout(timer);
           if (late || run !== this.run) {
             stream.getTracks().forEach((t) => t.stop());
-            return reject(new Error("已取消"));
+            return reject(new Error($t("已取消")));
           }
           this.stream = stream;
           this.mark("mic");
@@ -173,7 +174,7 @@ export class VoiceController {
         this.transcript.dropPartials();
         this.deps.onText(this.transcript);
         this.settled?.();
-        this.fail(e instanceof Error ? e.message : "连不上语音服务");
+        this.fail(e instanceof Error ? e.message : $t("连不上语音服务"));
         this.run++;
       }
       return false;
@@ -185,7 +186,7 @@ export class VoiceController {
     const ms = this.deps.connectTimeoutMs ?? CONNECT_TIMEOUT;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new ConnectError(0, `连不上语音服务：${ms / 1000} 秒内没有连上`)), ms);
+      timer = setTimeout(() => reject(new ConnectError(0, $t("连不上语音服务：{n} 秒内没有连上", { n: ms / 1000 }))), ms);
     });
     return Promise.race([p, late]).finally(() => clearTimeout(timer));
   }
@@ -200,7 +201,7 @@ export class VoiceController {
     const ms = this.deps.connectTimeoutMs ?? CONNECT_TIMEOUT;
     const late = new Promise<never>((_, reject) => {
       mic.then(() => {
-        if (!done) timer = setTimeout(() => reject(new ConnectError(0, `连不上语音服务：${ms / 1000} 秒内没有连上`)), ms);
+        if (!done) timer = setTimeout(() => reject(new ConnectError(0, $t("连不上语音服务：{n} 秒内没有连上", { n: ms / 1000 }))), ms);
       }, reject);
     });
     // A transport is only usable with the microphone open (fakes may not wait for it).
@@ -216,7 +217,7 @@ export class VoiceController {
     const max = this.transport?.maxSeconds;
     if (!max) return;
     this.limitTimer = setTimeout(() => {
-      this.deps.onNotice?.(`单次录音最长 ${Math.round(max / 60)} 分钟，已自动结束`);
+      this.deps.onNotice?.($t("单次录音最长 {n} 分钟，已自动结束", { n: Math.round(max / 60) }));
       void this.stop();
     }, Math.max(1, max - 3) * 1000);
   }
@@ -231,7 +232,7 @@ export class VoiceController {
     };
     for (let attempt = 0; ; attempt++) {
       const session = await this.withTimeout(this.deps.mint(language));
-      if (run !== this.run) throw new Error("已取消");
+      if (run !== this.run) throw new Error($t("已取消"));
       if (session.expires_at && session.expires_at - SECRET_MARGIN_S < this.deps.now() / 1000 && attempt === 0) continue;
       this.clientCommits = session.client_commits;
       this.transportName = session.transport;
@@ -247,7 +248,7 @@ export class VoiceController {
       }
       if (run !== this.run) {
         t.close();
-        throw new Error("已取消");
+        throw new Error($t("已取消"));
       }
       return t;
     }
@@ -381,12 +382,12 @@ export class VoiceController {
     "conversation.item.input_audio_transcription.failed": (e) => {
       if (e.item_id) this.acknowledged(e.item_id);
       if (e.item_id) this.transcript.drop(e.item_id);
-      this.deps.onNotice?.("有一段语音没有识别出来");
+      this.deps.onNotice?.($t("有一段语音没有识别出来"));
     },
     error: (e) => {
       // Committing with too little audio is expected after a short noise.
       if (e.error?.code === "input_audio_buffer_commit_empty") return this.acknowledged();
-      this.deps.onNotice?.(`语音识别出错：${e.error?.message ?? "未知错误"}`);
+      this.deps.onNotice?.($t("语音识别出错：{n}", { n: e.error?.message ?? $t("未知错误") }));
     },
   };
 
@@ -396,7 +397,7 @@ export class VoiceController {
     this.transcript.settle();
     this.deps.onText(this.transcript);
     this.settled?.();
-    this.fail(message || "和语音服务的连接断开了");
+    this.fail(message || $t("和语音服务的连接断开了"));
     this.run++; // whatever of this recording still arrives (a late microphone, a transport) is closed
   }
 

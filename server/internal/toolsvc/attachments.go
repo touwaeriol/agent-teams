@@ -48,13 +48,13 @@ func (s *Service) loadAttachments(ctx context.Context, tx *core.Tx, c *call, ids
 		return nil, nil
 	}
 	if len(uniq) > core.MaxToolAttachments {
-		return nil, refuse("一次最多带 %d 个附件", core.MaxToolAttachments)
+		return nil, refuse("at most %d attachments at a time", core.MaxToolAttachments)
 	}
 	pid := c.emp().ProjectID
 	list, err := core.UseAttachments(ctx, tx, pid, uniq, s.core.AttachmentTTL)
 	switch {
 	case errors.Is(err, core.ErrAttachmentExpired):
-		return nil, refuse("%s。请让用户重新上传后再发", err.Error())
+		return nil, refuse("%s. Ask the user to upload it again, then send", err.Error())
 	case errors.Is(err, core.ErrNotFound):
 		return nil, refuse("%s", s.missingAttachments(ctx, tx, pid, uniq))
 	case err != nil:
@@ -75,7 +75,7 @@ func (s *Service) missingAttachments(ctx context.Context, tx *core.Tx, projectID
 	if len(bad) == 0 {
 		bad = ids
 	}
-	return fmt.Sprintf("附件 %s 不存在、不属于这个项目或还没上传完（用消息 [附件] 块里的 img_… id）", strings.Join(bad, "、"))
+	return fmt.Sprintf("attachment %s does not exist, is not in this project or has not finished uploading (use the img_… ids of a message's [附件] block)", strings.Join(bad, ", "))
 }
 
 // sessionNodeV2 is the node of the calling session when its daemon has attachments_v2; else a
@@ -86,14 +86,14 @@ func (s *Service) sessionNodeV2(ctx context.Context, tx *core.Tx, c *call, tool 
 		return "", err
 	}
 	if sess.NodeID == nil {
-		return "", refuse("会话不在任何节点上，没有工作目录可以放附件")
+		return "", refuse("the session is on no node, so there is no working directory for the attachment")
 	}
 	ok, err := core.NodeHasFeature(ctx, tx, *sess.NodeID, orchestrator.FeatureAttachmentsV2)
 	if err != nil {
 		return "", err
 	}
 	if !ok {
-		return "", refuse("节点守护进程版本过旧，不支持 %s：请升级节点守护进程", tool)
+		return "", refuse("the node daemon is too old for %s: upgrade the node daemon", tool)
 	}
 	return *sess.NodeID, nil
 }
@@ -125,7 +125,7 @@ func (s *Service) readAttachment(ctx context.Context, tx *core.Tx, c *call) (Res
 		url, err := blobstore.Or(s.core.Blobs).PresignGet(ctx, *a.StorageKey, AttachmentURLTTL,
 			blobstore.GetOptions{ContentType: "application/octet-stream"})
 		if errors.Is(err, blobstore.ErrNotConfigured) {
-			return Result{}, refuse("平台的文件存储还没有配置，暂时取不了附件")
+			return Result{}, refuse("the platform's file storage is not configured yet, so attachments cannot be fetched")
 		}
 		if err != nil {
 			return Result{}, err
@@ -135,7 +135,7 @@ func (s *Service) readAttachment(ctx context.Context, tx *core.Tx, c *call) (Res
 	}
 	out := protocol.ReadAttachmentResult{ID: protocol.AttachmentID(a.ID), Name: a.Name, ContentType: a.ContentType, Size: a.Size,
 		SHA256: ref.SHA256, LocalPath: ".attachments/" + a.ID}
-	text := fmt.Sprintf("附件 %s（%s，%s，%s）正在下载到工作目录的 .attachments/ 下（不会被 git 提交），用文件或命令行工具读取。",
+	text := fmt.Sprintf("Attachment %s (%s, %s, %s) is being downloaded into .attachments/ of your working directory (never committed by git); read it with file or command-line tools.",
 		a.ID, a.Name, a.ContentType, human(int64(a.Size)))
 	return Result{OK: true, Text: text, Structured: out, AttachmentDownload: dl}, nil
 }
@@ -145,7 +145,7 @@ func carried(files []core.AttachmentRef) string {
 	if len(files) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("（附带 %d 个附件）", len(files))
+	return " (with " + plural(len(files), "attachment") + ")"
 }
 
 // human is a byte count for people (1.5 MB).
@@ -159,4 +159,12 @@ func human(n int64) string {
 		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
 	}
 	return fmt.Sprintf("%d B", n)
+}
+
+// plural is "1 thing" or "n things".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }

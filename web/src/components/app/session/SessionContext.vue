@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * 上下文 of a session's 会话信息 panel: the total bar, "已使用 x% · 7.7万 / 100万" (the window is the
  * runtime's, never a fixed number). Hidden as a whole when the runtime reports no use (Antigravity)
@@ -24,7 +25,7 @@ defineExpose({ total });
 <template>
   <section v-if="total" class="flex flex-col gap-2" data-testid="session-context">
     <div class="flex items-center justify-between">
-      <SectionLabel>上下文</SectionLabel>
+      <SectionLabel>{{ $t("上下文") }}</SectionLabel>
       <slot name="actions" :total="total" />
     </div>
     <span class="text-[13px]" data-testid="context-total">{{ total.text }}</span>

@@ -1,3 +1,4 @@
+import { $t } from "@/i18n";
 import type { ProjectView } from "@/api/views";
 
 export function matchesProject(p: Pick<ProjectView, "name" | "description" | "repos">, q: string): boolean {
@@ -12,8 +13,8 @@ const byRecent = (a: Pick<ProjectView, "updated_at">, b: Pick<ProjectView, "upda
 export function sidebarGroups(list: ProjectView[], q: string) {
   const shown = list.filter((p) => matchesProject(p, q));
   const groups = [
-    { title: "已置顶", items: shown.filter((p) => p.pinned && !p.archived) },
-    { title: "最近使用", items: shown.filter((p) => !p.pinned && !p.archived).sort(byRecent) },
+    { title: $t("已置顶"), items: shown.filter((p) => p.pinned && !p.archived) },
+    { title: $t("最近使用"), items: shown.filter((p) => !p.pinned && !p.archived).sort(byRecent) },
   ].filter((g) => g.items.length > 0);
   return { shown, groups, archived: shown.filter((p) => p.archived) };
 }

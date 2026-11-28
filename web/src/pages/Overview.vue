@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Project home: the project's threads as cards with filters, and on the side what waits for
 // you and project memory.
+import { $t } from "@/i18n";
 import { computed, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { errorText } from "@/api/mutations";
@@ -19,16 +20,16 @@ const overview = useOverview(pid);
 const roles = useRoles();
 const filter = ref<Filter>("all");
 const o = computed(() => overview.data.value);
-const repos = computed(() => (o.value?.project.repos?.length ? o.value.project.repos.map((r) => r.repo).join("、") : "未关联仓库"));
+const repos = computed(() => (o.value?.project.repos?.length ? o.value.project.repos.map((r) => r.repo).join("、") : $t("未关联仓库")));
 const links = computed(() => [
-  { to: `/projects/${pid.value}/settings`, label: "项目设置", primary: false },
-  { to: `/projects/${pid.value}/office`, label: "办公室", primary: false },
-  { to: `/projects/${pid.value}`, label: "和项目统筹说话", primary: true },
+  { to: `/projects/${pid.value}/settings`, label: $t("项目设置"), primary: false },
+  { to: `/projects/${pid.value}/office`, label: $t("办公室"), primary: false },
+  { to: `/projects/${pid.value}`, label: $t("和项目统筹说话"), primary: true },
 ]);
 </script>
 
 <template>
-  <EmptyState v-if="overview.error.value" title="打不开项目首页" :description="errorText(overview.error.value)" />
+  <EmptyState v-if="overview.error.value" :title="$t('打不开项目首页')" :description="errorText(overview.error.value)" />
   <Loading v-else-if="!o" class="h-full" />
   <main v-else class="px-4 pb-12 pt-4 sm:px-8 sm:pt-8">
     <div class="mx-auto flex max-w-[1100px] flex-col gap-6">
@@ -39,8 +40,8 @@ const links = computed(() => [
             <h1 class="text-2xl font-semibold tracking-tight">{{ o.project.name }}</h1>
             <span class="flex flex-wrap gap-2 text-[13px] text-muted-foreground">
               <span class="font-mono text-foreground">{{ repos }}</span>
-              <span>工作方式 {{ o.project.work_mode === "worktree" ? "worktree" : "独立克隆" }}</span>
-              <span v-if="roles.data.value?.roles">团队模板：{{ teamSummary(roles.data.value.roles) }}</span>
+              <span>{{ $t("工作方式") }} {{ o.project.work_mode === "worktree" ? "worktree" : $t("独立克隆") }}</span>
+              <span v-if="roles.data.value?.roles">{{ $t("团队模板：{roles}", { roles: teamSummary(roles.data.value.roles) }) }}</span>
             </span>
           </div>
         </div>

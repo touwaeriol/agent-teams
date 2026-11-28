@@ -218,7 +218,7 @@ func TestFinishThenFinalReply(t *testing.T) {
 	tm.lead.expectSend("[Task t1 · dev-1 · done]")
 	turnStarted(tm.lead)
 	res := tm.lead.mustCall("finish", map[string]string{"summary": "调研结论：方案 A\n细节"})
-	if !strings.Contains(text(res), "回合结束后讨论串结束") {
+	if !strings.Contains(text(res), "when the turn ends the thread ends") {
 		t.Fatalf("finish result %q", text(res))
 	}
 	time.Sleep(600 * time.Millisecond)
@@ -271,7 +271,7 @@ func TestResubmitAfterCIFail(t *testing.T) {
 	c.checks("success") // the lead fixed CI
 	turnStarted(lead)
 	res := lead.mustCall("finish", map[string]string{"summary": "修好了 CI"})
-	if !strings.Contains(text(res), "重新提交验收") || !strings.Contains(text(res), "PR 留给人") {
+	if !strings.Contains(text(res), "resubmitted for acceptance") || !strings.Contains(text(res), "left for a person to merge") {
 		t.Fatalf("finish result %q", text(res))
 	}
 	v := c.view(t)
@@ -294,7 +294,7 @@ func TestResubmitAfterReject(t *testing.T) {
 	}
 	lead.expectSend("验收未通过")
 	res := lead.mustCall("open_pr", map[string]any{"title": "Acc", "body": "改好了"})
-	if !strings.Contains(text(res), "重新提交验收") {
+	if !strings.Contains(text(res), "resubmitted for acceptance") {
 		t.Fatalf("open_pr result %q", text(res))
 	}
 	if v := c.view(t); v.Status != "review" || v.Counts.Waiting != 1 {
@@ -303,7 +303,7 @@ func TestResubmitAfterReject(t *testing.T) {
 	c.reject(t)
 	lead.expectSend("验收未通过")
 	res = lead.mustCall("finish", map[string]string{"summary": "又改好了"})
-	if !strings.Contains(text(res), "等用户在页面上验收") {
+	if !strings.Contains(text(res), "waiting for the user's acceptance on the page") {
 		t.Fatalf("finish result %q", text(res))
 	}
 	c.accept(t)
@@ -491,7 +491,7 @@ func TestFinishDropsIdleTasks(t *testing.T) {
 	c.update(t, map[string]any{"status": "review"})
 	c.stays(t, "review", 600*time.Millisecond) // the blocked task holds the end
 	out := lead.mustCall("finish", map[string]any{"summary": "做完了"})
-	if got := text(out); !strings.Contains(got, "已取消没人在做的任务："+string(task.TaskID)) {
+	if got := text(out); !strings.Contains(got, "Cancelled the tasks nobody was working on: "+string(task.TaskID)) {
 		t.Fatalf("finish result: %s", got)
 	}
 	c.waitFor(t, "done after finish", func(v core.ThreadView) bool { return v.Status == "done" })

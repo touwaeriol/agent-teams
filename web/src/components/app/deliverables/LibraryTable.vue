@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { ChevronDown, ChevronUp } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import type { DeliverableView } from "@/api/views";
@@ -14,11 +15,11 @@ import Owner from "./Owner.vue";
 const props = defineProps<{ pid: string; items: DeliverableView[]; sort: { key: SortKey; dir: "asc" | "desc" } }>();
 const emit = defineEmits<{ sort: [key: SortKey] }>();
 const COLUMNS: { key: SortKey; label: string; className: string }[] = [
-  { key: "name", label: "名称", className: "min-w-0 flex-1" },
-  { key: "owner", label: "所有者", className: "w-32" },
-  { key: "modified", label: "修改日期", className: "w-40" },
-  { key: "size", label: "大小", className: "w-20" },
-  { key: "type", label: "类型", className: "w-16" },
+  { key: "name", label: $t("名称"), className: "min-w-0 flex-1" },
+  { key: "owner", label: $t("所有者"), className: "w-32" },
+  { key: "modified", label: $t("修改日期"), className: "w-40" },
+  { key: "size", label: $t("大小"), className: "w-20" },
+  { key: "type", label: $t("类型"), className: "w-16" },
 ];
 const root = ref<HTMLElement | null>(null);
 const width = useWidth(root);
@@ -30,7 +31,7 @@ const ariaSort = (k: SortKey) => (props.sort.key === k ? (props.sort.dir === "as
 </script>
 
 <template>
-  <div ref="root" role="table" aria-label="资料库" class="text-[13px]">
+  <div ref="root" role="table" :aria-label="$t('资料库')" class="text-[13px]">
     <div role="row" class="sticky top-0 z-[1] flex h-9 items-center gap-3 rounded-lg bg-raised px-3 text-xs text-foreground/80">
       <button
         v-for="c in cols"

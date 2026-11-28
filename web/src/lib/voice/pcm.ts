@@ -1,6 +1,7 @@
 // Audio for the server relay: microphone samples (Float32 at the AudioContext's rate, usually
 // 48 kHz) → 24 kHz mono PCM16 little-endian in 100 ms frames, which /api/voice/stream forwards
 // to OpenAI as input_audio_buffer.append. Pure and streaming, so tests check the math.
+import { $t } from "@/i18n";
 
 export const OUT_RATE = 24_000;
 /** 100 ms at 24 kHz. */
@@ -159,7 +160,7 @@ export interface Capture {
 /** Captures the stream as 24 kHz PCM16 frames until stop(). */
 export async function startCapture(stream: MediaStream, onFrame: (frame: ArrayBuffer) => void): Promise<Capture> {
   const Ctx = globalThis.AudioContext ?? (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctx || typeof AudioWorkletNode === "undefined") throw new Error("这个浏览器不支持录音（需要 HTTPS 和较新的浏览器）");
+  if (!Ctx || typeof AudioWorkletNode === "undefined") throw new Error($t("这个浏览器不支持录音（需要 HTTPS 和较新的浏览器）"));
   const ctx = new Ctx();
   const url = URL.createObjectURL(new Blob([CAPTURE_WORKLET], { type: "text/javascript" }));
   try {

@@ -1,5 +1,6 @@
 // Cards that wait for the user come in three looks: `soft` (thread panel), `plain` (Thread page
 // aside), `mobile` (44 px buttons in a grid).
+import { $t } from "@/i18n";
 import type { QuestionView } from "@/api/views";
 
 export type CardVariant = "soft" | "plain" | "mobile";
@@ -17,8 +18,8 @@ export const CODE: Record<CardVariant, string> = {
 };
 
 export function askerTitle(q: QuestionView, leadName?: string): string {
-  if (q.kind === "approval") return `${q.asker} 请求权限`;
-  return q.asker === leadName || q.asker.startsWith("lead") ? "组长提问" : `${q.asker} 提问`;
+  if (q.kind === "approval") return $t("{asker} 请求权限", { asker: q.asker });
+  return q.asker === leadName || q.asker.startsWith("lead") ? $t("组长提问") : $t("{asker} 提问", { asker: q.asker });
 }
 
 /** Who asks, when it is not the person the chat is with (the lead in a thread, the coordinator). */

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** One standalone repository, styled like ServerCard: URL, credential, access, default branch, host key,
  * projects; 测试连接 / 编辑 / 重置主机密钥 / 删除. */
 import { GitBranch, KeyRound, Lock } from "lucide-vue-next";
@@ -23,10 +24,10 @@ const result = ref<GitTestResult | null>(null);
 const test = useAction(() => gitRepos.test(props.repo.id), { invalidate: [keys.gitRepos], onSuccess: (r) => (result.value = r) });
 const reset = useAction(() => gitRepos.resetHostKey(props.repo.id), {
   invalidate: [keys.gitRepos],
-  success: "主机密钥已重置，再测试一次会重新固定",
+  success: $t("主机密钥已重置，再测试一次会重新固定"),
   onSuccess: () => (result.value = null),
 });
-const remove = useAction(() => gitRepos.remove(props.repo.id), { invalidate: [keys.gitRepos, keys.gitCredentials], success: "仓库已删除" });
+const remove = useAction(() => gitRepos.remove(props.repo.id), { invalidate: [keys.gitRepos, keys.gitCredentials], success: $t("仓库已删除") });
 const TONE = { ok: "text-ok", warn: "text-warn", bad: "text-bad" } as const;
 </script>
 
@@ -39,68 +40,68 @@ const TONE = { ok: "text-ok", warn: "text-warn", bad: "text-bad" } as const;
         <span class="min-w-0 break-all font-mono text-[13px] text-muted-foreground">{{ repo.url }}</span>
       </span>
       <span class="flex flex-wrap gap-2 [&>.el-button]:!ml-0">
-        <el-button size="small" :disabled="test.isPending.value" @click="test.mutate()"><Spinner v-if="test.isPending.value" /> 测试连接</el-button>
-        <el-button size="small" @click="emit('edit')">编辑</el-button>
+        <el-button size="small" :disabled="test.isPending.value" @click="test.mutate()"><Spinner v-if="test.isPending.value" /> {{ $t("测试连接") }}</el-button>
+        <el-button size="small" @click="emit('edit')">{{ $t("编辑") }}</el-button>
         <ConfirmAction
           v-if="repo.host_key_fp"
-          :title="`重置 ${title} 的主机密钥？`"
-          description="只在服务器确实换了主机密钥时使用。重置后下一次测试连接会重新固定看到的密钥。"
-          confirm-label="重置"
+          :title="$t('重置 {title} 的主机密钥？', { title })"
+          :description="$t('只在服务器确实换了主机密钥时使用。重置后下一次测试连接会重新固定看到的密钥。')"
+          :confirm-label="$t('重置')"
           variant="primary"
           size="small"
           @confirm="reset.mutate()"
-        >重置主机密钥</ConfirmAction>
+        >{{ $t("重置主机密钥") }}</ConfirmAction>
         <ConfirmAction
-          :title="`删除仓库 ${title}？`"
-          :description="repo.projects.length ? `还有项目在用：${repo.projects.map((p) => p.name).join('、')}。先在项目设置里移除。` : '平台上的镜像会一并删除；上游仓库不受影响。'"
+          :title="$t('删除仓库 {title}？', { title })"
+          :description="repo.projects.length ? $t('还有项目在用：{projects}。先在项目设置里移除。', { projects: repo.projects.map((p) => p.name).join('、') }) : $t('平台上的镜像会一并删除；上游仓库不受影响。')"
           size="small"
           @confirm="remove.mutate()"
-        >删除</ConfirmAction>
+        >{{ $t("删除") }}</ConfirmAction>
       </span>
     </div>
     <dl class="grid grid-cols-1 gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-2">
       <div class="flex gap-2">
-        <dt class="w-20 shrink-0 text-muted-foreground">认证方式</dt>
+        <dt class="w-20 shrink-0 text-muted-foreground">{{ $t("认证方式") }}</dt>
         <dd class="flex min-w-0 items-center gap-1.5">
           <template v-if="cred">
             <KeyRound v-if="cred.kind === 'ssh_key'" class="size-3.5 shrink-0" /><Lock v-else class="size-3.5 shrink-0" />
             <span class="truncate">{{ CRED_KIND_LABEL[cred.kind] }} · {{ cred.name }}</span>
           </template>
-          <template v-else>公开仓库（只读）</template>
+          <template v-else>{{ $t("公开仓库（只读）") }}</template>
         </dd>
       </div>
       <div class="flex gap-2">
-        <dt class="w-20 shrink-0 text-muted-foreground">访问权限</dt>
+        <dt class="w-20 shrink-0 text-muted-foreground">{{ $t("访问权限") }}</dt>
         <dd class="min-w-0">
           <span :class="TONE[access.tone]">{{ access.text }}</span>
-          <span v-if="repo.last_checked_at" class="text-muted-foreground"> · {{ timeAgo(repo.last_checked_at) }}检查</span>
+          <span v-if="repo.last_checked_at" class="text-muted-foreground"> {{ $t("· {last_checked_at}检查", { last_checked_at: timeAgo(repo.last_checked_at) }) }}</span>
         </dd>
       </div>
       <div class="flex gap-2">
-        <dt class="w-20 shrink-0 text-muted-foreground">默认分支</dt>
+        <dt class="w-20 shrink-0 text-muted-foreground">{{ $t("默认分支") }}</dt>
         <dd class="flex items-center gap-1.5 font-mono text-xs"><GitBranch class="size-3.5" />{{ repo.default_branch || "—" }}</dd>
       </div>
       <div class="flex gap-2">
-        <dt class="w-20 shrink-0 text-muted-foreground">凭据更新</dt>
+        <dt class="w-20 shrink-0 text-muted-foreground">{{ $t("凭据更新") }}</dt>
         <dd>
           {{ cred ? timeAgo(cred.cred_updated_at) : "—" }}
-          <span v-if="days !== null && days <= 14" class="text-warn"> · {{ days <= 0 ? "令牌已过期" : `令牌 ${days} 天后到期` }}</span>
+          <span v-if="days !== null && days <= 14" class="text-warn"> · {{ days <= 0 ? $t("令牌已过期") : $t("令牌 {days} 天后到期", { days }) }}</span>
         </dd>
       </div>
       <div v-if="repo.transport === 'ssh'" class="flex min-w-0 gap-2 sm:col-span-2">
-        <dt class="w-20 shrink-0 text-muted-foreground">主机指纹</dt>
+        <dt class="w-20 shrink-0 text-muted-foreground">{{ $t("主机指纹") }}</dt>
         <dd class="min-w-0">
           <span v-if="repo.host_key_fp" class="break-all font-mono text-xs leading-5">{{ repo.host_key_fp }}</span>
-          <span v-else class="text-warn">还没固定：点“测试连接”，第一次连接时固定</span>
+          <span v-else class="text-warn">{{ $t("还没固定：点“测试连接”，第一次连接时固定") }}</span>
         </dd>
       </div>
       <div class="flex gap-2 sm:col-span-2">
-        <dt class="w-20 shrink-0 text-muted-foreground">使用的项目</dt>
-        <dd class="text-foreground/85">{{ repo.projects.length ? repo.projects.map((p) => p.name).join("、") : "还没有项目使用（在项目设置 → 仓库里添加）" }}</dd>
+        <dt class="w-20 shrink-0 text-muted-foreground">{{ $t("使用的项目") }}</dt>
+        <dd class="text-foreground/85">{{ repo.projects.length ? repo.projects.map((p) => p.name).join("、") : $t("还没有项目使用（在项目设置 → 仓库里添加）") }}</dd>
       </div>
       <div class="flex gap-2 sm:col-span-2">
-        <dt class="w-20 shrink-0 text-muted-foreground">能力</dt>
-        <dd class="text-muted-foreground">节点直连仓库，凭据只给员工的 git 用 · 没有 PR 和 CI：讨论串的改动留在讨论串分支上，完成即交付</dd>
+        <dt class="w-20 shrink-0 text-muted-foreground">{{ $t("能力") }}</dt>
+        <dd class="text-muted-foreground">{{ $t("节点直连仓库，凭据只给员工的 git 用 · 没有 PR 和 CI：讨论串的改动留在讨论串分支上，完成即交付") }}</dd>
       </div>
     </dl>
     <TestResult v-if="result" :result="result" />

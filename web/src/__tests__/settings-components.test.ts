@@ -15,6 +15,7 @@ import ScheduleRow from "@/components/app/schedules/ScheduleRow.vue";
 import { emptyDraft } from "@/components/app/schedules/schedule";
 import ScheduleNoteLine from "@/components/app/ScheduleNoteLine.vue";
 import ThreadWakeups from "@/components/app/thread/ThreadWakeups.vue";
+import LanguageMenu from "@/components/app/language/LanguageMenu.vue";
 import TagInput from "@/components/common/TagInput.vue";
 import { newRole } from "@/lib/roles";
 import { toast } from "@/lib/toast";
@@ -698,4 +699,20 @@ describe("Project models", () => {
     await flushPromises();
     expect(w.find("[data-testid=model-row-codex]").exists()).toBe(false);
   }, 15000);
+});
+
+describe("LanguageMenu", () => {
+  it("saves the picked language on the account from the sidebar", async () => {
+    // The server answers with the page's own language, so no reload starts.
+    const spy = api([["PUT", /\/api\/me\/locale$/, { id: "u1", email: "a@b.c", display_name: "", role: "member", locale: "zh-CN" }]]);
+    const w = mountWith(LanguageMenu);
+    await w.get("[aria-label='界面语言']").trigger("click");
+    await flushPromises();
+    const items = [...document.querySelectorAll<HTMLElement>(".el-dropdown-menu__item")];
+    expect(items.map((i) => i.textContent?.trim())).toEqual(["跟随浏览器", "简体中文", "English", "한국어", "日本語"]);
+    items.find((i) => i.textContent?.trim() === "简体中文")!.click();
+    await flushPromises();
+    const [req] = calls(spy, "PUT", /\/api\/me\/locale$/);
+    expect(await req.json()).toEqual({ locale: "zh-CN" });
+  });
 });

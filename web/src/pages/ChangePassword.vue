@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** Shown instead of the app while `must_change_password` is set. */
 import { useQueryClient } from "@tanstack/vue-query";
 import { ref } from "vue";
@@ -30,20 +31,20 @@ async function submit() {
 </script>
 
 <template>
-  <AuthShell subtitle="管理员重置了你的密码，请先设一个新密码。">
+  <AuthShell :subtitle="$t('管理员重置了你的密码，请先设一个新密码。')">
     <form class="flex flex-col gap-4 rounded-2xl border bg-panel p-6" @submit.prevent="submit">
       <label class="flex flex-col gap-1.5">
-        <span class="text-[13px] font-medium">临时密码</span>
+        <span class="text-[13px] font-medium">{{ $t("临时密码") }}</span>
         <input v-model="current" type="password" required autocomplete="current-password" :class="AUTH_INPUT" />
       </label>
       <label class="flex flex-col gap-1.5">
-        <span class="text-[13px] font-medium">新密码</span>
+        <span class="text-[13px] font-medium">{{ $t("新密码") }}</span>
         <input v-model="next" type="password" required minlength="8" autocomplete="new-password" :class="AUTH_INPUT" />
       </label>
       <p v-if="error" role="alert" class="text-[13px] text-destructive">{{ error }}</p>
       <button type="submit" :disabled="busy" :class="AUTH_SUBMIT">
         <Spinner v-if="busy" />
-        保存新密码
+        {{ $t("保存新密码") }}
       </button>
     </form>
   </AuthShell>

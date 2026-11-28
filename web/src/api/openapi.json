@@ -203,6 +203,17 @@
               "null"
             ]
           },
+          "locale": {
+            "description": "Interface language; empty = follow the browser",
+            "enum": [
+              "",
+              "zh-CN",
+              "en",
+              "ko",
+              "ja"
+            ],
+            "type": "string"
+          },
           "max_nodes": {
             "format": "int64",
             "type": [
@@ -248,7 +259,8 @@
           "active",
           "max_nodes",
           "must_change_password",
-          "created_at"
+          "created_at",
+          "locale"
         ],
         "type": "object"
       },
@@ -3449,6 +3461,19 @@
         ],
         "type": "object"
       },
+      "LocaleInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "locale": {
+            "description": "zh-CN, en, ko, ja, or empty to follow the browser",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locale"
+        ],
+        "type": "object"
+      },
       "Look": {
         "additionalProperties": false,
         "properties": {
@@ -4369,6 +4394,19 @@
           "mode",
           "state",
           "error"
+        ],
+        "type": "object"
+      },
+      "NodeGuideOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "description": "Public Docker guide on the node registration address (node-docker.md)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
         ],
         "type": "object"
       },
@@ -9377,6 +9415,17 @@
           "id": {
             "type": "string"
           },
+          "locale": {
+            "description": "Interface language; empty = follow the browser",
+            "enum": [
+              "",
+              "zh-CN",
+              "en",
+              "ko",
+              "ja"
+            ],
+            "type": "string"
+          },
           "max_nodes": {
             "format": "int64",
             "type": [
@@ -9403,7 +9452,8 @@
           "active",
           "max_nodes",
           "must_change_password",
-          "created_at"
+          "created_at",
+          "locale"
         ],
         "type": "object"
       },
@@ -13045,6 +13095,47 @@
         ]
       }
     },
+    "/api/me/locale": {
+      "put": {
+        "operationId": "put-my-locale",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocaleInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserView"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Set my interface language (empty = follow the browser)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/me/memory": {
       "get": {
         "operationId": "list-user-memory",
@@ -13456,6 +13547,37 @@
           }
         },
         "summary": "Register a node; returns its one-time token and install command",
+        "tags": [
+          "nodes"
+        ]
+      }
+    },
+    "/api/nodes/guide": {
+      "get": {
+        "operationId": "node-guide",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeGuideOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Link to the public Docker guide on the node registration address",
         "tags": [
           "nodes"
         ]

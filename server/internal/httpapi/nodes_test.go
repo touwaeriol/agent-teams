@@ -21,18 +21,18 @@ type createdNode struct {
 // TestNodeComposeSnippet: the compose hostname is quoted (a node named 123, true or 1e3 stays a
 // string in YAML) and the volumes carry the docker run names (not <project>_<key>), so switching
 // between docker run and compose keeps the logins and the workspace. Both give the container FUSE
-// for the shared folder.
+// for the shared folder and turn core dumps off.
 func TestNodeComposeSnippet(t *testing.T) {
 	n := nodeContainer{name: "123", host: "123", slug: "agent-teams-node-123", console: "http://console.test", token: "tok", image: "img"}
 	run, compose := n.dockerRun(), n.compose()
 	for _, want := range []string{"    hostname: \"123\"", "  claude: { name: agent-teams-node-123-claude }", "  data: { name: agent-teams-node-123-data }",
-		`    devices: ["/dev/fuse"]`, `    cap_add: ["SYS_ADMIN"]`, `    security_opt: ["apparmor:unconfined"]`} {
+		`    devices: ["/dev/fuse"]`, `    cap_add: ["SYS_ADMIN"]`, `    security_opt: ["apparmor:unconfined"]`, "    ulimits: { core: 0 }"} {
 		if !strings.Contains(compose, want) {
 			t.Fatalf("compose lacks %q:\n%s", want, compose)
 		}
 	}
-	if !strings.Contains(run, "--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined") {
-		t.Fatalf("docker run lacks FUSE:\n%s", run)
+	if !strings.Contains(run, "--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined --ulimit core=0") {
+		t.Fatalf("docker run lacks FUSE or the core limit:\n%s", run)
 	}
 	for _, v := range nodeVolumes {
 		if !strings.Contains(run, "-v "+n.volume(v.key)+":"+v.path) || !strings.Contains(compose, "name: "+n.volume(v.key)+" }") {
@@ -46,18 +46,19 @@ func TestNodesLifecycle(t *testing.T) {
 	c, u := h.signUp("a@example.com")
 	var n createdNode
 	c.must(201, "POST", "/api/nodes", map[string]string{"name": "rc-erio"}, &n)
+	origin := h.srv.URL // no 节点注册地址: the address the caller used
 	if n.Token == "" || !strings.Contains(n.Install, "AGENT_TEAMS_NODE_TOKEN="+n.Token) ||
-		!strings.Contains(n.Install, "curl -fsSL http://console.test/install-node.sh") || !strings.Contains(n.Install, "--name rc-erio") {
+		!strings.Contains(n.Install, "curl -fsSL "+origin+"/install-node.sh") || !strings.Contains(n.Install, "--name rc-erio") {
 		t.Fatalf("enrollment %+v", n)
 	}
 	for _, want := range []string{"docker run -d --name agent-teams-node-rc-erio --hostname rc-erio", "AGENT_TEAMS_NODE_TOKEN=" + n.Token,
-		"AGENT_TEAMS_CONSOLE=http://console.test", "-v agent-teams-node-rc-erio-claude:/home/agent/.claude", "-v agent-teams-node-rc-erio-data:/home/agent/.local/share/agent-teams", "ghcr.io/example/node:test"} {
+		"AGENT_TEAMS_CONSOLE=" + origin, "-v agent-teams-node-rc-erio-claude:/home/agent/.claude", "-v agent-teams-node-rc-erio-data:/home/agent/.local/share/agent-teams", "ghcr.io/example/node:test"} {
 		if !strings.Contains(n.Docker, want) {
 			t.Fatalf("docker run lacks %q:\n%s", want, n.Docker)
 		}
 	}
 	for _, want := range []string{"name: agent-teams-node-rc-erio\n", "image: ghcr.io/example/node:test", `AGENT_TEAMS_NODE_TOKEN: "` + n.Token + `"`,
-		`AGENT_TEAMS_CONSOLE: "http://console.test"`, "- workspace:/home/agent/.agents_team", "  state: { name: agent-teams-node-rc-erio-state }"} {
+		`AGENT_TEAMS_CONSOLE: "` + origin + `"`, "- workspace:/home/agent/.agents_team", "  state: { name: agent-teams-node-rc-erio-state }"} {
 		if !strings.Contains(n.Compose, want) {
 			t.Fatalf("compose lacks %q:\n%s", want, n.Compose)
 		}

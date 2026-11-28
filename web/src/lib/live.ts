@@ -1,5 +1,6 @@
 // Live progress of a thread, pure and unit-tested: what each employee is doing right now,
 // how far its tasks are, and how long it has been running.
+import { $t } from "@/i18n";
 import type { EmployeeBrief, TaskView, ThreadView } from "@/api/views";
 
 /**
@@ -33,31 +34,31 @@ export function isWaking(m: Pick<EmployeeBrief, "status">): boolean {
 }
 
 const VERB: Record<string, string> = {
-  typing: "在写",
-  reading: "在看",
-  running: "在跑",
-  thinking: "思考中",
-  claiming: "领任务",
-  raising_hand: "等你审批",
-  waiting: "等别人",
-  queued: "排队等工位",
-  offline: "节点离线",
-  broken: "出错了",
-  idle: "空闲",
+  typing: $t("在写"),
+  reading: $t("在看"),
+  running: $t("在跑"),
+  thinking: $t("思考中"),
+  claiming: $t("领任务"),
+  raising_hand: $t("等你审批"),
+  waiting: $t("等别人"),
+  queued: $t("排队等工位"),
+  offline: $t("节点离线"),
+  broken: $t("出错了"),
+  idle: $t("空闲"),
 };
 
 /** Short state label shown before the activity line. */
 export function stateLabel(m: Pick<EmployeeBrief, "status">): string {
-  if (isWaking(m)) return "唤醒中";
-  if (m.status?.state === "queued" && m.status.substate === "no_runtime") return "排队等节点";
+  if (isWaking(m)) return $t("唤醒中");
+  if (m.status?.state === "queued" && m.status.substate === "no_runtime") return $t("排队等节点");
   const s = m.status?.state ?? "idle";
   return VERB[s] ?? s;
 }
 
 /** The state label next to someone's open cards: a raised hand with no card for the user waits on the lead. */
 export function askingLabel(m: Pick<EmployeeBrief, "status">, asksUser: boolean): string {
-  if (asksUser) return "等你审批";
-  return m.status?.state === "raising_hand" ? "等组长回复" : stateLabel(m);
+  if (asksUser) return $t("等你审批");
+  return m.status?.state === "raising_hand" ? $t("等组长回复") : stateLabel(m);
 }
 
 export interface TaskProgress {
@@ -81,13 +82,13 @@ export function taskProgress(tasks: Pick<TaskView, "status">[]): TaskProgress {
 export function elapsed(fromIso: string | null | undefined, now: number): string {
   if (!fromIso) return "";
   const s = Math.max(0, Math.floor((now - Date.parse(fromIso)) / 1000));
-  if (s < 60) return `${s} 秒`;
+  if (s < 60) return $t("{s} 秒", { s });
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m} 分`;
+  if (m < 60) return $t("{m} 分", { m });
   const h = Math.floor(m / 60);
-  if (h < 24) return m % 60 ? `${h} 小时 ${m % 60} 分` : `${h} 小时`;
+  if (h < 24) return m % 60 ? $t("{h} 小时 {n} 分", { h, n: m % 60 }) : $t("{h} 小时", { h });
   const d = Math.floor(h / 24);
-  return h % 24 ? `${d} 天 ${h % 24} 小时` : `${d} 天`;
+  return h % 24 ? $t("{d} 天 {n} 小时", { d, n: h % 24 }) : $t("{d} 天", { d });
 }
 
 /** Whether a thread is still going (live feedback is shown and the clock ticks). */
@@ -107,11 +108,11 @@ export function featured(t: Pick<ThreadView, "members">): EmployeeBrief | undefi
 
 /** One compact line for chat chips: "dev-1 在跑 · npm test" / "等你审批 2 条命令". */
 export function liveLine(t: Pick<ThreadView, "members" | "status" | "counts" | "pr_number" | "pause_reason">): string {
-  if (t.counts.approvals_open > 0) return `等你审批 ${t.counts.approvals_open} 条命令`;
-  if (t.counts.questions_open > 0) return `等你回答 ${t.counts.questions_open} 个问题`;
+  if (t.counts.approvals_open > 0) return $t("等你审批 {approvals_open} 条命令", { approvals_open: t.counts.approvals_open });
+  if (t.counts.questions_open > 0) return $t("等你回答 {questions_open} 个问题", { questions_open: t.counts.questions_open });
   if (!threadActive(t)) return "";
-  if (t.status === "queued") return "排队等节点";
-  if (t.status === "paused") return "已暂停";
+  if (t.status === "queued") return $t("排队等节点");
+  if (t.status === "paused") return $t("已暂停");
   const m = featured(t);
   if (!m?.status || m.status.state === "idle") return "";
   const doing = m.status.bubble ? ` · ${m.status.bubble}` : "";

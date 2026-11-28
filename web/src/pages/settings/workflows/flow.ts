@@ -1,21 +1,22 @@
 // Workflows (流程图) page logic: drafts, presets, layout and the Vue Flow shapes. Kept free of
 // Vue so it is unit-tested (flow.test.ts).
+import { $t } from "@/i18n";
 import type { FlowDraft, FlowEdge, FlowStep, FlowView, RoleView } from "@/api/views";
 
 export type StepKind = NonNullable<FlowStep["kind"]>;
 export type EdgeKind = NonNullable<FlowEdge["kind"]>;
 
 export const STEP_KINDS: { value: StepKind; label: string; hint: string }[] = [
-  { value: "work", label: "做事", hint: "这个岗位完成这一步" },
-  { value: "review", label: "审查", hint: "检查上一步的结果，不通过可以退回" },
-  { value: "decision", label: "决策", hint: "拍板选方案，不通过可以退回" },
-  { value: "approval", label: "等我确认", hint: "组长问你，你确认后才继续" },
+  { value: "work", label: $t("做事"), hint: $t("这个岗位完成这一步") },
+  { value: "review", label: $t("审查"), hint: $t("检查上一步的结果，不通过可以退回") },
+  { value: "decision", label: $t("决策"), hint: $t("拍板选方案，不通过可以退回") },
+  { value: "approval", label: $t("等我确认"), hint: $t("组长问你，你确认后才继续") },
 ];
 
 export const EDGE_KINDS: { value: EdgeKind; label: string }[] = [
-  { value: "next", label: "然后" },
-  { value: "branch", label: "条件分支" },
-  { value: "reject", label: "不通过退回" },
+  { value: "next", label: $t("然后") },
+  { value: "branch", label: $t("条件分支") },
+  { value: "reject", label: $t("不通过退回") },
 ];
 
 export const LEAD = "lead";
@@ -30,16 +31,16 @@ export interface RoleChoice {
 
 export function roleChoices(roles: RoleView[]): RoleChoice[] {
   const members = roles.filter((r) => r.tier === "member").map((r) => ({ value: r.role, label: r.title || r.role }));
-  return [...members, { value: LEAD, label: "组长" }];
+  return [...members, { value: LEAD, label: $t("组长") }];
 }
 
 export function roleLabel(role: string, choices: RoleChoice[]): string {
-  if (!role) return "我";
-  return choices.find((c) => c.value === role)?.label ?? `${role}（已不在团队）`;
+  if (!role) return $t("我");
+  return choices.find((c) => c.value === role)?.label ?? $t("{role}（已不在团队）", { role });
 }
 
 export function kindLabel(kind: FlowStep["kind"]): string {
-  return STEP_KINDS.find((k) => k.value === (kind ?? "work"))?.label ?? "做事";
+  return STEP_KINDS.find((k) => k.value === (kind ?? "work"))?.label ?? $t("做事");
 }
 
 /** A fresh step id: s1, s2… not yet in the flow. */
@@ -96,28 +97,28 @@ export function presets(roles: RoleView[]): { label: string; draft: FlowDraft }[
   const pick = (want: string) => (keys.includes(want) ? want : (keys[0] ?? LEAD));
   const step = (id: string, name: string, role: string, kind: StepKind = "work", instructions = ""): FlowStep => ({ id, name, role, kind, instructions, x: 0, y: 0 });
   const dev: FlowDraft = {
-    name: "开发 → 测试 → 审查",
+    name: $t("开发 → 测试 → 审查"),
     steps: [
-      step("dev", "开发", pick("dev"), "work", "按任务改代码并补上测试"),
-      step("test", "测试", pick("qa"), "work", "跑全量测试，复现并记录问题"),
-      step("review", "审查", pick("reviewer"), "review", "只读审查改动，不通过写清要改的点"),
-      step("pr", "合并开 PR", LEAD, "work"),
+      step("dev", $t("开发"), pick("dev"), "work", $t("按任务改代码并补上测试")),
+      step("test", $t("测试"), pick("qa"), "work", $t("跑全量测试，复现并记录问题")),
+      step("review", $t("审查"), pick("reviewer"), "review", $t("只读审查改动，不通过写清要改的点")),
+      step("pr", $t("合并开 PR"), LEAD, "work"),
     ],
     edges: [
       { from: "dev", to: "test", kind: "next" },
       { from: "test", to: "review", kind: "next" },
       { from: "review", to: "pr", kind: "next" },
-      { from: "review", to: "dev", kind: "reject", label: "有问题" },
+      { from: "review", to: "dev", kind: "reject", label: $t("有问题") },
     ],
   };
   const parallel: FlowDraft = {
-    name: "设计 → 并行开发 → 汇合",
+    name: $t("设计 → 并行开发 → 汇合"),
     steps: [
-      step("design", "方案设计", pick("designer"), "work", "出方案和接口约定"),
-      step("ok", "确认方案", "", "approval"),
-      step("fe", "前端", pick("dev")),
-      step("be", "后端", pick("dev")),
-      step("join", "联调验收", pick("qa"), "review"),
+      step("design", $t("方案设计"), pick("designer"), "work", $t("出方案和接口约定")),
+      step("ok", $t("确认方案"), "", "approval"),
+      step("fe", $t("前端"), pick("dev")),
+      step("be", $t("后端"), pick("dev")),
+      step("join", $t("联调验收"), pick("qa"), "review"),
     ],
     edges: [
       { from: "design", to: "ok", kind: "next" },
@@ -127,7 +128,7 @@ export function presets(roles: RoleView[]): { label: string; draft: FlowDraft }[
       { from: "be", to: "join", kind: "next" },
     ],
   };
-  const blank: FlowDraft = { name: "新流程", steps: [step("s1", "第一步", pick("dev"))], edges: [] };
+  const blank: FlowDraft = { name: $t("新流程"), steps: [step("s1", $t("第一步"), pick("dev"))], edges: [] };
   return [dev, parallel, blank].map((d) => ({ label: d.name, draft: { ...d, steps: layout(d.steps ?? [], d.edges ?? []) } }));
 }
 

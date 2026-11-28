@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // Deliverable viewer page (/projects/:pid/deliverables/:id): finds the deliverable and its thread.
+import { $t } from "@/i18n";
 import { computed, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
 import { useDeliverables, useThreads } from "@/api/queries";
@@ -25,10 +26,10 @@ watch(
 
 <template>
   <Loading v-if="list.isLoading.value" class="h-full" />
-  <EmptyState v-else-if="!item" title="找不到这个交付物">
+  <EmptyState v-else-if="!item" :title="$t('找不到这个交付物')">
     <template #action>
       <RouterLink v-slot="{ href, navigate }" :to="`/projects/${pid}/deliverables`" custom>
-        <el-button tag="a" :href="href" type="primary" @click="navigate">回到交付物</el-button>
+        <el-button tag="a" :href="href" type="primary" @click="navigate">{{ $t("回到交付物") }}</el-button>
       </RouterLink>
     </template>
   </EmptyState>

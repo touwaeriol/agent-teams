@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { RouterLink } from "vue-router";
 import type { ProjectView } from "@/api/views";
 import { CodeXml } from "lucide-vue-next";
@@ -20,7 +21,7 @@ const emit = defineEmits<{ navigate: [] }>();
       class="flex h-full min-w-0 flex-1 items-center gap-2.5 px-2.5"
       @click="emit('navigate')"
     >
-      <span v-if="isSession(project)" aria-label="会话" title="会话" class="flex size-[22px] shrink-0 items-center justify-center rounded-md bg-raised text-muted-foreground">
+      <span v-if="isSession(project)" :aria-label="$t('会话')" :title="$t('会话')" class="flex size-[22px] shrink-0 items-center justify-center rounded-md bg-raised text-muted-foreground">
         <CodeXml class="size-3.5" :stroke-width="2" />
       </span>
       <ProjectIcon v-else :project="project" :size="22" />

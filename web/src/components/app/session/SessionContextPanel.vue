@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * 上下文 of a session's 会话信息: the total bar (SessionContext) with its breakdown, a 刷新 button
  * and when it was last counted. Only a runtime that reports a breakdown (Claude) shows it: for
@@ -62,9 +63,9 @@ function settle() {
   if (timer) clearTimeout(timer);
   timer = undefined;
 }
-function fail(raw: string, text = refreshErrorText(raw) ?? "刷新失败") {
+function fail(raw: string, text = refreshErrorText(raw) ?? $t("刷新失败")) {
   failure.value = { text, raw };
-  toast.error(`刷新失败：${text}`);
+  toast.error($t("刷新失败：{text}", { text }));
 }
 /** The context event answering the pending refresh: ends it (with the reason when it failed). */
 function answered(ev: ContextEvent | undefined): boolean {
@@ -107,13 +108,13 @@ async function refresh() {
     timer = setTimeout(() => {
       if (!pending.value) return;
       settle();
-      fail("timeout", "节点没能及时统计完，稍后再试");
+      fail("timeout", $t("节点没能及时统计完，稍后再试"));
       void q.refetch();
     }, REFRESH_TIMEOUT_MS);
   } catch (e) {
     if (asked !== cid.value) return;
     settle();
-    fail(e instanceof ApiError ? e.message : String(e), e instanceof ApiError ? e.message : "网络错误，稍后再试");
+    fail(e instanceof ApiError ? e.message : String(e), e instanceof ApiError ? e.message : $t("网络错误，稍后再试"));
     void q.refetch(); // 409: the session parked, the node went away…
   }
 }
@@ -127,7 +128,7 @@ const updated = computed(() => {
   return detail.value ? updatedText(detail.value, timeAgo) : null;
 });
 const refreshTitle = computed(() =>
-  detail.value?.can_refresh ? "立刻重新统计（精确值，调用 token 计数接口，不跑模型）" : "会话没有在运行（已停放或节点离线），发一条消息后再刷新",
+  detail.value?.can_refresh ? $t("立刻重新统计（精确值，调用 token 计数接口，不跑模型）") : $t("会话没有在运行（已停放或节点离线），发一条消息后再刷新"),
 );
 defineExpose({ refresh, pending, failure });
 </script>
@@ -144,13 +145,13 @@ defineExpose({ refresh, pending, failure });
         @click="refresh"
       >
         <RefreshCw :class="cn('size-3', pending !== null && 'animate-spin')" />
-        {{ pending !== null ? "刷新中…" : "刷新" }}
+        {{ pending !== null ? $t("刷新中…") : $t("刷新") }}
       </button>
     </template>
-    <p v-if="failure" class="text-xs text-destructive" :title="failure.raw" data-testid="context-refresh-error">刷新失败：{{ failure.text }}</p>
+    <p v-if="failure" class="text-xs text-destructive" :title="failure.raw" data-testid="context-refresh-error">{{ $t("刷新失败：{text}", { text: failure.text }) }}</p>
     <SessionContextDetail v-if="hasRows" :detail="detail" />
     <p class="text-[11.5px] leading-5 text-muted-foreground" data-testid="context-updated">
-      <template v-if="updated">{{ updated }}。</template>每轮结束自动更新，“刷新”取精确值；延迟加载的工具用到时才载入，不计入已使用。
+      <template v-if="updated">{{ updated }}。</template>{{ $t("每轮结束自动更新，“刷新”取精确值；延迟加载的工具用到时才载入，不计入已使用。") }}
     </p>
   </SessionContext>
 </template>

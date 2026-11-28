@@ -3,6 +3,7 @@
 // as a thumbnail (images) or a file card with a remove button that also cancels a running upload.
 // Without object storage (503 storage_unavailable) files up to 5 MB go through the old base64
 // upload. Sending passes the uploaded ids; the strip clears after a successful send.
+import { $t } from "@/i18n";
 import { computed, onBeforeUnmount, ref, toValue, watch, type ComputedRef, type MaybeRefOrGetter, type Ref } from "vue";
 import { projects as projectActions } from "@/api/actions";
 import { errorText } from "@/api/mutations";
@@ -51,7 +52,7 @@ export interface UploadHooks {
 /** Uploads one file; injectable for tests. */
 export type Uploader = (pid: string, file: File, hooks?: UploadHooks) => Promise<{ id: string }>;
 
-export const STORAGE_FALLBACK_NOTE = "文件存储暂时不可用，已改用旧方式上传（只支持 5 MB 以内的文件）";
+export const STORAGE_FALLBACK_NOTE = $t("文件存储暂时不可用，已改用旧方式上传（只支持 5 MB 以内的文件）");
 
 /**
  * The multipart direct upload through `api` (project uploads, or the project-less one of a new
@@ -63,12 +64,12 @@ export function directUploader(api: (pid: string) => UploadApi = projectUploads,
       const done = await uploadFile(file, api(pid), {
         kind: "attachment", ...(hooks.signal ? { signal: hooks.signal } : {}), onProgress: (sent, total) => hooks.onProgress?.(total ? sent / total : 1),
       });
-      if (!done.attachment) throw new Error("服务器没有返回附件");
+      if (!done.attachment) throw new Error($t("服务器没有返回附件"));
       return { id: done.attachment.id };
     } catch (e) {
       if (!storageUnavailable(e)) throw e;
-      if (o.legacy === false) throw new Error("文件存储暂时不可用，现在不能上传附件");
-      if (file.size > LEGACY_MAX_BYTES) throw new Error(`文件存储暂时不可用，现在只能上传 5 MB 以内的文件（这个文件 ${formatBytes(file.size)}）`);
+      if (o.legacy === false) throw new Error($t("文件存储暂时不可用，现在不能上传附件"));
+      if (file.size > LEGACY_MAX_BYTES) throw new Error($t("文件存储暂时不可用，现在只能上传 5 MB 以内的文件（这个文件 {size}）", { size: formatBytes(file.size) }));
       toast.warning(STORAGE_FALLBACK_NOTE);
       const r = await projectActions.attach(pid, { name: file.name || "file", data: await fileBase64(file) });
       hooks.onProgress?.(1);
@@ -188,7 +189,7 @@ export function useAttachments(pid: MaybeRefOrGetter<string>, uploader: Uploader
     problems.forEach((p) => toast.error(p));
     const fresh = ok.map((f) => {
       const kind = attachKind(f);
-      return { key: `img-${++counter}`, name: f.name || "文件", kind, size: f.size, progress: 0, preview: kind === "image" ? URL.createObjectURL(f) : "", file: f };
+      return { key: `img-${++counter}`, name: f.name || $t("文件"), kind, size: f.size, progress: 0, preview: kind === "image" ? URL.createObjectURL(f) : "", file: f };
     });
     if (!toValue(cacheKey)) urls.push(...fresh.map((f) => f.preview).filter(Boolean));
     items.value = [...items.value, ...fresh.map(({ file: _file, ...x }) => x)];

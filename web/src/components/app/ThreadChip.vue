@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** A thread the speaker opened, with its live status underneath while it runs, and its plan progress "x/y" with the current step. */
 import { ChevronRight, ListChecks } from "lucide-vue-next";
 import { computed } from "vue";
@@ -31,7 +32,7 @@ const working = computed(() => {
   >
     <span class="flex items-center gap-2">
       <Dot :color="tone" />
-      讨论串 #{{ no }} {{ thread?.title ?? "" }}
+      {{ $t("讨论串 #{no}", { no }) }} {{ thread?.title ?? "" }}
       <ChevronRight class="size-3 text-[#8A877F]" :stroke-width="2" />
     </span>
     <span v-if="line" :class="cn('flex min-w-0 max-w-full items-center gap-1.5 pl-[15px] text-xs', asks ? 'text-[#B4530B]' : 'text-muted-foreground')">
@@ -39,7 +40,7 @@ const working = computed(() => {
       <span class="truncate">{{ line }}</span>
     </span>
     <span v-if="plan" class="flex min-w-0 max-w-full items-center gap-1.5 pl-[15px] text-xs text-muted-foreground" data-chip-plan="">
-      <span class="inline-flex shrink-0 items-center gap-1 tabular-nums" :title="`主任务完成 ${plan.label}`"><ListChecks class="size-3" :stroke-width="1.8" />{{ plan.label }}</span>
+      <span class="inline-flex shrink-0 items-center gap-1 tabular-nums" :title="$t('主任务完成 {label}', { label: plan.label })"><ListChecks class="size-3" :stroke-width="1.8" />{{ plan.label }}</span>
       <span v-if="step" class="truncate" :title="step.title" data-chip-step="">{{ step.title }}</span>
     </span>
   </button>

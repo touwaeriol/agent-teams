@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** 添加 / 编辑服务器. The credential is write-only: editing shows “已保存，留空不修改”, and changing host,
  * port, user or the auth kind requires entering it again (the server seals it for those values). */
 import { computed, ref, watch } from "vue";
@@ -22,7 +23,7 @@ const problem = computed(() => serverFormProblem(saved.value, form.value));
 const touched = ref(false);
 watch(open, () => (touched.value = false));
 const keep = computed(() => saved.value && !required.value);
-const placeholder = computed(() => (keep.value ? "已保存，留空不修改" : ""));
+const placeholder = computed(() => (keep.value ? $t("已保存，留空不修改") : ""));
 const kindChanged = (k: AuthKind) => {
   form.value.kind = k;
   form.value.password = form.value.privateKey = form.value.passphrase = "";
@@ -34,7 +35,7 @@ const save = useAction(
   },
   {
     invalidate: [keys.servers],
-    success: () => (saved.value ? "已保存" : "服务器已添加"),
+    success: () => (saved.value ? $t("已保存") : $t("服务器已添加")),
     onSuccess: (s) => {
       open.value = false;
       emit("saved", s);
@@ -50,42 +51,42 @@ function submit() {
 <template>
   <FormDialog
     v-model:open="open"
-    :title="saved ? `编辑服务器 ${saved.name}` : '添加服务器'"
-    description="员工的会话通过主节点登录这台服务器，节点上拿不到密码或私钥。保存后凭证不能再查看，只能替换。"
-    :submit-label="saved ? '保存' : '添加'"
+    :title="saved ? $t('编辑服务器 {name}', { name: saved.name }) : $t('添加服务器')"
+    :description="$t('员工的会话通过主节点登录这台服务器，节点上拿不到密码或私钥。保存后凭证不能再查看，只能替换。')"
+    :submit-label="saved ? $t('保存') : $t('添加')"
     :busy="save.isPending.value"
     width="36rem"
     @submit="submit"
   >
-    <Field v-slot="{ id }" label="名称" hint="会话里用 ssh 名称 连接，例如 ssh prod；小写字母、数字和 -">
+    <Field v-slot="{ id }" :label="$t('名称')" :hint="$t('会话里用 ssh 名称 连接，例如 ssh prod；小写字母、数字和 -')">
       <el-input :id="id" v-model="form.name" class="at-mono" placeholder="prod" />
     </Field>
     <div class="grid grid-cols-[1fr_7rem] gap-3">
-      <Field v-slot="{ id }" label="主机" hint="域名或 IP">
+      <Field v-slot="{ id }" :label="$t('主机')" :hint="$t('域名或 IP')">
         <el-input :id="id" v-model="form.host" class="at-mono" placeholder="203.0.113.10" />
       </Field>
-      <Field v-slot="{ id }" label="端口">
+      <Field v-slot="{ id }" :label="$t('端口')">
         <el-input-number :id="id" v-model="form.port" :min="1" :max="65535" :controls="false" class="!w-full" />
       </Field>
     </div>
-    <Field v-slot="{ id }" label="用户">
+    <Field v-slot="{ id }" :label="$t('用户')">
       <el-input :id="id" v-model="form.username" class="at-mono" placeholder="deploy" />
     </Field>
-    <Field label="认证方式">
-      <el-radio-group :model-value="form.kind" aria-label="认证方式" @update:model-value="(k) => kindChanged(k as AuthKind)">
+    <Field :label="$t('认证方式')">
+      <el-radio-group :model-value="form.kind" :aria-label="$t('认证方式')" @update:model-value="(k) => kindChanged(k as AuthKind)">
         <el-radio-button v-for="(label, k) in AUTH_LABEL" :key="k" :value="k">{{ label }}</el-radio-button>
       </el-radio-group>
     </Field>
-    <Callout v-if="saved && required" tone="warn">改了主机、端口、用户或认证方式，旧凭证随之作废，请重新填写{{ form.kind === "password" ? "密码" : "私钥" }}。</Callout>
-    <Field v-if="form.kind === 'password'" v-slot="{ id }" label="密码">
+    <Callout v-if="saved && required" tone="warn">{{ $t("改了主机、端口、用户或认证方式，旧凭证随之作废，请重新填写") }}{{ form.kind === "password" ? $t("密码") : $t("私钥") }}。</Callout>
+    <Field v-if="form.kind === 'password'" v-slot="{ id }" :label="$t('密码')">
       <el-input :id="id" v-model="form.password" type="password" show-password autocomplete="new-password" :placeholder="placeholder" />
     </Field>
     <template v-else>
-      <Field v-slot="{ id }" label="私钥" hint="粘贴 OpenSSH 或 PEM 格式的私钥（-----BEGIN … PRIVATE KEY-----）">
+      <Field v-slot="{ id }" :label="$t('私钥')" :hint="$t('粘贴 OpenSSH 或 PEM 格式的私钥（-----BEGIN … PRIVATE KEY-----）')">
         <el-input :id="id" v-model="form.privateKey" type="textarea" :rows="5" class="at-mono" spellcheck="false" :placeholder="placeholder || '-----BEGIN OPENSSH PRIVATE KEY-----'" />
       </Field>
-      <Field v-slot="{ id }" label="私钥口令（可选）" hint="私钥加了 passphrase 才需要填">
-        <el-input :id="id" v-model="form.passphrase" type="password" show-password autocomplete="new-password" :placeholder="keep && saved?.has_passphrase && !form.privateKey.trim() ? '已保存，留空不修改' : ''" />
+      <Field v-slot="{ id }" :label="$t('私钥口令（可选）')" :hint="$t('私钥加了 passphrase 才需要填')">
+        <el-input :id="id" v-model="form.passphrase" type="password" show-password autocomplete="new-password" :placeholder="keep && saved?.has_passphrase && !form.privateKey.trim() ? $t('已保存，留空不修改') : ''" />
       </Field>
     </template>
     <p v-if="touched && problem" class="text-[13px] text-bad" role="alert">{{ problem }}</p>

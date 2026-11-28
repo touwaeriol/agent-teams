@@ -8,6 +8,7 @@
 // opening, capture starts as soon as the microphone is there, and frames recorded before the
 // server's ready (OpenAI accepted the session) are kept in order (at most MAX_BUFFER_BYTES, the
 // oldest dropped beyond) and sent first once it comes. Commits wait for ready and their audio.
+import { $t } from "@/i18n";
 import { csrfToken } from "@/api/client";
 import { CONNECT_TIMEOUT, ConnectError, type Connect, type RealtimeEvent, type Transport, type TransportHandlers, type VoiceSessionInfo } from "./openai";
 import { OUT_RATE, startCapture, type Capture } from "./pcm";
@@ -16,7 +17,7 @@ export const RELAY_PATH = "/api/voice/stream";
 export const RELAY_PROTOCOL = "agent-teams-voice";
 /** Audio kept while connecting: 8 s of 24 kHz PCM16 (the server allows a 10 s burst from Accept). */
 export const MAX_BUFFER_BYTES = 8 * OUT_RATE * 2;
-export const BUFFER_DROPPED = "连接语音服务较慢，最早的几秒录音没有发出去";
+export const BUFFER_DROPPED = $t("连接语音服务较慢，最早的几秒录音没有发出去");
 
 export interface RelayDeps {
   /** WebSocket constructor (a fake in tests). */
@@ -107,7 +108,7 @@ class RelayConnection {
       this.capture = await this.deps.capture(media, (frame) => this.onFrame(frame));
     } catch (e) {
       this.abort();
-      throw new ConnectError(0, e instanceof Error && e.message ? e.message : "打不开录音");
+      throw new ConnectError(0, e instanceof Error && e.message ? e.message : $t("打不开录音"));
     }
     // Failed (or closed) while the capture was starting: don't leave the microphone captured.
     if (this.failure || this.closed) {
@@ -129,12 +130,12 @@ class RelayConnection {
   /** Opens the socket; the promise settles with the server's ready (OpenAI accepted the session). */
   private connect(language: string): Promise<ServerMessage> {
     return new Promise((resolve, reject) => {
-      this.timer = setTimeout(() => fail(`${this.deps.timeoutMs / 1000} 秒内没有连上`), this.deps.timeoutMs);
+      this.timer = setTimeout(() => fail($t("{n} 秒内没有连上", { n: this.deps.timeoutMs / 1000 })), this.deps.timeoutMs);
       const fail = (reason: string) => {
         clearTimeout(this.timer);
         this.ready = this.failed = null;
         this.shut();
-        this.failure = new ConnectError(0, reason.startsWith("连不上语音服务") ? reason : `连不上语音服务：${reason}`);
+        this.failure = new ConnectError(0, reason.startsWith("连不上语音服务") ? reason : $t("连不上语音服务：{reason}", { reason }));
         reject(this.failure);
       };
       this.ready = (m) => {
@@ -154,7 +155,7 @@ class RelayConnection {
       try {
         ws = new this.deps.WebSocket(this.deps.url(language), [RELAY_PROTOCOL, `csrf.${this.deps.csrf()}`]);
       } catch (e) {
-        return fail(e instanceof Error ? e.message : "地址不对");
+        return fail(e instanceof Error ? e.message : $t("地址不对"));
       }
       ws.binaryType = "arraybuffer";
       ws.onopen = () => this.h.mark?.("ws_open");
@@ -167,7 +168,7 @@ class RelayConnection {
 
   /** Gives up connecting (cancelled, or the microphone failed): nothing is sent. */
   private abort(): void {
-    if (this.failed) this.failed(new ConnectError(0, "已取消"));
+    if (this.failed) this.failed(new ConnectError(0, $t("已取消")));
     else this.shut();
   }
 
@@ -204,22 +205,22 @@ class RelayConnection {
     }
     if (m.type === "ready") return this.ready?.(m);
     if (m.type === "error" && m.fatal) {
-      this.fatal = m.error?.message || "语音服务出错";
+      this.fatal = m.error?.message || $t("语音服务出错");
       return this.failed?.(new ConnectError(0, this.fatal));
     }
     if (this.live) this.h.onEvent(m);
   }
 
   private onSocketClose(): void {
-    if (this.failed) return this.failed(new ConnectError(0, this.fatal || "连接被拒绝或网络不通，请刷新页面后重试"));
+    if (this.failed) return this.failed(new ConnectError(0, this.fatal || $t("连接被拒绝或网络不通，请刷新页面后重试")));
     if (this.closed) return;
     this.closed = true;
     this.capture?.stop();
     if (!this.handedOut) {
       // Ready came, but the connection died before the microphone opened (or while the capture
       // started): open() fails with the reason instead of handing out a dead transport.
-      const reason = this.fatal || "和语音服务的连接断开了";
-      this.failure = new ConnectError(0, reason.startsWith("连不上语音服务") ? reason : `连不上语音服务：${reason}`);
+      const reason = this.fatal || $t("和语音服务的连接断开了");
+      this.failure = new ConnectError(0, reason.startsWith("连不上语音服务") ? reason : $t("连不上语音服务：{reason}", { reason }));
       this.shut();
       this.diedEarly?.(this.failure);
       return;

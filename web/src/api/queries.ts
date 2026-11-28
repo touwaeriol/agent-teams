@@ -52,6 +52,7 @@ export const keys = {
   checks: (tid: string) => ["t", tid, "checks"] as const,
   employee: (id: string) => ["employee", id] as const,
   nodes: ["nodes"] as const,
+  nodeGuide: ["node-guide"] as const,
   scheduling: ["me", "scheduling"] as const,
   nodeSessions: (id: string) => ["nodes", id, "sessions"] as const,
   roles: ["roles"] as const,
@@ -307,6 +308,10 @@ export const useSearch = (pid: Arg, q: Arg) =>
 
 export const useNodes = (refetchInterval = 15_000) =>
   useQuery({ queryKey: keys.nodes, queryFn: () => list(client.GET("/api/nodes")), refetchInterval });
+
+/** The Docker guide link on the node registration address (GET /api/nodes/guide). */
+export const useNodeGuide = () =>
+  useQuery({ queryKey: keys.nodeGuide, queryFn: () => unwrap(client.GET("/api/nodes/guide")), staleTime: 300_000 });
 
 /** The user's node scheduling thresholds (GET /api/me/scheduling). */
 export const useScheduling = () => useQuery({ queryKey: keys.scheduling, queryFn: () => unwrap(client.GET("/api/me/scheduling")) });

@@ -1,3 +1,4 @@
+import { $t } from "@/i18n";
 import type { NodeView } from "@/api/views";
 
 /** Slots of a node: configured max, else what the daemon reported. */
@@ -19,7 +20,7 @@ export interface NodeSummary {
 
 /** "运行中 5 / 8", or "运行中 5" when some online node has no limit (slots 0 means none set). */
 export function runningText(s: Pick<NodeSummary, "active" | "slots" | "unlimited">): string {
-  return s.unlimited ? `运行中 ${s.active}` : `运行中 ${s.active} / ${s.slots}`;
+  return s.unlimited ? $t("运行中 {n}", { n: s.active }) : $t("运行中 {n} / {slots}", { n: s.active, slots: s.slots });
 }
 
 export function summarizeNodes(list: NodeView[]): NodeSummary {

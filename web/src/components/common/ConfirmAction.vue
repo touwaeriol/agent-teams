@@ -2,12 +2,13 @@
 // Asks before doing something that cannot be undone. Uncontrolled: renders its own trigger
 // (default: a 删除 button; `icon-only` = a bare trash icon; the default slot replaces the label).
 // Controlled (opened from a menu item): pass `v-model:open` and no trigger is drawn.
+import { $t } from "@/i18n";
 import { Trash2 } from "lucide-vue-next";
 import { computed, ref } from "vue";
 
 const props = withDefaults(
   defineProps<{ title: string; description?: string; confirmLabel?: string; variant?: "danger" | "primary" | "default"; size?: "small" | "default"; iconOnly?: string; open?: boolean }>(),
-  { confirmLabel: "删除", variant: "danger", size: "default", open: undefined, description: undefined, iconOnly: undefined },
+  { confirmLabel: $t("删除"), variant: "danger", size: "default", open: undefined, description: undefined, iconOnly: undefined },
 );
 const emit = defineEmits<{ confirm: []; "update:open": [open: boolean] }>();
 const local = ref(false);
@@ -46,7 +47,7 @@ function confirm() {
     </template>
     <template #footer>
       <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <el-button @click="shown = false">取消</el-button>
+        <el-button @click="shown = false">{{ $t("取消") }}</el-button>
         <el-button type="danger" class="!ml-0" @click="confirm">{{ confirmLabel }}</el-button>
       </div>
     </template>

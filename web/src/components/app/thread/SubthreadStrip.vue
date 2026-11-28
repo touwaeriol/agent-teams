@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** Under the open thread's header: its parent ("父讨论串 #3 标题") and its subthreads as small links with their status marks. */
 import { ChevronRight, CornerLeftUp } from "lucide-vue-next";
 import { computed } from "vue";
@@ -17,13 +18,13 @@ const href = (no: number) => `/projects/${props.pid}/threads/${no}`;
 </script>
 
 <template>
-  <nav v-if="thread.parent_no != null || subs.length" aria-label="父子讨论串" class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[#EFEDE8] px-4 py-1.5 text-xs text-muted-foreground dark:border-border" data-subthread-strip="">
+  <nav v-if="thread.parent_no != null || subs.length" :aria-label="$t('父子讨论串')" class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-[#EFEDE8] px-4 py-1.5 text-xs text-muted-foreground dark:border-border" data-subthread-strip="">
     <RouterLink v-if="thread.parent_no != null" :to="href(thread.parent_no)" class="flex min-w-0 items-center gap-1 hover:text-foreground" data-parent-link="">
       <CornerLeftUp class="size-3.5 shrink-0" :stroke-width="1.8" />
-      <span class="truncate">父讨论串 #{{ thread.parent_no }} {{ parent?.title ?? "" }}</span>
+      <span class="truncate">{{ $t("父讨论串 #{parent_no}", { parent_no: thread.parent_no }) }} {{ parent?.title ?? "" }}</span>
     </RouterLink>
     <span v-if="subs.length" class="flex min-w-0 flex-wrap items-center gap-1.5">
-      <span>子讨论串</span>
+      <span>{{ $t("子讨论串") }}</span>
       <RouterLink
         v-for="s in subs"
         :key="s.id"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * What a session was started with and can no longer change (#53): node, role and agent (CLI),
  * read-only at the start of the box's controls row (model, effort and mode follow and can still
@@ -22,7 +23,7 @@ const text = computed(() => (narrow.value ? parts.value.agent : [parts.value.nod
   <span
     v-if="parts.agent"
     :class="['inline-flex h-7 max-w-[260px] cursor-default items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground', narrow ? 'shrink-0' : 'min-w-0']"
-    :title="`节点：${parts.node || '等待分配'}，岗位：${parts.role}，Agent：${parts.agent}（会话开始后不能再改）`"
+    :title="$t('节点：{n}，岗位：{role}，Agent：{agent}（会话开始后不能再改）', { n: parts.node || $t('等待分配'), role: parts.role, agent: parts.agent })"
     data-testid="session-fixed"
   >
     <Lock class="size-3 shrink-0" />

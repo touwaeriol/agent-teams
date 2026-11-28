@@ -86,15 +86,15 @@ func TestOrderedAndRender(t *testing.T) {
 	}
 	text := Render(w, map[string]string{"dev": "开发", "qa": "测试", "reviewer": "审查员"})
 	for _, want := range []string{
-		"## 工作流程：开发流程", "并行", "流程说明（用户编写）：\n常规改动",
-		"1. 开发（岗位 开发（dev），做事）", "   说明：改代码\n   补测试", "然后 → 测试、文档",
-		"审查（岗位 审查员（reviewer），审查）", "不通过退回 → 开发（有问题）", "用户确认（用户，等用户确认）",
+		"## Workflow: 开发流程", "parallel", "Flow description (written by the user):\n常规改动",
+		"1. 开发 (role 开发 (dev), work)", "   Instructions: 改代码\n   补测试", "then → 测试, 文档",
+		"审查 (role 审查员 (reviewer), review)", "on failure, back to → 开发 (有问题)", "用户确认 (the user, user approval)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("render lacks %q:\n%s", want, text)
 		}
 	}
-	if gone := Render(w, map[string]string{"dev": "开发"}); !strings.Contains(gone, "岗位 qa，已不在团队里") {
+	if gone := Render(w, map[string]string{"dev": "开发"}); !strings.Contains(gone, "role qa, no longer on the team") {
 		t.Fatalf("a removed role must be flagged:\n%s", gone)
 	}
 	cycle := Flow{Name: "c", Steps: []FlowStep{{ID: "a", Name: "A"}, {ID: "b", Name: "B"}},
@@ -156,12 +156,12 @@ func TestLibrary(t *testing.T) {
 		t.Fatalf("several picks keep their order and skip gone ones %+v", got)
 	}
 	section, err := LeadSection(ctx, pool, "u1", []string{a.ID})
-	if err != nil || !strings.Contains(section, "## 工作流程：开发流程") || !strings.Contains(section, "岗位 开发（dev）") || !strings.Contains(section, "岗位 qa，已不在团队里") {
+	if err != nil || !strings.Contains(section, "## Workflow: 开发流程") || !strings.Contains(section, "role 开发 (dev)") || !strings.Contains(section, "role qa, no longer on the team") {
 		t.Fatalf("lead section %v:\n%s", err, section)
 	}
 	both, err := LeadSection(ctx, pool, "u1", []string{a.ID, b.ID})
-	if err != nil || !strings.Contains(both, "## 工作流程（2 个）") || !strings.Contains(both, "挑最合适的一个流程") ||
-		!strings.Contains(both, "### 流程：开发流程") || !strings.Contains(both, "### 流程：小改动") || strings.Count(both, "```mermaid") != 2 {
+	if err != nil || !strings.Contains(both, "## Workflows (2)") || !strings.Contains(both, "pick the flow that best fits") ||
+		!strings.Contains(both, "### Flow: 开发流程") || !strings.Contains(both, "### Flow: 小改动") || strings.Count(both, "```mermaid") != 2 {
 		t.Fatalf("two flows %v:\n%s", err, both)
 	}
 	renamed := first
@@ -216,9 +216,9 @@ func TestBranchesAndMermaid(t *testing.T) {
 	w := Flow{Name: d.Name, Steps: d.Steps, Edges: d.Edges}
 	text := Render(w, map[string]string{"dev": "开发", "reviewer": "审查员"})
 	for _, want := range []string{
-		"按条件只走一条：如果需要设计 → 设计；如果不需要 → 开发", "条件分支”时只走其中一条",
-		"```mermaid\nflowchart LR\n", `s1["判断#quot;要不要#quot;设计<br/>组长 · 决策"]`, `s1 -->|"需要设计"| s2`,
-		"s2 --> s3", `s4 -.->|"不通过退回"| s3`, "每一步的详细说明",
+		"take only one by condition: if 需要设计 → 设计; if 不需要 → 开发", "\"branch\" arrows, take only one",
+		"```mermaid\nflowchart LR\n", `s1["判断#quot;要不要#quot;设计<br/>lead · decision"]`, `s1 -->|"需要设计"| s2`,
+		"s2 --> s3", `s4 -.->|"reject"| s3`, "Each step in detail",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("render lacks %q:\n%s", want, text)

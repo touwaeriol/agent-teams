@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /**
  * The coordinator conversation, with the questions it asked drawn where they were asked. The
  * user's bubbles can be selected and forwarded to a thread (lib/forward), and ?msg=<id> scrolls
@@ -68,8 +69,8 @@ watch(
     <template #insert="{ item }"><WaitingCard :cid="cid!" :pid="pid" :question="item.question" variant="soft" /></template>
     <template #empty>
       <div class="flex flex-col items-center gap-2 py-16 text-center">
-        <p class="text-[15px] font-medium">和项目统筹说说要做什么</p>
-        <p class="max-w-md text-[13px] leading-6 text-muted-foreground">统筹只分派、不改代码：它会判断要做什么，开讨论串让组长带成员在仓库里完成，有结论回到这里告诉你。</p>
+        <p class="text-[15px] font-medium">{{ $t("和项目统筹说说要做什么") }}</p>
+        <p class="max-w-md text-[13px] leading-6 text-muted-foreground">{{ $t("统筹只分派、不改代码：它会判断要做什么，开讨论串让组长带成员在仓库里完成，有结论回到这里告诉你。") }}</p>
       </div>
     </template>
   </Chat>

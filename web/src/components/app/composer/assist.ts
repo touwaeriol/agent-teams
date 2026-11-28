@@ -1,5 +1,6 @@
 // Composer assist, pure parts: where a "/" or "@" popup starts, the platform's own commands,
 // the popup rows, what a pick does to the text, and which @ references a message still carries.
+import { $t } from "@/i18n";
 import type { components } from "@/api/schema";
 
 type S = components["schemas"];
@@ -41,13 +42,13 @@ export interface PlatformCommand {
 }
 
 export const PLATFORM_COMMANDS: PlatformCommand[] = [
-  { name: "effort", desc: "讨论串的思考强度", scopes: ["lead"] },
-  { name: "status", desc: "谁在忙、待处理的卡片、节点", scopes: ["coordinator", "lead"] },
-  { name: "context", desc: "员工手上的上下文和本次会话的用量", scopes: ["coordinator", "lead"] },
-  { name: "skills", desc: "这位员工的技能和插件", scopes: ["coordinator", "lead"] },
-  { name: "usage", desc: "打开使用情况", scopes: ["coordinator", "lead"] },
-  { name: "memory", desc: "打开记忆设置", scopes: ["coordinator", "lead"] },
-  { name: "config", desc: "打开项目设置", scopes: ["coordinator", "lead"] },
+  { name: "effort", desc: $t("讨论串的思考强度"), scopes: ["lead"] },
+  { name: "status", desc: $t("谁在忙、待处理的卡片、节点"), scopes: ["coordinator", "lead"] },
+  { name: "context", desc: $t("员工手上的上下文和本次会话的用量"), scopes: ["coordinator", "lead"] },
+  { name: "skills", desc: $t("这位员工的技能和插件"), scopes: ["coordinator", "lead"] },
+  { name: "usage", desc: $t("打开使用情况"), scopes: ["coordinator", "lead"] },
+  { name: "memory", desc: $t("打开记忆设置"), scopes: ["coordinator", "lead"] },
+  { name: "config", desc: $t("打开项目设置"), scopes: ["coordinator", "lead"] },
 ];
 
 /** The platform commands of a scope, less those the employee's role hides. */
@@ -105,7 +106,7 @@ export interface SlashConfig {
   custom?: readonly CustomCommand[];
 }
 
-const customDetail = (c: CustomCommand) => c.description || (c.mode === "passthrough" ? "透传给 Claude Code" : "提示词模板");
+const customDetail = (c: CustomCommand) => c.description || (c.mode === "passthrough" ? $t("透传给 Claude Code") : $t("提示词模板"));
 
 /**
  * "/" rows in three groups: platform commands (命令, less the hidden ones), the role's and the
@@ -115,10 +116,10 @@ const customDetail = (c: CustomCommand) => c.description || (c.mode === "passthr
  */
 export function slashItems(q: string, scope: Scope, skills: ComposerCommand[], cfg: SlashConfig = {}): AssistItem[] {
   const groups: AssistItem[][] = [
-    platformCommands(scope, cfg.hidden).map((c) => ({ key: `cmd:${c.name}`, group: "命令", label: `/${c.name}`, detail: c.desc, command: c.name })),
-    (cfg.custom ?? []).map((c) => ({ key: `custom:${c.name}`, group: "自定义", label: `/${c.name}`, detail: customDetail(c), insert: `/${c.name} ` })),
+    platformCommands(scope, cfg.hidden).map((c) => ({ key: `cmd:${c.name}`, group: $t("命令"), label: `/${c.name}`, detail: c.desc, command: c.name })),
+    (cfg.custom ?? []).map((c) => ({ key: `custom:${c.name}`, group: $t("自定义"), label: `/${c.name}`, detail: customDetail(c), insert: `/${c.name} ` })),
     skills.map((c) => ({
-      key: `skill:${c.name}`, group: "技能", label: `/${c.name}`, detail: c.description || (c.source === "plugin" ? "插件命令" : "技能"), insert: `/${c.name} `,
+      key: `skill:${c.name}`, group: $t("技能"), label: `/${c.name}`, detail: c.description || (c.source === "plugin" ? $t("插件命令") : $t("技能")), insert: `/${c.name} `,
     })),
   ];
   const rows = groups
@@ -128,10 +129,10 @@ export function slashItems(q: string, scope: Scope, skills: ComposerCommand[], c
   const tiered = rows.map((r) => ({ ...r, t: nameTier(q, r.item.label.slice(1)) }));
   const best = tiered.filter((r) => r.t < 2).sort((a, b) => a.t - b.t || a.gi - b.gi || a.i - b.i);
   const rest = tiered.filter((r) => r.t === 2).sort((a, b) => a.gi - b.gi || a.s - b.s || a.i - b.i);
-  return [...best.map((r) => ({ ...r.item, group: "最佳匹配" })), ...rest.map((r) => r.item)];
+  return [...best.map((r) => ({ ...r.item, group: $t("最佳匹配") })), ...rest.map((r) => r.item)];
 }
 
-const REF_GROUPS: Record<RefCandidate["kind"], string> = { file: "文件", thread: "讨论串", deliverable: "交付物", memory: "记忆" };
+const REF_GROUPS: Record<RefCandidate["kind"], string> = { file: $t("文件"), thread: $t("讨论串"), deliverable: $t("交付物"), memory: $t("记忆") };
 const REF_ORDER: RefCandidate["kind"][] = ["file", "thread", "deliverable", "memory"];
 
 /** The token a reference leaves in the text: @path, @#12, @标题, @name.md. */

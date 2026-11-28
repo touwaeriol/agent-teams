@@ -1,6 +1,7 @@
 // Project files: the project's folder in the user's shared folder (projects/<pid>/ of the
 // user's shared folder; .project-files/ in every employee's working directory). Path rules, breadcrumbs, the
 // upload plan and the multipart upload with progress live here; the page is pages/ProjectFiles.vue.
+import { $t } from "@/i18n";
 import { ApiError, csrfToken, CSRF_HEADER, toApiError } from "@/api/client";
 import type { FileEntry, FilesUploaded, FsView } from "@/api/views";
 import { formatBytes } from "./bytes";
@@ -11,7 +12,7 @@ export const BATCH_BYTES = 1000 << 20;
 /** Most bytes of a path inside the volume (server userfs.MaxPathBytes). */
 export const MAX_PATH_BYTES = 1024;
 
-export const FILES_NOTICE = "项目文件对本项目所有会话和成员可见，不要放密钥或密码。";
+export const FILES_NOTICE = $t("项目文件对本项目所有会话和成员可见，不要放密钥或密码。");
 
 /** The folder at the project's root where the platform keeps deliverable versions (the server refuses to delete it). */
 export const MANAGED_FOLDER = ".deliverables";
@@ -21,12 +22,12 @@ export const isManaged = (e: Pick<FileEntry, "dir" | "path">) => e.dir && e.path
 
 /** The text of the link to the shared folder setting, by the volume's state. */
 export function folderLinkText(view: Pick<FsView, "volume" | "configured"> | null | undefined): string {
-  if (view?.configured === false) return "去查看"; // the console has no shared folders
+  if (view?.configured === false) return $t("去查看"); // the console has no shared folders
   const state = view?.volume?.state;
-  if (state === "error") return "开通失败，去重试";
-  if (state === "provisioning") return "正在开通，去查看";
-  if (state === "deleting") return "正在删除，去查看";
-  return state ? "去查看" : "正在开通，去查看";
+  if (state === "error") return $t("开通失败，去重试");
+  if (state === "provisioning") return $t("正在开通，去查看");
+  if (state === "deleting") return $t("正在删除，去查看");
+  return state ? $t("去查看") : $t("正在开通，去查看");
 }
 
 const utf8Length = (s: string) => new TextEncoder().encode(s).length;
@@ -42,13 +43,13 @@ const BAD_CHARS = /[\u0000-\u001f\u007f]/;
  */
 export function pathProblem(p: string): string | null {
   const t = p.replace(/^\/+|\/+$/g, "");
-  if (t === "") return "路径是空的";
-  if (utf8Length(t) > MAX_PATH_BYTES) return `路径超过 ${MAX_PATH_BYTES} 字节`;
-  if (t.includes("\\")) return "不能有反斜杠";
-  if (BAD_CHARS.test(t)) return "不能有控制字符或换行";
+  if (t === "") return $t("路径是空的");
+  if (utf8Length(t) > MAX_PATH_BYTES) return $t("路径超过 {MAX_PATH_BYTES} 字节", { MAX_PATH_BYTES });
+  if (t.includes("\\")) return $t("不能有反斜杠");
+  if (BAD_CHARS.test(t)) return $t("不能有控制字符或换行");
   for (const s of t.split("/")) {
-    if (s === "") return "不能有空的目录名（比如 a//b）";
-    if (s === "." || s === "..") return "不能有 . 或 .. 目录";
+    if (s === "") return $t("不能有空的目录名（比如 a//b）");
+    if (s === "." || s === "..") return $t("不能有 . 或 .. 目录");
   }
   return null;
 }
@@ -67,7 +68,7 @@ export function parentDir(dir: string): string {
 
 /** The links of the breadcrumb: the project's folder, then every folder down to dir. */
 export function breadcrumbs(dir: string): { name: string; path: string }[] {
-  const out = [{ name: "项目文件", path: "" }];
+  const out = [{ name: $t("项目文件"), path: "" }];
   let path = "";
   for (const seg of dir.split("/").filter(Boolean)) {
     path = joinPath(path, seg);
@@ -211,9 +212,9 @@ export function planUpload(picked: PickedFile[], entries: FileEntry[] | null | u
   for (const { file, path } of picked) {
     const bad = pathProblem(path) ?? pathProblem(joinPath(dir, path));
     if (bad) problems.push(`${path || file.name}：${bad}`);
-    else if (seen.has(path)) problems.push(`${path}：这次上传里有两个同名文件`);
+    else if (seen.has(path)) problems.push($t("{path}：这次上传里有两个同名文件", { path }));
     seen.add(path);
-    if (file.size > BATCH_BYTES) problems.push(`${path}：${formatBytes(file.size)}，网页一次最多上传 ${formatBytes(BATCH_BYTES)}，更大的文件请让员工直接放进 .project-files/`);
+    if (file.size > BATCH_BYTES) problems.push($t("{path}：{size}，网页一次最多上传 {BATCH_BYTES}，更大的文件请让员工直接放进 .project-files/", { path, size: formatBytes(file.size), BATCH_BYTES: formatBytes(BATCH_BYTES) }));
     const hit = replaced(path, files, dirs);
     if (hit) overwrites.add(hit);
   }
@@ -260,9 +261,9 @@ export function uploadErrorText(e: unknown): string {
   if (e instanceof UploadBatchError) {
     const done = e.done.length;
     const reason = uploadErrorText(e.cause);
-    return done > 0 ? `已上传 ${done} 个文件，其余 ${e.failed.length} 个没有上传：${reason}` : reason;
+    return done > 0 ? $t("已上传 {done} 个文件，其余 {failedCount} 个没有上传：{reason}", { done, failedCount: e.failed.length, reason }) : reason;
   }
-  if (e instanceof ApiError && e.status === 413) return `这次上传的请求太大，被服务器拒绝（${e.message}）。请分几次上传`;
+  if (e instanceof ApiError && e.status === 413) return $t("这次上传的请求太大，被服务器拒绝（{message}）。请分几次上传", { message: e.message });
   return e instanceof Error ? e.message : String(e);
 }
 
@@ -318,7 +319,7 @@ async function sendBatch(pid: string, dir: string, files: PickedFile[], onProgre
     withCredentials: true,
     headers: token ? { [CSRF_HEADER]: token } : {},
     onProgress: (loaded, total) => total > 0 && onProgress?.(loaded / total),
-    networkError: () => new ApiError(0, "网络错误，上传没有完成"),
+    networkError: () => new ApiError(0, $t("网络错误，上传没有完成")),
   });
   const body = parseBody(xhr.responseText);
   if (xhr.status >= 200 && xhr.status < 300) return body as FilesUploaded;

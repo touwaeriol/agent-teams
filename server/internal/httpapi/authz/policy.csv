@@ -93,6 +93,7 @@ p, user, /api/git/repos/:id/host-key/reset, POST
 p, user, /api/git/repos/:id/test, POST
 p, user, /api/git/repos/test, POST
 p, user, /api/me, GET
+p, user, /api/me/locale, PUT
 p, user, /api/me/memory, GET
 p, user, /api/me/memory/:name, GET
 p, user, /api/me/memory/:name, PUT
@@ -104,6 +105,7 @@ p, user, /api/me/sessions, GET
 p, user, /api/me/sessions/:id, DELETE
 p, user, /api/nodes, GET
 p, user, /api/nodes, POST
+p, user, /api/nodes/guide, GET
 p, user, /api/nodes/:id, DELETE
 p, user, /api/nodes/:id, PATCH
 p, user, /api/nodes/:id/drain, POST

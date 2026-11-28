@@ -101,3 +101,7 @@ docker exec -it agent-teams-node claude login
   BuildKit secret 传入（`--secret id=build_ca,src=ca.crt`），只在下载步骤里挂载，不会留在镜像里。
 - **隔离**：容器里没有 bubblewrap，节点报告的隔离级别是 `none`；容器本身就是隔离边界。
 - **需要更多工具**（Go、Java、数据库客户端……）：以这个镜像为基础写自己的 Dockerfile，`USER root` 装完再 `USER agent`。
+
+## Core dump
+
+`compose.yml` 设了 `ulimits: core: 0`，守护进程启动时也会用 `prlimit` 把自己（以及它启动的员工会话）的 core 上限设为 0：进程崩溃留下的几 GB core 文件会被员工 `git add -A` 提交，GitHub 拒收超过 100 MB 的文件。要调试崩溃时在 `node.env` 写 `AGENT_TEAMS_CORE_DUMPS=on`。

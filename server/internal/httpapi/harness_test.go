@@ -257,6 +257,14 @@ func (c *client) do(method, path string, body any, headers ...string) response {
 		req.Header.Set(CSRFHeader, c.cookie(CSRFCookie))
 	}
 	for i := 0; i+1 < len(headers); i += 2 {
+		if strings.EqualFold(headers[i], "Host") {
+			// net/http ignores a Host entry in Header, and the jar then looks cookies up by that host.
+			req.Host = headers[i+1]
+			for _, ck := range c.http.Jar.Cookies(req.URL) {
+				req.AddCookie(ck)
+			}
+			continue
+		}
 		req.Header.Set(headers[i], headers[i+1])
 	}
 	resp, err := c.http.Do(req)
@@ -268,9 +276,9 @@ func (c *client) do(method, path string, body any, headers ...string) response {
 	return response{Status: resp.StatusCode, Header: resp.Header, Body: raw}
 }
 
-func (c *client) must(status int, method, path string, body any, out any) response {
+func (c *client) must(status int, method, path string, body any, out any, headers ...string) response {
 	c.h.t.Helper()
-	r := c.do(method, path, body)
+	r := c.do(method, path, body, headers...)
 	if r.Status != status {
 		c.h.t.Fatalf("%s %s = %d, want %d: %s", method, path, r.Status, status, r.Body)
 	}

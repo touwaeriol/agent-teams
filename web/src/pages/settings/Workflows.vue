@@ -3,6 +3,7 @@
 // a project's thread leads get the project's flow in their prompt and split tasks by it (a
 // reference: the platform does not expand or block tasks). The default flow applies to projects
 // that pick none (project settings → 高级).
+import { $t } from "@/i18n";
 import { Workflow as FlowIcon } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { workflows as flowActions } from "@/api/actions";
@@ -58,7 +59,7 @@ const save = useAction(
   (c: { id: string | null; draft: FlowDraft }) => (c.id ? flowActions.update(c.id, c.draft) : flowActions.create(c.draft)),
   {
     invalidate,
-    success: "流程已保存",
+    success: $t("流程已保存"),
     onSuccess: (saved) => {
       current.value = { id: saved.id, draft: draftOf(saved) };
       dirty.value = false;
@@ -67,7 +68,7 @@ const save = useAction(
 );
 const remove = useAction((id: string) => flowActions.remove(id), {
   invalidate,
-  success: "流程已删除",
+  success: $t("流程已删除"),
   onSuccess: (_, id) => {
     current.value = null;
     const next = flows.value.find((f) => f.id !== id);
@@ -85,21 +86,21 @@ const unlabeled = computed(() => (current.value ? unlabeledBranches(current.valu
       <header class="flex flex-wrap items-start gap-3">
         <NavButton />
         <div class="flex min-w-0 flex-1 basis-80 flex-col gap-1.5">
-          <h1 class="text-2xl font-semibold">工作流程</h1>
-          <p class="text-sm text-muted-foreground">用流程图写下一件事怎么做：每一步交给哪个岗位、先后顺序、哪些步骤并行、审查不通过退回到哪里。讨论串的组长拆任务时会参考项目的流程；项目没单独选时用默认流程（项目设置 → 高级）。</p>
+          <h1 class="text-2xl font-semibold">{{ $t("工作流程") }}</h1>
+          <p class="text-sm text-muted-foreground">{{ $t("用流程图写下一件事怎么做：每一步交给哪个岗位、先后顺序、哪些步骤并行、审查不通过退回到哪里。讨论串的组长拆任务时会参考项目的流程；项目没单独选时用默认流程（项目设置 → 高级）。") }}</p>
         </div>
         <el-dropdown trigger="click" @command="(i: number) => startNew(options[i]!.draft)">
-          <el-button type="primary" class="h-[38px]">新建流程</el-button>
+          <el-button type="primary" class="h-[38px]">{{ $t("新建流程") }}</el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item v-for="(p, i) in options" :key="p.label" :command="i">{{ i === options.length - 1 ? "空白流程" : `从预设：${p.label}` }}</el-dropdown-item>
+              <el-dropdown-item v-for="(p, i) in options" :key="p.label" :command="i">{{ i === options.length - 1 ? $t("空白流程") : $t("从预设：{label}", { label: p.label }) }}</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
       </header>
 
       <Loading v-if="list.isLoading.value" />
-      <EmptyState v-else-if="flows.length === 0 && !current" title="还没有工作流程" description="新建一个流程，或从预设开始。第一个流程会成为默认流程，所有项目的组长都会参考它。">
+      <EmptyState v-else-if="flows.length === 0 && !current" :title="$t('还没有工作流程')" :description="$t('新建一个流程，或从预设开始。第一个流程会成为默认流程，所有项目的组长都会参考它。')">
         <template #icon><FlowIcon /></template>
         <template #action>
           <div class="flex flex-wrap justify-center gap-2">
@@ -109,7 +110,7 @@ const unlabeled = computed(() => (current.value ? unlabeledBranches(current.valu
       </EmptyState>
 
       <div v-else class="flex flex-col gap-4">
-        <div class="flex flex-wrap gap-2" role="tablist" aria-label="我的流程">
+        <div class="flex flex-wrap gap-2" role="tablist" :aria-label="$t('我的流程')">
           <button
             v-for="f in flows"
             :key="f.id"
@@ -120,47 +121,47 @@ const unlabeled = computed(() => (current.value ? unlabeledBranches(current.valu
             @click="open(f)"
           >
             {{ f.name }}
-            <span v-if="f.is_default" class="rounded bg-muted px-1.5 text-[11px] text-muted-foreground">默认</span>
+            <span v-if="f.is_default" class="rounded bg-muted px-1.5 text-[11px] text-muted-foreground">{{ $t("默认") }}</span>
           </button>
-          <span v-if="current && !current.id" class="flex h-9 items-center rounded-lg border border-dashed border-brand px-3 text-[13px] font-medium">{{ current.draft.name || "新流程" }}（未保存）</span>
+          <span v-if="current && !current.id" class="flex h-9 items-center rounded-lg border border-dashed border-brand px-3 text-[13px] font-medium">{{ current.draft.name || $t("新流程") }}{{ $t("（未保存）") }}</span>
         </div>
 
         <template v-if="current">
           <div class="grid gap-3 sm:grid-cols-[minmax(0,280px)_minmax(0,1fr)_auto] sm:items-end">
-            <Field v-slot="{ id }" label="流程名称">
+            <Field v-slot="{ id }" :label="$t('流程名称')">
               <el-input :id="id" :model-value="current.draft.name" maxlength="40" @update:model-value="(v: string) => edit({ ...current!.draft, name: v })" />
             </Field>
-            <Field v-slot="{ id }" label="说明（可选）">
+            <Field v-slot="{ id }" :label="$t('说明（可选）')">
               <el-input
                 :id="id"
                 :model-value="current.draft.description ?? ''"
                 maxlength="2000"
-                placeholder="什么样的事走这个流程"
+                :placeholder="$t('什么样的事走这个流程')"
                 @update:model-value="(v: string) => edit({ ...current!.draft, description: v })"
               />
             </Field>
             <label class="flex h-9 items-center gap-2 text-[13px]">
               <el-switch :model-value="!!current.draft.is_default" @update:model-value="(v) => edit({ ...current!.draft, is_default: !!v })" />
-              默认流程
+              {{ $t("默认流程") }}
             </label>
           </div>
 
           <FlowEditor :key="current.id ?? 'new'" :model-value="current.draft" :roles="choices" @update:model-value="edit" />
 
-          <p v-if="loose.length" class="text-[13px] text-amber-700 dark:text-amber-300">这些步骤还没连线：{{ loose.join("、") }}。组长会把它们当作和别的步骤无关、可以单独做的事。</p>
+          <p v-if="loose.length" class="text-[13px] text-amber-700 dark:text-amber-300">{{ $t("这些步骤还没连线：{loose}。组长会把它们当作和别的步骤无关、可以单独做的事。", { loose: loose.join("、") }) }}</p>
 
-          <p v-if="unlabeled" class="text-[13px] text-destructive">有 {{ unlabeled }} 条条件分支还没写条件，写上才能保存。</p>
+          <p v-if="unlabeled" class="text-[13px] text-destructive">{{ $t("有 {unlabeled} 条条件分支还没写条件，写上才能保存。", { unlabeled }) }}</p>
 
           <div class="flex flex-wrap items-center justify-end gap-2">
             <ConfirmAction
               v-if="current.id"
-              :title="`删除流程 ${current.draft.name}？`"
-              description="选了这个流程的项目会改用默认流程；已经在做的讨论串下次开会话时生效。"
+              :title="$t('删除流程 {name}？', { name: current.draft.name })"
+              :description="$t('选了这个流程的项目会改用默认流程；已经在做的讨论串下次开会话时生效。')"
               @confirm="remove.mutate(current!.id!)"
             />
-            <el-button v-if="dirty && current.id" @click="open(flows.find((f) => f.id === current!.id)!)">放弃修改</el-button>
-            <el-button v-if="!current.id" @click="current = null; flows[0] && open(flows[0])">取消</el-button>
-            <el-button type="primary" :loading="save.isPending.value" :disabled="!dirty || unlabeled > 0" @click="save.mutate(current!)">保存</el-button>
+            <el-button v-if="dirty && current.id" @click="open(flows.find((f) => f.id === current!.id)!)">{{ $t("放弃修改") }}</el-button>
+            <el-button v-if="!current.id" @click="current = null; flows[0] && open(flows[0])">{{ $t("取消") }}</el-button>
+            <el-button type="primary" :loading="save.isPending.value" :disabled="!dirty || unlabeled > 0" @click="save.mutate(current!)">{{ $t("保存") }}</el-button>
           </div>
         </template>
       </div>

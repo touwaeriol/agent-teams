@@ -74,7 +74,7 @@ func TestSessionMultiRepo(t *testing.T) {
 		t.Fatalf("session tools %v", tools)
 	}
 	sys := *open.Claude.SystemAppend
-	if !strings.Contains(sys, "多仓库会话") || !strings.Contains(sys, "o/web：目录 ./o__web") || strings.Contains(sys, "## 项目记忆") {
+	if !strings.Contains(sys, "multi-repository session") || !strings.Contains(sys, "o/web: directory ./o__web") || strings.Contains(sys, "## Project memory") {
 		t.Fatalf("session prompt:\n%s", sys)
 	}
 	if open.FirstMessage == nil || open.FirstMessage.Text != msg {

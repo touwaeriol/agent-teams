@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 540 {
+	if migrations.Latest() != 560 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -2251,9 +2251,9 @@ INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capa
 	}
 }
 
-// TestWorkflowsMigration: 00540 adds at_workflows (names unique per user, at most one default
-// per user) and at_projects.workflows ({} for existing projects); Down drops both.
-func TestWorkflowsMigration(t *testing.T) {
+// TestUserLocaleMigration: 00550 gives existing accounts an empty locale (follow the browser),
+// accepts the shipped languages, refuses others, and the column goes down again.
+func TestUserLocaleMigration(t *testing.T) {
 	db := open(t, testdb.URL(t))
 	ctx := context.Background()
 	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
@@ -2263,12 +2263,50 @@ func TestWorkflowsMigration(t *testing.T) {
 	if _, err := p.UpTo(ctx, 530); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 550); err != nil {
+		t.Fatal(err)
+	}
+	var l string
+	if err := db.QueryRow(`SELECT locale FROM at_users WHERE id = 'u1'`).Scan(&l); err != nil || l != "" {
+		t.Fatalf("default %q %v", l, err)
+	}
+	for _, ok := range []string{"zh-CN", "en", "ko", "ja", ""} {
+		if _, err := db.Exec(`UPDATE at_users SET locale = $1 WHERE id = 'u1'`, ok); err != nil {
+			t.Fatalf("%q refused: %v", ok, err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE at_users SET locale = 'fr' WHERE id = 'u1'`); err == nil {
+		t.Fatal("fr accepted")
+	}
+	if _, err := p.DownTo(ctx, 530); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT locale FROM at_users WHERE id = 'u1'`).Scan(&l); err == nil {
+		t.Fatal("locale after down")
+	}
+}
+
+// TestWorkflowsMigration: 00560 adds at_workflows (names unique per user, at most one default
+// per user) and at_projects.workflows ({} for existing projects); Down drops both.
+func TestWorkflowsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 550); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`
 INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x'), ('u2', 'b@example.com', 'x');
 INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'P');`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.UpTo(ctx, 540); err != nil {
+	if _, err := p.UpTo(ctx, 560); err != nil {
 		t.Fatal(err)
 	}
 	var n int
@@ -2285,7 +2323,7 @@ INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'P');`); err != 
 	if _, err := db.Exec(`UPDATE at_workflows SET is_default = TRUE WHERE id = 'wf2'`); err == nil {
 		t.Fatal("two defaults for one user")
 	}
-	if _, err := p.DownTo(ctx, 530); err != nil {
+	if _, err := p.DownTo(ctx, 550); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`SELECT 1 FROM at_workflows`); err == nil {

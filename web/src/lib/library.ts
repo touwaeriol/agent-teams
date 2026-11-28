@@ -1,5 +1,6 @@
 // The 资料库 panel's table logic: names, owners, sizes, types and sorting of
 // deliverables, and which files the user may add.
+import { $t, intlLocale } from "@/i18n";
 import type { DeliverableView } from "@/api/views";
 import { isHosted } from "./artifacts";
 import { deliverableKind } from "./present";
@@ -17,7 +18,7 @@ export const LIBRARY_MAX_BYTES = 5 << 20;
 export const LIBRARY_EXTENSIONS = ["html", "htm", "md", "markdown", "pdf", "json", "csv", "txt"];
 export const LIBRARY_ACCEPT = LIBRARY_EXTENSIONS.map((e) => `.${e}`).join(",");
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
-export const IMAGE_NOT_DELIVERABLE = "图片不是交付物，请把截图放进报告文档（html/md/pdf）里";
+export const IMAGE_NOT_DELIVERABLE = $t("图片不是交付物，请把截图放进报告文档（html/md/pdf）里");
 
 export function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -45,9 +46,9 @@ export function isLibraryDeliverable(d: Pick<DeliverableView, "detail">): boolea
 export function uploadProblem(file: { name: string; size: number }): string | null {
   const ext = extensionOf(file.name);
   if (IMAGE_EXTENSIONS.includes(ext)) return `${file.name}：${IMAGE_NOT_DELIVERABLE}`;
-  if (!LIBRARY_EXTENSIONS.includes(ext)) return `不支持 ${file.name}：只能添加 html、md、pdf、json、csv、txt`;
-  if (file.size === 0) return `${file.name} 是空文件`;
-  if (file.size > LIBRARY_MAX_BYTES) return `${file.name} 超过 5 MB`;
+  if (!LIBRARY_EXTENSIONS.includes(ext)) return $t("不支持 {name}：只能添加 html、md、pdf、json、csv、txt", { name: file.name });
+  if (file.size === 0) return $t("{name} 是空文件", { name: file.name });
+  if (file.size > LIBRARY_MAX_BYTES) return $t("{name} 超过 5 MB", { name: file.name });
   return null;
 }
 
@@ -66,8 +67,8 @@ export function typeLabel(d: Pick<DeliverableView, "kind" | "detail">): string {
 
 /** Who added it: you, the platform, or the employee's name. */
 export function ownerLabel(publishedBy: string): string {
-  if (publishedBy === "user") return "你";
-  if (!publishedBy || publishedBy === "platform") return "平台";
+  if (publishedBy === "user") return $t("你");
+  if (!publishedBy || publishedBy === "platform") return $t("平台");
   return publishedBy;
 }
 
@@ -77,7 +78,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${d.getHours()}:${pad(d.getMinutes())}`;
+  return $t("{year}年{month}月{day}日 {hour}:{minute}", { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(), hour: d.getHours(), minute: pad(d.getMinutes()) });
 }
 
 const SORT_VALUE: Record<SortKey, (d: DeliverableView) => string | number> = {
@@ -96,7 +97,7 @@ export function sortLibrary(items: DeliverableView[], key: SortKey, dir: SortDir
     const y = value(b);
     if (x === y) return a.id < b.id ? -1 : 1;
     if (typeof x === "number" && typeof y === "number") return (x - y) * sign;
-    return String(x).localeCompare(String(y), "zh-CN") * sign;
+    return String(x).localeCompare(String(y), intlLocale()) * sign;
   });
 }
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { computed } from "vue";
 import { fillDays, formatUSD } from "@/lib/projectSettings";
 
@@ -9,7 +10,7 @@ const max = computed(() => Math.max(...list.value.map((d) => d.cost), 0.0001));
 
 <template>
   <div class="rounded-xl border px-3.5 pb-2 pt-3">
-    <span class="text-xs text-muted-foreground">每天费用</span>
+    <span class="text-xs text-muted-foreground">{{ $t("每天费用") }}</span>
     <div class="mt-2 flex h-24 items-end gap-1">
       <span
         v-for="d in list"

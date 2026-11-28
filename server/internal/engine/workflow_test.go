@@ -33,7 +33,7 @@ func TestWorkflowInLeadPrompt(t *testing.T) {
 	tm.b.must(422, "POST", "/api/workflows", bad, nil)
 
 	sys := openLeadPrompt(t, tm, "Flow one")
-	for _, want := range []string{"## 工作流程：开发流程", "1. 写代码（岗位", "说明：按任务改代码", "然后 → 补测试、写文档", "合并开 PR（组长，你自己"} {
+	for _, want := range []string{"## Workflow: 开发流程", "1. 写代码 (role", "Instructions: 按任务改代码", "then → 补测试, 写文档", "合并开 PR (the lead: you"} {
 		if !strings.Contains(sys, want) {
 			t.Fatalf("lead prompt misses %q:\n%s", want, sys)
 		}
@@ -52,7 +52,7 @@ func TestWorkflowInLeadPrompt(t *testing.T) {
 		t.Fatalf("project workflows %v", view.Workflows)
 	}
 	sys = openLeadPrompt(t, tm, "Flow both")
-	for _, want := range []string{"## 工作流程（2 个）", "### 流程：开发流程", "### 流程：小改动"} {
+	for _, want := range []string{"## Workflows (2)", "### Flow: 开发流程", "### Flow: 小改动"} {
 		if !strings.Contains(sys, want) {
 			t.Fatalf("lead prompt misses %q:\n%s", want, sys)
 		}
@@ -61,7 +61,7 @@ func TestWorkflowInLeadPrompt(t *testing.T) {
 	if len(view.Workflows) != 1 || view.Workflows[0] != "none" {
 		t.Fatalf("project workflows %v", view.Workflows)
 	}
-	if sys := openLeadPrompt(t, tm, "Flow two"); strings.Contains(sys, "## 工作流程") {
+	if sys := openLeadPrompt(t, tm, "Flow two"); strings.Contains(sys, "## Workflow") {
 		t.Fatal("a project with no flow still got one")
 	}
 	tm.b.must(204, "DELETE", "/api/workflows/"+created.ID, nil, nil)

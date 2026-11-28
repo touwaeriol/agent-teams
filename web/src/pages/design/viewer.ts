@@ -1,16 +1,17 @@
 // Pure helpers and the text fetcher of the deliverable viewer (web/src/pages/DesignViewer.tsx).
+import { $t } from "@/i18n";
 import { ref, toValue, watch, type MaybeRefOrGetter, type Ref } from "vue";
 import type { DeliverableFiles, DeliverableVersion, ThreadView } from "@/api/views";
 import { timeAgo } from "@/lib/utils";
 
 /** "#12 标题 · dev-2 做的 · 3 分钟前" under the title. */
 export function viewerSubtitle(thread: Pick<ThreadView, "no" | "title"> | undefined, author: string, updatedAt: string): string {
-  return [thread ? `#${thread.no} ${thread.title}` : null, author ? `${author} 做的` : null, timeAgo(updatedAt)].filter(Boolean).join(" · ");
+  return [thread ? `#${thread.no} ${thread.title}` : null, author ? $t("{author} 做的", { author }) : null, timeAgo(updatedAt)].filter(Boolean).join(" · ");
 }
 
 /** The message "通过，按这个做" sends to the lead. */
 export function approvalText(label: string, title: string, version: number | undefined): string {
-  return `${label}「${title}」${version ? `第 ${version} 版` : ""}通过，按这个做。`;
+  return $t("{label}「{title}」{n}通过，按这个做。", { label, title, n: version ? $t("第 {version} 版", { version }) : "" });
 }
 
 /** The version to request when one is picked: 0 (= latest, follows new versions) for the newest. */
@@ -29,8 +30,8 @@ export function versionLabel(
   threadNo?: number | null,
 ): string {
   const where = v.publisher_thread_no && v.publisher_thread_no !== threadNo ? `（#${v.publisher_thread_no}）` : "";
-  const who = v.published_by === "user" ? "你" : v.published_by;
-  return `v${v.version}${v.version === latest ? "（最新）" : ""} · ${who} ${v.version === 1 ? "发布" : "修改"}${where} · ${timeAgo(v.created_at)}`;
+  const who = v.published_by === "user" ? $t("你") : v.published_by;
+  return $t("v{version}{n} · {who} {n2}{where} · {created_at}", { version: v.version, n: v.version === latest ? $t("（最新）") : "", who, n2: v.version === 1 ? $t("发布") : $t("修改"), where, created_at: timeAgo(v.created_at) });
 }
 
 /** The text at a signed URL (no cookies, no referrer); refetched when the URL changes. */

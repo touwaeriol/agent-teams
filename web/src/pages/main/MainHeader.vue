@@ -2,6 +2,7 @@
 // The project header: ☰ (phones), project switcher, coordinator state, 等你 N, then the icons
 // 资料库 / 讨论串 panel / 办公室 and the ⋯ menu (项目首页, 定时任务, 设置). Phones get 项目概览
 // (讨论串 / 资料库 / 定时任务) instead of the panel toggle.
+import { $t } from "@/i18n";
 import { Clock, Home, LayoutList, Library, MoreHorizontal, PanelRight, Settings, Users } from "lucide-vue-next";
 import { computed } from "vue";
 import { RouterLink, useRouter } from "vue-router";
@@ -43,27 +44,27 @@ const COMMANDS: Record<string, () => void> = {
         :to="`/projects/${project.id}/threads/${waiting.first.no}`"
         class="mr-1.5 flex h-8 items-center rounded-full bg-[#FFF4EC] px-2.5 text-xs text-[#B4530B] lg:hidden"
       >
-        等你 {{ waiting.count }}
+        {{ $t("等你 {count}", { count: waiting.count }) }}
       </RouterLink>
-      <IconButton label="项目概览" class="lg:hidden" @click="emit('overview')"><LayoutList :stroke-width="1.8" /></IconButton>
-      <IconButton label="资料库" :active="panel === 'library'" @click="emit('panel', panel === 'library' ? 'threads' : 'library')">
+      <IconButton :label="$t('项目概览')" class="lg:hidden" @click="emit('overview')"><LayoutList :stroke-width="1.8" /></IconButton>
+      <IconButton :label="$t('资料库')" :active="panel === 'library'" @click="emit('panel', panel === 'library' ? 'threads' : 'library')">
         <Library :stroke-width="1.8" />
       </IconButton>
       <IconButton
-        :label="panel === 'threads' ? '收起讨论串' : '显示讨论串'"
+        :label="panel === 'threads' ? $t('收起讨论串') : $t('显示讨论串')"
         :active="panel === 'threads'"
         class="max-lg:hidden"
         @click="emit('panel', panel === 'threads' ? 'none' : 'threads')"
       >
         <PanelRight :stroke-width="1.8" />
       </IconButton>
-      <IconButton label="办公室" :to="`/projects/${project.id}/office`" class="max-sm:hidden"><Users :stroke-width="1.8" /></IconButton>
-      <IconMenu label="更多" @command="(c: string) => COMMANDS[c]?.()">
+      <IconButton :label="$t('办公室')" :to="`/projects/${project.id}/office`" class="max-sm:hidden"><Users :stroke-width="1.8" /></IconButton>
+      <IconMenu :label="$t('更多')" @command="(c: string) => COMMANDS[c]?.()">
         <MoreHorizontal :stroke-width="1.8" />
         <template #menu>
-          <el-dropdown-item command="home"><Home /> 项目首页</el-dropdown-item>
-          <el-dropdown-item command="schedules"><Clock /> 定时任务</el-dropdown-item>
-          <el-dropdown-item command="settings" divided><Settings /> 设置</el-dropdown-item>
+          <el-dropdown-item command="home"><Home /> {{ $t("项目首页") }}</el-dropdown-item>
+          <el-dropdown-item command="schedules"><Clock /> {{ $t("定时任务") }}</el-dropdown-item>
+          <el-dropdown-item command="settings" divided><Settings /> {{ $t("设置") }}</el-dropdown-item>
         </template>
       </IconMenu>
     </span>

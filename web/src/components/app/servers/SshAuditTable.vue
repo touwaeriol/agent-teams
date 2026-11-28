@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 /** The SSH access log: who, which session / thread, when, which server, the command and the result. */
 import { computed } from "vue";
 import type { SshAuditView } from "@/api/views";
@@ -12,12 +13,12 @@ const props = withDefaults(defineProps<{ rows: SshAuditView[]; showServer?: bool
 });
 const emit = defineEmits<{ more: [] }>();
 const columns = computed<Column[]>(() => [
-  { key: "time", header: "时间", class: "whitespace-nowrap" },
-  { key: "who", header: "谁 · 讨论串 / 会话", class: "whitespace-nowrap" },
-  ...(props.showServer ? [{ key: "server", header: "服务器", class: "whitespace-nowrap" }] : []),
-  { key: "kind", header: "类型", class: "whitespace-nowrap" },
-  { key: "command", header: "命令" },
-  { key: "result", header: "结果", class: "min-w-[110px]" },
+  { key: "time", header: $t("时间"), class: "whitespace-nowrap" },
+  { key: "who", header: $t("谁 · 讨论串 / 会话"), class: "whitespace-nowrap" },
+  ...(props.showServer ? [{ key: "server", header: $t("服务器"), class: "whitespace-nowrap" }] : []),
+  { key: "kind", header: $t("类型"), class: "whitespace-nowrap" },
+  { key: "command", header: $t("命令") },
+  { key: "result", header: $t("结果"), class: "min-w-[110px]" },
 ]);
 const TONE = { ok: "text-ok", warn: "text-warn", danger: "text-bad", muted: "text-muted-foreground" };
 const where = (a: SshAuditView) => {
@@ -28,7 +29,7 @@ const where = (a: SshAuditView) => {
 
 <template>
   <div class="flex flex-col gap-2">
-    <DataTable :columns="columns" :rows="rows" :row-key="(a) => String(a.id)" :min-width="showServer ? 640 : 620" empty="还没有访问记录">
+    <DataTable :columns="columns" :rows="rows" :row-key="(a) => String(a.id)" :min-width="showServer ? 640 : 620" :empty="$t('还没有访问记录')">
       <template #cell-time="{ row }"><span :title="new Date(row.created_at).toLocaleString('zh-CN')">{{ timeAgo(row.created_at) }}</span></template>
       <template #cell-who="{ row }">
         <span class="flex flex-col">
@@ -41,10 +42,10 @@ const where = (a: SshAuditView) => {
       <template #cell-command="{ row }">
         <code v-if="row.command" :class="['block truncate font-mono text-xs', showServer ? 'max-w-[200px]' : 'max-w-[300px]']" :title="row.command">{{ row.command }}</code>
         <span v-else class="text-muted-foreground">—</span>
-        <span v-if="row.command_truncated" class="text-xs text-muted-foreground">（已截断）</span>
+        <span v-if="row.command_truncated" class="text-xs text-muted-foreground">{{ $t("（已截断）") }}</span>
       </template>
       <template #cell-result="{ row }"><span :class="TONE[auditResult(row).tone]">{{ auditResult(row).text }}</span></template>
     </DataTable>
-    <el-button v-if="hasMore" size="small" class="self-center" :loading="loading" @click="emit('more')">加载更多</el-button>
+    <el-button v-if="hasMore" size="small" class="self-center" :loading="loading" @click="emit('more')">{{ $t("加载更多") }}</el-button>
   </div>
 </template>

@@ -21,6 +21,8 @@ export const auth = {
   logout: () => unwrap(client.POST("/auth/logout")),
   changePassword: (body: S["PasswordInputBody"]) => unwrap(client.POST("/api/me/password", { body })),
   revokeSession: (id: string) => unwrap(client.DELETE("/api/me/sessions/{id}", { params: { path: { id } } })),
+  /** The account's interface language ("" = follow the browser). */
+  setLocale: (locale: string) => unwrap(client.PUT("/api/me/locale", { body: { locale } })),
 };
 
 export const projects = {

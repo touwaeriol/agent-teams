@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { $t } from "@/i18n";
 import { Square } from "lucide-vue-next";
 import { computed } from "vue";
 import { threads as threadActions } from "@/api/actions";
@@ -10,12 +11,12 @@ import LiveDot from "../LiveDot.vue";
 import { memberStatusLine } from "./members";
 
 const props = defineProps<{ thread: ThreadView; member: EmployeeBrief; asking: boolean; now: number }>();
-const stop = useAction(() => threadActions.interruptMember(props.thread.id, props.member.name), { success: `已让 ${props.member.name} 停下` });
+const stop = useAction(() => threadActions.interruptMember(props.thread.id, props.member.name), { success: $t("已让 {name} 停下", { name: props.member.name }) });
 const working = computed(() => workingHere(props.member));
 const elsewhere = computed(() => busyElsewhereText(props.member));
 const where = computed(() => {
   const n = props.member.node;
-  return `${RUNTIME_LABEL[props.member.runtime] ?? props.member.runtime} · ${n ? `${n.name}${n.online ? "" : "（离线）"}` : "未分配节点"}`;
+  return $t("{n} · {n2}", { n: RUNTIME_LABEL[props.member.runtime] ?? props.member.runtime, n2: n ? $t("{name}{n}", { name: n.name, n: n.online ? "" : $t("（离线）") }) : $t("未分配节点") });
 });
 // Queued for want of a node with its CLI logged in (no_runtime): say why, e.g. 没有已登录 Antigravity 的在线节点.
 const reason = computed(() => (elsewhere.value ? "" : queueReason(props.member)));
@@ -34,11 +35,11 @@ const status = computed(() =>
         v-if="working"
         type="button"
         :disabled="stop.isPending.value"
-        :aria-label="`让 ${member.name} 停下`"
+        :aria-label="$t('让 {name} 停下', { name: member.name })"
         class="ml-auto flex h-7 items-center gap-1 rounded-md border px-2 text-xs hover:bg-background"
         @click="stop.mutate()"
       >
-        <Square class="size-2.5 fill-current" /> 停下
+        <Square class="size-2.5 fill-current" /> {{ $t("停下") }}
       </button>
     </span>
     <span class="text-xs text-muted-foreground">{{ where }}</span>

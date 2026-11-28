@@ -17,13 +17,36 @@ type Enrollment struct {
 }
 
 // nodeURL is the address nodes register and connect with: the administrator's 节点注册地址, else
-// AGENT_TEAMS_NODE_URL, else the public URL (a CDN or forwarder in front of the backend should not
-// carry the nodes' long-lived connections).
+// AGENT_TEAMS_NODE_URL, else the address the caller reached the console on (see nodeURLDefault).
 func (s *Server) nodeURL(ctx context.Context) string {
 	if p, err := s.platformSettings(ctx); err == nil && p.NodeURL != "" {
 		return p.NodeURL
 	}
-	return s.cfg.NodeOrigin()
+	return s.nodeURLDefault(ctx)
+}
+
+// nodeURLDefault is the node address when no 节点注册地址 is set: AGENT_TEAMS_NODE_URL, else the
+// origin of the current request, else the public URL (no request, or a host that is not a plain
+// host[:port], which must never reach the install script).
+func (s *Server) nodeURLDefault(ctx context.Context) string {
+	return first(s.cfg.NodeURL, requestOf(ctx).Origin, s.cfg.PublicURL)
+}
+
+type nodeGuideOutput struct {
+	Body struct {
+		URL string `json:"url" doc:"Public Docker guide on the node registration address (node-docker.md)"`
+	}
+}
+
+// nodeGuide is the Docker guide link for the 节点 page: on the 节点注册地址 when one is set, else on
+// the address the caller reached the console on.
+func (s *Server) nodeGuide(ctx context.Context, _ *struct{}) (*nodeGuideOutput, error) {
+	if _, err := requireUser(ctx); err != nil {
+		return nil, err
+	}
+	out := &nodeGuideOutput{}
+	out.Body.URL = s.nodeURL(ctx) + "/node-docker.md"
+	return out, nil
 }
 
 func (s *Server) enrollment(ctx context.Context, name, token string) Enrollment {
@@ -55,7 +78,7 @@ func (n nodeContainer) volume(key string) string { return n.slug + "-" + key }
 func (n nodeContainer) dockerRun() string {
 	lines := []string{
 		fmt.Sprintf("docker run -d --name %s --hostname %s --restart unless-stopped --stop-timeout 60", n.slug, n.host),
-		"--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined",
+		"--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined --ulimit core=0",
 		"-e AGENT_TEAMS_CONSOLE=" + shellQuote(n.console),
 		"-e AGENT_TEAMS_NODE_TOKEN=" + shellQuote(n.token),
 	}
@@ -81,6 +104,7 @@ func (n nodeContainer) compose() string {
 	w("    devices: [\"/dev/fuse\"]")
 	w("    cap_add: [\"SYS_ADMIN\"]")
 	w("    security_opt: [\"apparmor:unconfined\"]")
+	w("    ulimits: { core: 0 }   # 不生成 core dump：崩溃留下的几 GB 文件会被提交进仓库")
 	w("    environment:")
 	w("      AGENT_TEAMS_CONSOLE: %q", n.console)
 	w("      AGENT_TEAMS_NODE_TOKEN: %q", n.token)

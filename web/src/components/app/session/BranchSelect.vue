@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The branch a session's repository starts from: the repository's branches (GitHub or a standalone
 // Git repository), or any name typed in; empty = the default branch.
+import { $t } from "@/i18n";
 import { computed } from "vue";
 import { useBranches, useGitRepoBranches } from "@/api/queries";
 import type { RepoRef } from "../repo/repo";
@@ -24,8 +25,8 @@ const options = computed(() => (q.value.data.value ?? []) as string[]);
     :clearable="clearable"
     default-first-option
     :loading="q.isLoading.value"
-    placeholder="默认分支"
-    :aria-label="label || `${item.repo} 的分支`"
+    :placeholder="$t('默认分支')"
+    :aria-label="label || $t('{repo} 的分支', { repo: item.repo })"
     class="w-44 shrink-0"
   >
     <el-option v-for="b in options" :key="b" :label="b" :value="b" />

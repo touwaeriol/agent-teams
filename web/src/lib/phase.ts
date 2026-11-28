@@ -2,6 +2,7 @@
 // line), the open thread (header mark, the line at the bottom of the chat) and the coordinator /
 // overview cards (threadKind in present.ts) all read threadPhase, so they never disagree.
 // Pure and unit-tested.
+import { $t } from "@/i18n";
 import type { QuestionView, ThreadView } from "@/api/views";
 import { isWaking, isWorking, liveLine, queueReason, workingHere } from "./live";
 
@@ -12,26 +13,26 @@ export type ListGroupId = "waiting" | "active" | "idle" | "done" | "archived";
  * so folds remembered in localStorage keep working).
  */
 export const LIST_GROUPS: { id: ListGroupId; label: string }[] = [
-  { id: "waiting", label: "等你处理" },
-  { id: "active", label: "进行中" },
-  { id: "idle", label: "已暂停" },
-  { id: "done", label: "已完成" },
-  { id: "archived", label: "已归档" },
+  { id: "waiting", label: $t("等你处理") },
+  { id: "active", label: $t("进行中") },
+  { id: "idle", label: $t("已暂停") },
+  { id: "done", label: $t("已完成") },
+  { id: "archived", label: $t("已归档") },
 ];
 
 /** The round mark before a row and in the open thread's header. */
 export type RowMark = "wait" | "working" | "queued" | "paused" | "done" | "failed" | "archived" | "finished" | "resolved";
 
 export const MARK_LABEL: Record<RowMark, string> = {
-  wait: "等你处理",
-  working: "进行中",
-  queued: "排队中",
-  paused: "已暂停",
-  done: "已完成",
-  failed: "失败",
-  archived: "已归档",
-  finished: "已完成",
-  resolved: "已解决",
+  wait: $t("等你处理"),
+  working: $t("进行中"),
+  queued: $t("排队中"),
+  paused: $t("已暂停"),
+  done: $t("已完成"),
+  failed: $t("失败"),
+  archived: $t("已归档"),
+  finished: $t("已完成"),
+  resolved: $t("已解决"),
 };
 
 export type PhaseId =
@@ -85,23 +86,23 @@ export interface ThreadPhase {
 export const awaitsAcceptance = (t: Pick<ThreadView, "status" | "merge_policy" | "merge_error">): boolean =>
   t.status === "review" && (t.merge_policy === "manual" || Boolean(t.merge_error));
 
-export const REVIEW_LINE: Record<ThreadView["merge_policy"], string> = { pr: "等检查通过", auto: "检查通过后自动合并", manual: "等你验收" };
+export const REVIEW_LINE: Record<ThreadView["merge_policy"], string> = { pr: $t("等检查通过"), auto: $t("检查通过后自动合并"), manual: $t("等你验收") };
 
 /** The review line, plus the small tasks that still hold the thread's end (they keep it in review after the checks pass). */
 export function reviewLine(t: Pick<ThreadView, "merge_policy" | "counts"> & { pr_state?: string | null }): string {
-  const line = t.pr_state === "merged" ? "已合并，等收尾" : (REVIEW_LINE[t.merge_policy] ?? REVIEW_LINE.pr);
+  const line = t.pr_state === "merged" ? $t("已合并，等收尾") : (REVIEW_LINE[t.merge_policy] ?? REVIEW_LINE.pr);
   const open = openTasks(t);
-  return open > 0 ? `${line}，还有 ${open} 个小任务没结束` : line;
+  return open > 0 ? $t("{line}，还有 {open} 个小任务没结束", { line, open }) : line;
 }
 
 /** Small tasks not finished yet (older servers without tasks_open: everything not done). */
 export const openTasks = (t: Pick<ThreadView, "counts">): number => t.counts.tasks_open ?? Math.max(0, t.counts.tasks_total - t.counts.tasks_done);
 
-const PAUSE_REASONS: Record<string, string> = { user: "已暂停", rate_limit: "Claude 使用限额用完，已暂停" };
+const PAUSE_REASONS: Record<string, string> = { user: $t("已暂停"), rate_limit: $t("Claude 使用限额用完，已暂停") };
 
 export function pauseLine(reason: string): string {
-  if (!reason) return "已暂停";
-  return PAUSE_REASONS[reason] ?? `已暂停：${reason}`;
+  if (!reason) return $t("已暂停");
+  return PAUSE_REASONS[reason] ?? $t("已暂停：{reason}", { reason });
 }
 
 export type PhaseInput = Pick<
@@ -123,38 +124,38 @@ const phase = (id: PhaseId, group: ListGroupId, mark: RowMark, note: string, lab
  */
 export function threadPhase(t: PhaseInput, waiting?: Map<number, QuestionView>): ThreadPhase {
   if (t.status === "archived") return phase("archived", "archived", "archived", "");
-  if (t.reminded_at) return phase("reminded", "waiting", "wait", "提醒时间到了，等你处理");
+  if (t.reminded_at) return phase("reminded", "waiting", "wait", $t("提醒时间到了，等你处理"));
   if (t.status === "done") return t.solo ? phase("resolved", "done", "resolved", "") : phase("done", "done", "done", "");
   if (t.status === "failed") return phase("failed", "done", "failed", "");
-  if (awaitsAcceptance(t)) return phase("acceptance", "waiting", "wait", t.merge_error ? "合并失败，等你处理" : "等你验收", "待验收");
-  if (t.status === "waiting" || t.counts.waiting > 0 || waiting?.has(t.no)) return phase("asking", "waiting", "wait", liveLine(t) || "等你处理");
-  if (t.status === "queued") return phase("queued", "active", "queued", t.queue_position ? `排队中，前面还有 ${t.queue_position} 个` : "排队等节点");
+  if (awaitsAcceptance(t)) return phase("acceptance", "waiting", "wait", t.merge_error ? $t("合并失败，等你处理") : $t("等你验收"), $t("待验收"));
+  if (t.status === "waiting" || t.counts.waiting > 0 || waiting?.has(t.no)) return phase("asking", "waiting", "wait", liveLine(t) || $t("等你处理"));
+  if (t.status === "queued") return phase("queued", "active", "queued", t.queue_position ? $t("排队中，前面还有 {queue_position} 个", { queue_position: t.queue_position }) : $t("排队等节点"));
   if (t.status === "paused") return phase("paused", "idle", "paused", pauseLine(t.pause_reason));
   if (t.status === "review") return phase("checks", "active", "working", reviewLine(t));
-  if (t.members.some(workingHere)) return phase("working", "active", "working", liveLine(t) || "进行中");
-  if (openTasks(t) > 0) return phase("tasks", "active", "working", "等成员处理任务");
+  if (t.members.some(workingHere)) return phase("working", "active", "working", liveLine(t) || $t("进行中"));
+  if (openTasks(t) > 0) return phase("tasks", "active", "working", $t("等成员处理任务"));
   const lead = t.members.find((m) => m.tier === "lead");
   switch (lead?.status?.state) {
     case "offline":
-      return phase("lead_down", "waiting", "wait", "组长离线：节点不在线，节点上线后才能继续");
+      return phase("lead_down", "waiting", "wait", $t("组长离线：节点不在线，节点上线后才能继续"));
     case "broken":
-      return phase("lead_down", "waiting", "wait", "组长的会话出错了，需要你看一下");
+      return phase("lead_down", "waiting", "wait", $t("组长的会话出错了，需要你看一下"));
     case "queued":
       // No online node has the lead's runtime logged in (no_runtime): nothing moves until the user
       // logs in somewhere, so it waits on the user like an offline lead (server core/phase.go).
-      if (lead && queueReason(lead)) return phase("lead_down", "waiting", "wait", `组长排队中：${queueReason(lead)}`);
-      return phase("lead_queued", "active", "queued", "等组长上线（节点工位已满，排队中）");
+      if (lead && queueReason(lead)) return phase("lead_down", "waiting", "wait", $t("组长排队中：{lead}", { lead: queueReason(lead) }));
+      return phase("lead_queued", "active", "queued", $t("等组长上线（节点工位已满，排队中）"));
     case "waiting":
     case "raising_hand":
-      return phase("lead_waiting", "active", "working", "组长在等别人回复");
+      return phase("lead_waiting", "active", "working", $t("组长在等别人回复"));
   }
   // A session's employee is not in a turn and nothing waits for the user's answer: the round is
   // over — replied, stopped by the user or ended without a reply — so 已完成 (not 等你处理); the
   // user confirms it solved or goes on. Same rule as the sidebar (server sessionStatusCol) and
   // core.PhaseOf.
-  if (t.solo) return phase("finished", "done", "finished", "做完了，等你确认是否解决");
-  if (!t.lead_last) return phase("reading", "active", "working", "组长正在阅读任务");
-  return phase("replied", "waiting", "wait", "组长已回复，等你回复");
+  if (t.solo) return phase("finished", "done", "finished", $t("做完了，等你确认是否解决"));
+  if (!t.lead_last) return phase("reading", "active", "working", $t("组长正在阅读任务"));
+  return phase("replied", "waiting", "wait", $t("组长已回复，等你回复"));
 }
 
 /** The quiet line at the bottom of a thread's chat while it is going (null when there is nothing to say). */
@@ -162,22 +163,22 @@ export function phaseLine(t: PhaseInput): { text: string; spin: boolean } | null
   const p = threadPhase(t);
   const lead = t.members.find((m) => m.tier === "lead");
   const leadLine = (): { text: string; spin: boolean } | null => {
-    if (lead && isWaking(lead)) return { text: "正在唤醒组长…", spin: true };
-    if (lead && isWorking(lead)) return { text: "组长正在回复…", spin: true };
+    if (lead && isWaking(lead)) return { text: $t("正在唤醒组长…"), spin: true };
+    if (lead && isWorking(lead)) return { text: $t("组长正在回复…"), spin: true };
     return null;
   };
   switch (p.id) {
     case "paused":
-      return { text: "讨论串已暂停", spin: false };
+      return { text: $t("讨论串已暂停"), spin: false };
     case "queued":
-      return { text: "排队中，等节点空出来", spin: true };
+      return { text: $t("排队中，等节点空出来"), spin: true };
     case "working":
-      return leadLine() ?? { text: "成员正在干活…", spin: true };
+      return leadLine() ?? { text: $t("成员正在干活…"), spin: true };
     case "tasks":
     case "lead_waiting":
       return { text: p.note, spin: true };
     case "reading":
-      return { text: "组长正在阅读任务…", spin: true };
+      return { text: $t("组长正在阅读任务…"), spin: true };
     case "lead_queued":
       return { text: p.note, spin: true };
     case "lead_down":

@@ -80,7 +80,7 @@ func TestLeadSchedulesWakeItself(t *testing.T) {
 	if r := tm.lead.call("schedule_cancel", map[string]any{"schedule_id": id}); r.Ok {
 		t.Fatal("cancelled an ended schedule")
 	}
-	if list := text(tm.lead.mustCall("schedule_list", map[string]any{})); !strings.Contains(list, id) || !strings.Contains(list, "已完成") {
+	if list := text(tm.lead.mustCall("schedule_list", map[string]any{})); !strings.Contains(list, id) || !strings.Contains(list, "done") {
 		t.Fatalf("list %q", list)
 	}
 
@@ -126,7 +126,7 @@ func TestCoordinatorSchedulesThreadAndUserOnes(t *testing.T) {
 	if user.Target != timers.TargetLead || user.CreatedBy != timers.ByUser || user.ThreadNo == nil || *user.ThreadNo != tm.thread.No {
 		t.Fatalf("user schedule %+v", user)
 	}
-	if r := coord.call("schedule_cancel", map[string]any{"schedule_id": user.ID}); r.Ok || !strings.Contains(text(r), "用户") {
+	if r := coord.call("schedule_cancel", map[string]any{"schedule_id": user.ID}); r.Ok || !strings.Contains(text(r), "the user") {
 		t.Fatalf("coordinator cancelled the user's schedule: %s", text(r))
 	}
 	var list []timers.Schedule

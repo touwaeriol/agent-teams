@@ -1,4 +1,5 @@
 // Skill and plugin uploads: a zip (sent as base64) or a picked folder of text files.
+import { $t } from "@/i18n";
 import type { SkillFile } from "@/api/views";
 
 /** Text files of a picked folder: hidden files and folders (.git, .DS_Store) are left out. */
@@ -25,4 +26,4 @@ export async function readFolder(list: ArrayLike<File>): Promise<SkillFile[]> {
 }
 
 export const PLUGIN_HELP =
-  "插件是 Claude Code 插件包：根目录 .claude-plugin/plugin.json，加上 skills/、commands/、agents/、hooks/hooks.json 或 .mcp.json。打包成 zip 上传（最多 200 个文件、合计 1 MB），同名再次上传会成为新版本。插件的工具调用照常需要审批（技能和命令里的 allowed-tools 会被去掉）；hooks 会在节点上直接运行命令，不经审批。";
+  $t("插件是 Claude Code 插件包：根目录 .claude-plugin/plugin.json，加上 skills/、commands/、agents/、hooks/hooks.json 或 .mcp.json。打包成 zip 上传（最多 200 个文件、合计 1 MB），同名再次上传会成为新版本。插件的工具调用照常需要审批（技能和命令里的 allowed-tools 会被去掉）；hooks 会在节点上直接运行命令，不经审批。");

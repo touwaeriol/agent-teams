@@ -3,6 +3,7 @@
 // documents as paper-stack cards (preview, title, relative time) in a row that scrolls sideways with
 // round ‹ › buttons, a "新内容" tag on the ones updated since this viewer last opened them, and
 // 查看全部 (opens the library) on the title line. PRs are not shown here; they live on the thread.
+import { $t } from "@/i18n";
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useDeliverables } from "@/api/queries";
@@ -42,7 +43,7 @@ watch([scroller, () => items.value.length, () => props.folded], () => nextTick((
 </script>
 
 <template>
-  <section v-if="items.length > 0" class="flex flex-col gap-2.5" aria-label="交付物">
+  <section v-if="items.length > 0" class="flex flex-col gap-2.5" :aria-label="$t('交付物')">
     <div class="flex items-center justify-between gap-2">
       <button
         type="button"
@@ -50,10 +51,10 @@ watch([scroller, () => items.value.length, () => props.folded], () => nextTick((
         class="flex items-center gap-1 rounded-full bg-raised py-[3px] pl-2.5 pr-2 text-[13px] text-muted-foreground hover:bg-accent hover:text-foreground"
         @click="emit('fold', !folded)"
       >
-        交付物
+        {{ $t("交付物") }}
         <ChevronDown class="size-3.5 transition-transform" :class="folded && '-rotate-90'" :stroke-width="1.8" />
       </button>
-      <button type="button" class="rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-raised hover:text-foreground" @click="emit('all')">查看全部</button>
+      <button type="button" class="rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-raised hover:text-foreground" @click="emit('all')">{{ $t("查看全部") }}</button>
     </div>
     <div v-if="!folded" class="relative -mx-1">
       <div ref="scroller" data-scroller="" class="overflow-x-auto px-1 pb-1 pt-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" @scroll.passive="measure">
@@ -71,7 +72,7 @@ watch([scroller, () => items.value.length, () => props.folded], () => nextTick((
               class="relative block rounded-xl ring-1 ring-transparent transition-shadow group-hover:ring-input group-focus-visible:ring-2 group-focus-visible:ring-ring"
             >
               <DeliverablePreview :item="d" :fresh="seen.isNew(d)" />
-              <span v-if="seen.isNew(d)" class="absolute left-1.5 top-1.5 rounded-full bg-info px-1.5 py-px text-[10px] font-medium leading-4 text-white dark:text-background">新内容</span>
+              <span v-if="seen.isNew(d)" class="absolute left-1.5 top-1.5 rounded-full bg-info px-1.5 py-px text-[10px] font-medium leading-4 text-white dark:text-background">{{ $t("新内容") }}</span>
             </span>
             <span class="flex items-start justify-between gap-2 px-0.5 text-[13px] leading-[18px]">
               <span class="line-clamp-2 min-w-0 break-all">{{ d.title }}</span>
@@ -83,7 +84,7 @@ watch([scroller, () => items.value.length, () => props.folded], () => nextTick((
       <button
         v-if="edges.left"
         type="button"
-        aria-label="向左滚动"
+        :aria-label="$t('向左滚动')"
         class="absolute left-0 top-[33px] flex size-7 items-center justify-center rounded-full border bg-panel text-foreground shadow-[0_1px_4px_rgba(0,0,0,0.12)] hover:bg-raised"
         @click="page(-1)"
       >
@@ -92,7 +93,7 @@ watch([scroller, () => items.value.length, () => props.folded], () => nextTick((
       <button
         v-if="edges.right"
         type="button"
-        aria-label="向右滚动"
+        :aria-label="$t('向右滚动')"
         class="absolute right-0 top-[33px] flex size-7 items-center justify-center rounded-full border bg-panel text-foreground shadow-[0_1px_4px_rgba(0,0,0,0.12)] hover:bg-raised"
         @click="page(1)"
       >

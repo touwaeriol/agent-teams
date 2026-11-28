@@ -2,6 +2,7 @@
 // The flow chart editor: steps are boxes, edges are arrows. Drag a box to move it, drag from its
 // right dot to another box to connect them (然后); click a box or an arrow to edit it on the
 // right. Several arrows out of one step run in parallel; several into one step wait for all.
+import { $t } from "@/i18n";
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import "@vue-flow/controls/dist/style.css";
@@ -35,7 +36,7 @@ const nodes = computed<Node[]>(() =>
     type: "step",
     position: { x: s.x ?? 0, y: s.y ?? 0 },
     selected: selected.value?.kind === "step" && selected.value.id === s.id,
-    data: { name: s.name || "未命名", who: roleLabel(s.role, props.roles), kind: kindLabel(s.kind), tone: TONE[s.kind ?? "work"], missing: !!s.role && !known.value.has(s.role) },
+    data: { name: s.name || $t("未命名"), who: roleLabel(s.role, props.roles), kind: kindLabel(s.kind), tone: TONE[s.kind ?? "work"], missing: !!s.role && !known.value.has(s.role) },
   })),
 );
 const flowEdges = computed<Edge[]>(() =>
@@ -49,7 +50,7 @@ const flowEdges = computed<Edge[]>(() =>
       source: e.from,
       target: e.to,
       type: reject ? "smoothstep" : "default",
-      label: e.label || (reject ? "退回" : branch ? "条件？" : ""),
+      label: e.label || (reject ? $t("退回") : branch ? $t("条件？") : ""),
       animated: false,
       selected: on,
       markerEnd: { type: MarkerType.ArrowClosed, color },
@@ -83,7 +84,7 @@ function addStep() {
   const id = newStepId(steps.value);
   const right = Math.max(-240, ...steps.value.map((s) => s.x ?? 0)) + 240;
   const first = props.roles[0]?.value ?? "lead";
-  put({ steps: [...steps.value, { id, name: "新步骤", role: first, kind: "work", instructions: "", x: right, y: 0 }] });
+  put({ steps: [...steps.value, { id, name: $t("新步骤"), role: first, kind: "work", instructions: "", x: right, y: 0 }] });
   selected.value = { kind: "step", id };
 }
 
@@ -120,8 +121,8 @@ const stepName = (id: string) => steps.value.find((s) => s.id === id)?.name ?? i
   <div class="flex flex-col gap-3 lg:flex-row">
     <div class="relative h-[460px] min-w-0 flex-1 overflow-hidden rounded-xl border bg-background sm:h-[540px]">
       <div class="absolute left-3 top-3 z-10 flex gap-2">
-        <el-button size="small" @click="addStep"><Plus class="mr-1 size-3.5" />添加步骤</el-button>
-        <el-button size="small" @click="tidy"><Wand2 class="mr-1 size-3.5" />自动排列</el-button>
+        <el-button size="small" @click="addStep"><Plus class="mr-1 size-3.5" />{{ $t("添加步骤") }}</el-button>
+        <el-button size="small" @click="tidy"><Wand2 class="mr-1 size-3.5" />{{ $t("自动排列") }}</el-button>
       </div>
       <VueFlow
         :nodes="nodes"
@@ -146,24 +147,24 @@ const stepName = (id: string) => steps.value.find((s) => s.id === id)?.name ?? i
     <aside class="flex w-full shrink-0 flex-col gap-3 rounded-xl border bg-panel p-4 lg:w-[300px]">
       <template v-if="step">
         <div class="flex items-center justify-between">
-          <span class="text-sm font-semibold">步骤</span>
-          <el-button text size="small" type="danger" @click="deleteSelected"><Trash2 class="mr-1 size-3.5" />删除步骤</el-button>
+          <span class="text-sm font-semibold">{{ $t("步骤") }}</span>
+          <el-button text size="small" type="danger" @click="deleteSelected"><Trash2 class="mr-1 size-3.5" />{{ $t("删除步骤") }}</el-button>
         </div>
-        <Field v-slot="{ id }" label="名称">
+        <Field v-slot="{ id }" :label="$t('名称')">
           <el-input :id="id" :model-value="step.name" maxlength="40" @update:model-value="(v: string) => patchStep(step!.id, { name: v })" />
         </Field>
-        <Field label="类型">
+        <Field :label="$t('类型')">
           <el-radio-group :model-value="step.kind ?? 'work'" size="small" @update:model-value="(v) => setKind(step!.id, v as StepKind)">
             <el-radio-button v-for="k in STEP_KINDS" :key="k.value" :value="k.value">{{ k.label }}</el-radio-button>
           </el-radio-group>
           <template #hint>{{ STEP_KINDS.find((k) => k.value === (step!.kind ?? "work"))?.hint }}</template>
         </Field>
-        <Field v-if="step.kind !== 'approval'" v-slot="{ id }" label="谁来做">
+        <Field v-if="step.kind !== 'approval'" v-slot="{ id }" :label="$t('谁来做')">
           <el-select :id="id" :model-value="step.role" @update:model-value="(v: string) => patchStep(step!.id, { role: v })">
             <el-option v-for="r in roles" :key="r.value" :value="r.value" :label="r.label" />
           </el-select>
         </Field>
-        <Field v-slot="{ id }" label="说明和验收标准" hint="组长拆任务时会把它写进这一步的任务里。">
+        <Field v-slot="{ id }" :label="$t('说明和验收标准')" :hint="$t('组长拆任务时会把它写进这一步的任务里。')">
           <el-input
             :id="id"
             type="textarea"
@@ -177,25 +178,25 @@ const stepName = (id: string) => steps.value.find((s) => s.id === id)?.name ?? i
       <template v-else-if="edge">
         <div class="flex items-center justify-between">
           <span class="text-sm font-semibold">{{ stepName(edge.from) }} → {{ stepName(edge.to) }}</span>
-          <el-button text size="small" type="danger" @click="deleteSelected"><Trash2 class="mr-1 size-3.5" />删除连线</el-button>
+          <el-button text size="small" type="danger" @click="deleteSelected"><Trash2 class="mr-1 size-3.5" />{{ $t("删除连线") }}</el-button>
         </div>
-        <Field label="类型">
+        <Field :label="$t('类型')">
           <el-radio-group :model-value="edge.kind ?? 'next'" size="small" @update:model-value="(v) => patchEdge(edgeKey(edge!), { kind: v as EdgeKind })">
             <el-radio-button v-for="k in EDGE_KINDS" :key="k.value" :value="k.value">{{ k.label }}</el-radio-button>
           </el-radio-group>
-          <template #hint>“然后”：从同一步连出几条会并行做。“条件分支”：从同一步连出的几条只走一条，由组长按线上的条件判断。“不通过退回”：审查或决策没通过时，回到箭头指向的步骤返工。</template>
+          <template #hint>{{ $t("“然后”：从同一步连出几条会并行做。“条件分支”：从同一步连出的几条只走一条，由组长按线上的条件判断。“不通过退回”：审查或决策没通过时，回到箭头指向的步骤返工。") }}</template>
         </Field>
-        <Field v-slot="{ id }" :label="edge.kind === 'branch' ? '条件（必填）' : '线上的文字（可选）'">
-          <el-input :id="id" :model-value="edge.label ?? ''" maxlength="20" :placeholder="edge.kind === 'branch' ? '比如：需要设计' : '比如：有问题'" @update:model-value="(v: string) => patchEdge(edgeKey(edge!), { label: v })" />
+        <Field v-slot="{ id }" :label="edge.kind === 'branch' ? $t('条件（必填）') : $t('线上的文字（可选）')">
+          <el-input :id="id" :model-value="edge.label ?? ''" maxlength="20" :placeholder="edge.kind === 'branch' ? $t('比如：需要设计') : $t('比如：有问题')" @update:model-value="(v: string) => patchEdge(edgeKey(edge!), { label: v })" />
         </Field>
       </template>
       <div v-else class="flex flex-col gap-2 text-[13px] leading-5 text-muted-foreground">
-        <span class="text-sm font-semibold text-foreground">怎么画</span>
-        <span>点“添加步骤”加一个方框，给它选岗位和类型。</span>
-        <span>从方框右边的圆点拖到另一个方框，就连上一条“然后”的箭头；点箭头可以改成“不通过退回”。</span>
-        <span>一个步骤连出几条“然后”，这几步会并行做；几条箭头指向同一步，它要等前面都完成。</span>
-        <span>要“是 / 否”这样只走一条路，就把箭头改成“条件分支”，在线上写条件。</span>
-        <span>组长拆任务时会参考这张图，遇到特殊情况可以调整，并会说明原因。</span>
+        <span class="text-sm font-semibold text-foreground">{{ $t("怎么画") }}</span>
+        <span>{{ $t("点“添加步骤”加一个方框，给它选岗位和类型。") }}</span>
+        <span>{{ $t("从方框右边的圆点拖到另一个方框，就连上一条“然后”的箭头；点箭头可以改成“不通过退回”。") }}</span>
+        <span>{{ $t("一个步骤连出几条“然后”，这几步会并行做；几条箭头指向同一步，它要等前面都完成。") }}</span>
+        <span>{{ $t("要“是 / 否”这样只走一条路，就把箭头改成“条件分支”，在线上写条件。") }}</span>
+        <span>{{ $t("组长拆任务时会参考这张图，遇到特殊情况可以调整，并会说明原因。") }}</span>
       </div>
     </aside>
   </div>

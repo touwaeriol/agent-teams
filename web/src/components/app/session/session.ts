@@ -1,5 +1,6 @@
 // 会话 (multi-repository sessions): a project of kind session where one employee works in a folder
 // holding every chosen repository side by side, and the user talks to it directly.
+import { $t, currentLocale, type Locale } from "@/i18n";
 import type { ProjectView } from "@/api/views";
 import { normalizeRepo, type RepoRef } from "../repo/repo";
 
@@ -35,12 +36,21 @@ export function withBranches(list: RepoRef[], prev: SessionRepo[]): SessionRepo[
 
 /** Thread wording said of a session, where the one employee is talked to directly. */
 export function sessionText(text: string): string {
-  return text.replace(/组长/g, "员工").replace(/讨论串/g, "会话");
+  return (SESSION_WORDS[currentLocale()] ?? []).reduce((s, [from, to]) => s.replace(from, to), text);
 }
+
+// Per language: the words for lead / thread and their session counterparts (employee / session),
+// matching the translations in i18n/locales.
+const SESSION_WORDS: Partial<Record<Locale, [RegExp, string][]>> = {
+  "zh-CN": [[/组长/g, "员工"], [/讨论串/g, "会话"]],
+  en: [[/\blead\b/g, "employee"], [/\bLead\b/g, "Employee"], [/\bthreads\b/g, "sessions"], [/\bThreads\b/g, "Sessions"], [/\bthread\b/g, "session"], [/\bThread\b/g, "Session"]],
+  ko: [[/리더/g, "직원"], [/스레드/g, "세션"]],
+  ja: [[/リーダー/g, "スタッフ"], [/スレッド/g, "セッション"]],
+};
 
 /** The repository chip under the new-session box: "选择仓库", "org/web · develop" or "org/web +2". */
 export function reposLabel(list: SessionRepo[]): string {
-  if (list.length === 0) return "仓库（可选）";
+  if (list.length === 0) return $t("仓库（可选）");
   const first = list[0].branch ? `${list[0].repo} · ${list[0].branch}` : list[0].repo;
   return list.length > 1 ? `${first} +${list.length - 1}` : first;
 }
@@ -72,13 +82,13 @@ export function parseDefaults(raw: string | null): SessionDefaults | null {
 export type SessionMark = "working" | "queued" | "finished" | "resolved" | "attention" | "paused" | "failed";
 
 export const SESSION_MARK_LABEL: Record<SessionMark, string> = {
-  working: "进行中",
-  queued: "排队中",
-  finished: "已完成",
-  resolved: "已解决",
-  attention: "等你处理",
-  paused: "已暂停",
-  failed: "失败",
+  working: $t("进行中"),
+  queued: $t("排队中"),
+  finished: $t("已完成"),
+  resolved: $t("已解决"),
+  attention: $t("等你处理"),
+  paused: $t("已暂停"),
+  failed: $t("失败"),
 };
 
 /**
@@ -115,6 +125,8 @@ export function sessionMark(p: Pick<ProjectView, "kind" | "waiting" | "archived"
 /** Tokens in Chinese units: 8,123 / 7.7万 / 100万. */
 export function zhTokens(n: number): string {
   if (n < 10_000) return n.toLocaleString("en-US");
+  // Other languages: the locale's compact form (77K, 7.7만, 7.7万).
+  if (currentLocale() !== "zh-CN") return new Intl.NumberFormat(currentLocale(), { notation: "compact", maximumFractionDigits: 1 }).format(n);
   const w = n / 10_000;
   return `${w >= 100 ? Math.round(w) : Number(w.toFixed(1))}万`;
 }
@@ -135,7 +147,7 @@ export function contextTotal(s: { context_used?: number | null; context_max?: nu
   if (used == null || !max || max <= 0) return null;
   const pct = Math.min(100, (used / max) * 100);
   const shown = used > 0 && pct < 1 ? "<1%" : `${Math.round(pct)}%`;
-  return { used, max, pct, text: `已使用 ${shown} · ${zhTokens(used)} / ${zhTokens(max)}` };
+  return { used, max, pct, text: $t("已使用 {shown} · {used} / {n}", { shown, used: zhTokens(used), n: zhTokens(max) }) };
 }
 
 /** The node of the new-session box: the remembered or picked one while it exists and is online, else auto (自动选择). */
@@ -168,15 +180,15 @@ interface NodeCliState {
  * never reported is not judged (the server checks the same: 422 on node_id).
  */
 export function nodeAgentProblem(n: { online: boolean; clis?: NodeCliState[] | null }, agent: string, label: (id: string) => string): string {
-  if (!n.online) return "离线";
+  if (!n.online) return $t("离线");
   const clis = n.clis ?? [];
   if (!agent || clis.length === 0) return "";
   const c = clis.find((x) => x.runtime === agent);
   const name = label(agent);
-  if (!c) return `没有检测到 ${name}`;
-  if (!c.installed) return `没有安装 ${name}`;
-  if (c.expired) return `${name} 登录已过期`;
-  if (c.ready === false || c.auth === "none" || c.auth === "unknown" || !c.auth) return `${name} 没有登录`;
+  if (!c) return $t("没有检测到 {name}", { name });
+  if (!c.installed) return $t("没有安装 {name}", { name });
+  if (c.expired) return $t("{name} 登录已过期", { name });
+  if (c.ready === false || c.auth === "none" || c.auth === "unknown" || !c.auth) return $t("{name} 没有登录", { name });
   return "";
 }
 

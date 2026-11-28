@@ -2,6 +2,7 @@
 // straight to storage. create → parts (presigned URLs, 1 hour) → PUT each slice of part_size bytes
 // (3 at a time, each retried; the ETag response header is kept) → complete. Cancelling aborts the
 // running PUTs and DELETEs the upload. The bytes never pass through the console.
+import { $t } from "@/i18n";
 import { client, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
 
@@ -93,16 +94,16 @@ export function sendXhr(r: XhrRequest): Promise<XMLHttpRequest> {
 
 /** XMLHttpRequest PUT of one part. The storage's CORS exposes ETag. */
 export const xhrPut: PutPart = async (url, body, onProgress, signal) => {
-  const xhr = await sendXhr({ method: "PUT", url, body, signal, onProgress, networkError: () => new PartError(0, "网络错误，分片没有传上去") });
-  if (xhr.status < 200 || xhr.status >= 300) throw new PartError(xhr.status, `分片上传失败（HTTP ${xhr.status}）`);
+  const xhr = await sendXhr({ method: "PUT", url, body, signal, onProgress, networkError: () => new PartError(0, $t("网络错误，分片没有传上去")) });
+  if (xhr.status < 200 || xhr.status >= 300) throw new PartError(xhr.status, $t("分片上传失败（HTTP {status}）", { status: xhr.status }));
   const etag = xhr.getResponseHeader("ETag");
-  if (!etag) throw new PartError(0, "存储没有返回 ETag（检查存储的 CORS 是否暴露了 ETag 头）");
+  if (!etag) throw new PartError(0, $t("存储没有返回 ETag（检查存储的 CORS 是否暴露了 ETag 头）"));
   return etag;
 };
 
 export class UploadCancelled extends Error {
   constructor() {
-    super("已取消上传");
+    super($t("已取消上传"));
   }
 }
 
@@ -172,7 +173,7 @@ export async function uploadFile(file: Blob & { name?: string }, api: UploadApi,
         if (inner.signal.aborted) throw new UploadCancelled();
         try {
           const url = urls.get(n);
-          if (!url) throw new PartError(0, `没有拿到第 ${n} 片的上传地址`);
+          if (!url) throw new PartError(0, $t("没有拿到第 {n} 片的上传地址", { n }));
           etags.set(n, await put(url, slice, (l) => ((loaded[n] = Math.min(l, end - start)), report()), inner.signal));
           loaded[n] = end - start;
           report();

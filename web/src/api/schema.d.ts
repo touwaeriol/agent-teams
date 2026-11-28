@@ -927,6 +927,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/locale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set my interface language (empty = follow the browser) */
+        put: operations["put-my-locale"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/me/memory": {
         parameters: {
             query?: never;
@@ -1041,6 +1058,23 @@ export interface paths {
         put?: never;
         /** Register a node; returns its one-time token and install command */
         post: operations["add-node"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/nodes/guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Link to the public Docker guide on the node registration address */
+        get: operations["node-guide"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2766,6 +2800,11 @@ export interface components {
             id: string;
             /** Format: date-time */
             last_login_at: string | null;
+            /**
+             * @description Interface language; empty = follow the browser
+             * @enum {string}
+             */
+            locale: "" | "zh-CN" | "en" | "ko" | "ja";
             /** Format: int64 */
             max_nodes: number | null;
             /** Format: int64 */
@@ -3772,6 +3811,10 @@ export interface components {
             at: string;
             text: string;
         };
+        LocaleInputBody: {
+            /** @description zh-CN, en, ko, ja, or empty to follow the browser */
+            locale: string;
+        };
         Look: {
             accessory: string;
             color: string;
@@ -4054,6 +4097,10 @@ export interface components {
             mode: "daemon" | "external";
             /** @description mounting, mounted, unmounted, error; empty before the first report */
             state: string;
+        };
+        NodeGuideOutputBody: {
+            /** @description Public Docker guide on the node registration address (node-docker.md) */
+            url: string;
         };
         NodeLog: {
             /** Format: date-time */
@@ -5579,6 +5626,11 @@ export interface components {
             display_name: string;
             email: string;
             id: string;
+            /**
+             * @description Interface language; empty = follow the browser
+             * @enum {string}
+             */
+            locale: "" | "zh-CN" | "en" | "ko" | "ja";
             /** Format: int64 */
             max_nodes: number | null;
             must_change_password: boolean;
@@ -8035,6 +8087,39 @@ export interface operations {
             };
         };
     };
+    "put-my-locale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocaleInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
     "list-user-memory": {
         parameters: {
             query?: never;
@@ -8361,6 +8446,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NewNodeOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    "node-guide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeGuideOutputBody"];
                 };
             };
             /** @description Error */

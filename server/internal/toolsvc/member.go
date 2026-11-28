@@ -58,14 +58,14 @@ func (s *Service) completeTask(ctx context.Context, tx *core.Tx, c *call) (Resul
 // (its worktree is not the commit under review). Not a verdict: the review is prepared again.
 func (s *Service) platformError(ctx context.Context, tx *core.Tx, task core.Task, summary string) (Result, error) {
 	if !scheduler.IsGateTask(task) {
-		return Result{}, refuse("status=platform_error 只用于平台派的审查 / 决策任务；做不完请用 status=failed")
+		return Result{}, refuse("status=platform_error is only for the review / decision tasks the platform assigns; if you cannot finish, use status=failed")
 	}
 	task, err := s.sched.ReviewPlatformError(ctx, tx, task, "审查员上报："+summary)
 	if err != nil {
 		return Result{}, err
 	}
 	res := protocol.CompleteTaskResult{TaskID: protocol.TaskID(task.ID), Status: protocol.TaskStatus(task.Status)}
-	done := okJSON(fmt.Sprintf("已上报平台错误，任务 %s 不算驳回，平台会重新准备审查（%s）", task.ID, task.Status), res)
+	done := okJSON(fmt.Sprintf("platform error reported; task %s does not count as a rejection, and the platform prepares the review again (%s)", task.ID, task.Status), res)
 	done.EndsTask = true
 	return done, nil
 }
@@ -88,8 +88,8 @@ func (s *Service) takeHandoff(ctx context.Context, tx *core.Tx, task core.Task, 
 	if _, err := core.UpdateTask(ctx, tx, task, map[string]any{"handoff_asked": true}); err != nil {
 		return Result{}, false, err
 	}
-	return failText("%s 依赖任务 %s：请在 complete_task 里加 handoff，写给接手的人——还没做完的、要注意的坑、约定好的接口和文件。"+
-		"确实没什么要交代的，再调用一次 complete_task 即可。", strings.Join(next, "、"), task.ID), true, nil
+	return failText("%s depend on task %s: add handoff to complete_task, written for whoever takes over: what is not done yet, pitfalls to watch, the agreed interfaces and files. "+
+		"If there really is nothing to hand over, just call complete_task again.", strings.Join(next, ", "), task.ID), true, nil
 }
 
 // isReviewOnly: review/decision tasks produce a verdict, not commits.
@@ -105,13 +105,13 @@ func withArtifacts(summary string, artifacts []string) string {
 func (s *Service) ownTask(ctx context.Context, tx *core.Tx, t core.Thread, c *call, id string) (core.Task, error) {
 	task, err := core.LockTask(ctx, tx, t.ID, id)
 	if err != nil {
-		return task, refuse("没有任务 %s", id)
+		return task, refuse("no task %s", id)
 	}
 	if task.ClaimedBy != c.emp().Name {
-		return task, refuse("任务 %s 不是你的", id)
+		return task, refuse("task %s is not yours", id)
 	}
 	if !workable[task.Status] {
-		return task, refuse("任务 %s 当前是 %s，不能完成", id, task.Status)
+		return task, refuse("task %s is %s and cannot be completed", id, task.Status)
 	}
 	return task, nil
 }
@@ -128,7 +128,7 @@ func (s *Service) complete(ctx context.Context, tx *core.Tx, task core.Task, out
 	if out.Pushed != nil {
 		res.Pushed = pushedList(out.Pushed)
 	}
-	done := okJSON(fmt.Sprintf("任务 %s 已提交（%s）", task.ID, task.Status), res)
+	done := okJSON(fmt.Sprintf("task %s submitted (%s)", task.ID, task.Status), res)
 	done.EndsTask = true
 	return done, nil
 }
@@ -140,7 +140,7 @@ func (s *Service) pushBranch(ctx context.Context, tx *core.Tx, c *call) (Result,
 		return Result{}, err
 	}
 	if !s.orch.HasRepo(ctx, t.ProjectID) {
-		return Result{}, refuse("项目没有关联 GitHub 仓库，无需推送")
+		return Result{}, refuse("the project has no GitHub repository; nothing to push")
 	}
 	meta := map[string]any{"then": "push_branch", "session_id": c.sc.Session.ID, "call_id": c.callID, "thread_id": t.ID}
 	if _, err := s.deliv.Push(ctx, tx, c.emp(), t, meta); err != nil {
@@ -212,7 +212,7 @@ func firstFailure(outcomes []delivery.PushOutcome) (delivery.PushOutcome, bool) 
 func pushFailText(o delivery.PushOutcome, n int) string {
 	text := delivery.PushError(&o.Result)
 	if n > 1 && o.Repo != "" {
-		text = "仓库 " + o.Repo + "：" + text
+		text = "repository " + o.Repo + ": " + text
 	}
 	return text
 }
@@ -265,9 +265,9 @@ func (s *Service) pushBranchDone(ctx context.Context, tx *core.Tx, meta map[stri
 	pushed, sha := pushedRepos(outcomes)
 	res := protocol.PushBranchResult{Branch: branch, HeadSHA: sha, Pushed: pushedList(pushed)}
 	if sha == "" {
-		return s.Complete(ctx, tx, sessionID, callID, okJSON("没有新的提交需要推送", res))
+		return s.Complete(ctx, tx, sessionID, callID, okJSON("no new commits to push", res))
 	}
-	return s.Complete(ctx, tx, sessionID, callID, okJSON("已推送到 "+branch+pushedText(pushed), res))
+	return s.Complete(ctx, tx, sessionID, callID, okJSON("pushed to "+branch+pushedText(pushed), res))
 }
 
 func pushedText(pushed map[string]string) string {
@@ -279,17 +279,17 @@ func pushedText(pushed map[string]string) string {
 		repos = append(repos, r)
 	}
 	sort.Strings(repos)
-	return "（" + strings.Join(repos, "、") + "）"
+	return " (" + strings.Join(repos, ", ") + ")"
 }
 
 func (s *Service) completeAfterPush(ctx context.Context, tx *core.Tx, meta map[string]any, outcomes []delivery.PushOutcome) error {
 	sessionID, callID := str(meta["session_id"]), str(meta["call_id"])
 	task, err := core.LockTask(ctx, tx, str(meta["thread_id"]), str(meta["task_id"]))
 	if err != nil {
-		return s.Complete(ctx, tx, sessionID, callID, failText("任务不存在了"))
+		return s.Complete(ctx, tx, sessionID, callID, failText("the task no longer exists"))
 	}
 	if !workable[task.Status] {
-		return s.Complete(ctx, tx, sessionID, callID, failText("任务 %s 已经是 %s", task.ID, task.Status))
+		return s.Complete(ctx, tx, sessionID, callID, failText("task %s is already %s", task.ID, task.Status))
 	}
 	pushed, sha := pushedRepos(outcomes)
 	var res Result
@@ -324,7 +324,7 @@ func (s *Service) listTeam(ctx context.Context, tx *core.Tx, c *call) (Result, e
 	for _, e := range emps {
 		m := s.member(ctx, tx, t, e)
 		out.Members = append(out.Members, m)
-		lines = append(lines, fmt.Sprintf("%s（%s）%s%s", e.Name, deref(m.Title), deref(m.Status), memberCommands(ctx, tx, e)))
+		lines = append(lines, fmt.Sprintf("%s (%s) %s%s", e.Name, deref(m.Title), deref(m.Status), memberCommands(ctx, tx, e)))
 	}
 	return okJSON(strings.Join(lines, "\n"), out), nil
 }
@@ -339,7 +339,7 @@ func memberCommands(ctx context.Context, tx *core.Tx, e core.Employee) string {
 	if err != nil || len(cmds) == 0 {
 		return ""
 	}
-	return "；命令（send_message 以它开头）：" + composer.Names(cmds)
+	return "; commands (start a send_message with one): " + composer.Names(cmds)
 }
 
 func (s *Service) member(ctx context.Context, tx *core.Tx, t core.Thread, e core.Employee) protocol.TeamMember {
@@ -347,13 +347,13 @@ func (s *Service) member(ctx context.Context, tx *core.Tx, t core.Thread, e core
 	typ := protocol.TeamMemberType(runtimes.Of(e.Runtime).TeamType)
 	m := protocol.TeamMember{Name: e.Name, Role: e.Role, Title: &title, Type: &typ}
 	if task, err := core.CurrentTaskOf(ctx, tx, e); err == nil && task.ConversationID != t.ID {
-		busy := "在别的讨论串忙"
+		busy := "busy in another thread"
 		m.Status = &busy
 	} else if err == nil {
-		st := "在做 " + task.ID
+		st := "working on " + task.ID
 		m.TaskID, m.Status = &task.ID, &st
 	} else {
-		idle := "空闲"
+		idle := "idle"
 		m.Status = &idle
 	}
 	if e.NodeID != nil {
@@ -377,7 +377,7 @@ func (s *Service) getTask(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	}
 	task, err := core.TaskByID(ctx, tx, t.ID, string(in.TaskID))
 	if err != nil {
-		return Result{}, refuse("没有任务 %s", in.TaskID)
+		return Result{}, refuse("no task %s", in.TaskID)
 	}
 	kind := protocol.TaskKind(task.Kind)
 	deps := make([]protocol.TaskID, len(task.DependsOn))
@@ -394,7 +394,7 @@ func (s *Service) getTask(ctx context.Context, tx *core.Tx, c *call) (Result, er
 	}
 	text := fmt.Sprintf("%s [%s] %s\n%s", task.ID, task.Status, orDash(task.ClaimedBy), task.Instruction)
 	if task.Summary != "" {
-		text += "\n结果：" + task.Summary
+		text += "\nResult: " + task.Summary
 	}
 	return okJSON(text, out), nil
 }
@@ -410,7 +410,7 @@ func (s *Service) requestReview(ctx context.Context, tx *core.Tx, c *call) (Resu
 		return Result{}, err
 	}
 	if in.Reviewer == c.emp().Name {
-		return Result{}, refuse("不能请自己审查")
+		return Result{}, refuse("you cannot ask yourself for a review")
 	}
 	parent := ""
 	branch := orchestrator.MemberBranch(t.No, c.emp().Name)
@@ -437,7 +437,7 @@ func (s *Service) assignSubtask(ctx context.Context, tx *core.Tx, c *call) (Resu
 		return Result{}, err
 	}
 	if in.Assignee == c.emp().Name {
-		return Result{}, refuse("不能派给自己")
+		return Result{}, refuse("you cannot assign to yourself")
 	}
 	parent, mainID := "", ""
 	if cur, err := core.CurrentTask(ctx, tx, t.ID, c.emp().Name); err == nil {
@@ -455,7 +455,7 @@ func (s *Service) assignSubtask(ctx context.Context, tx *core.Tx, c *call) (Resu
 	if err != nil {
 		return Result{}, err
 	}
-	return okJSON("子任务 "+task.ID+" 已创建"+carried(files), protocol.AssignSubtaskResult{TaskID: protocol.TaskID(task.ID)}), nil
+	return okJSON("subtask "+task.ID+" created"+carried(files), protocol.AssignSubtaskResult{TaskID: protocol.TaskID(task.ID)}), nil
 }
 
 // waitTask blocks until a task finishes.
@@ -470,7 +470,7 @@ func (s *Service) waitTask(ctx context.Context, tx *core.Tx, c *call) (Result, e
 	}
 	task, err := core.TaskByID(ctx, tx, t.ID, string(in.TaskID))
 	if err != nil {
-		return Result{}, refuse("没有任务 %s", in.TaskID)
+		return Result{}, refuse("no task %s", in.TaskID)
 	}
 	if task.Finished() {
 		return outcomeOf(task, protocol.ToolWaitTask), nil
@@ -479,7 +479,7 @@ func (s *Service) waitTask(ctx context.Context, tx *core.Tx, c *call) (Result, e
 }
 
 func outcomeOf(task core.Task, tool string) Result {
-	text := fmt.Sprintf("%s %s：%s", task.ID, task.Status, task.Summary)
+	text := fmt.Sprintf("%s %s: %s", task.ID, task.Status, task.Summary)
 	if tool == protocol.ToolRequestReview {
 		return okJSON(text, protocol.RequestReviewResult{TaskID: protocol.TaskID(task.ID), Status: protocol.TaskStatus(task.Status),
 			Result: task.Summary})
