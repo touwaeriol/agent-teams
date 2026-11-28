@@ -233,7 +233,7 @@ func (a *API) resolveRefs(ctx context.Context, u store.User, c core.Conversation
 		return "", nil, nil
 	}
 	if len(refs) > maxRefs {
-		return "", nil, httpapi.Invalid("refs", fmt.Sprintf("一条消息最多引用 %d 项", maxRefs))
+		return "", nil, httpapi.Invalidf("refs", "一条消息最多引用 {n} 项", "n", maxRefs)
 	}
 	p, err := a.e.Store.ProjectOf(ctx, u.ID, deref(c.ProjectID))
 	if err != nil {
@@ -310,7 +310,7 @@ func (a *API) fileRef(ctx context.Context, p store.Project, r MessageRef) (strin
 	}
 	repo, ok := ghops.Find(repos, r.Repo)
 	if !ok {
-		return "", nil, httpapi.Invalid("refs", "项目里没有仓库 "+r.Repo)
+		return "", nil, httpapi.Invalidf("refs", "项目里没有仓库 {repo}", "repo", r.Repo)
 	}
 	chip := map[string]any{"kind": "file", "label": path, "repo": repo.Slug, "path": path}
 	ref, err := a.e.GH.DefaultBranch(ctx, repo)
@@ -333,7 +333,7 @@ func (a *API) fileRef(ctx context.Context, p store.Project, r MessageRef) (strin
 func (a *API) threadRef(ctx context.Context, p store.Project, r MessageRef) (string, map[string]any, error) {
 	t, err := core.ThreadByNo(ctx, a.e.Core.Pool, p.ID, r.No)
 	if errors.Is(err, core.ErrNotFound) {
-		return "", nil, httpapi.Invalid("refs", fmt.Sprintf("没有讨论串 #%d", r.No))
+		return "", nil, httpapi.Invalidf("refs", "没有讨论串 #{no}", "no", r.No)
 	}
 	if err != nil {
 		return "", nil, err
@@ -449,7 +449,7 @@ func binaryKind(path string) string {
 func (a *API) memoryRef(ctx context.Context, p store.Project, r MessageRef) (string, map[string]any, error) {
 	f, err := store.GetMemoryFile(ctx, a.e.Core.Pool, store.ProjectMemory(p.ID), r.Name)
 	if errors.Is(err, store.ErrNotFound) || errors.Is(err, core.ErrNotFound) || store.IsMemoryError(err) {
-		return "", nil, httpapi.Invalid("refs", "没有记忆文件 "+r.Name)
+		return "", nil, httpapi.Invalidf("refs", "没有记忆文件 {name}", "name", r.Name)
 	}
 	if err != nil {
 		return "", nil, err

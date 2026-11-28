@@ -9,6 +9,7 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/timers"
 )
 
@@ -52,7 +53,7 @@ func ptr[T any](v T) *T { return &v }
 
 func scheduleErr(err error) error {
 	if bad, ok := timers.IsInvalid(err); ok {
-		return refuse("%s", bad.Message)
+		return refuse("%s", bad.Text.String())
 	}
 	return err
 }
@@ -127,7 +128,7 @@ func (s *Service) scheduleCreate(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err != nil {
 		return Result{}, scheduleErr(err)
 	}
-	if err := s.scheduleNote(ctx, tx, c, sc.ID, true, fmt.Sprintf("%s设置了定时任务「%s」：%s，%s。", speaker(c), sc.Name, when(sc), wakes(sc))); err != nil {
+	if err := s.scheduleNote(ctx, tx, c, sc.ID, true, msg.T("{who}设置了定时任务「{name}」：{when}，{wakes}。", "who", speaker(c), "name", sc.Name, "when", when(sc), "wakes", wakes(sc))); err != nil {
 		return Result{}, err
 	}
 	return okText(fmt.Sprintf("Created schedule %s %q: %s, next %s, %s. The platform sends a message when it fires; you can end the turn now.",
@@ -193,7 +194,7 @@ func (s *Service) scheduleCancel(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err := s.Schedules.Cancel(ctx, tx, cur); err != nil {
 		return Result{}, scheduleErr(err)
 	}
-	if err := s.scheduleNote(ctx, tx, c, cur.ID, false, fmt.Sprintf("%s取消了定时任务「%s」。", speaker(c), cur.Name)); err != nil {
+	if err := s.scheduleNote(ctx, tx, c, cur.ID, false, msg.T("{who}取消了定时任务「{name}」。", "who", speaker(c), "name", cur.Name)); err != nil {
 		return Result{}, err
 	}
 	return okText(fmt.Sprintf("cancelled schedule %s %q", cur.ID, cur.Name)), nil
@@ -216,13 +217,13 @@ func (s *Service) ownSchedule(ctx context.Context, tx *core.Tx, c *call, id stri
 // scheduleNote records a schedule change as a platform line in the caller's conversation, so the
 // user sees it where the agent talks; a created one carries schedule_id, so the user can undo it
 // from the line (meta.schedule_undo).
-func (s *Service) scheduleNote(ctx context.Context, tx *core.Tx, c *call, id string, created bool, text string) error {
+func (s *Service) scheduleNote(ctx context.Context, tx *core.Tx, c *call, id string, created bool, text msg.Text) error {
 	conv, err := s.orch.ConversationOf(ctx, tx, c.emp())
 	if err != nil {
 		return err
 	}
 	m, err := core.InsertMessage(ctx, tx, core.NewMessage{ConversationID: conv, Role: "system", Author: "platform", Kind: "note",
-		Content: text, Meta: map[string]any{"schedule_note": true, "schedule_id": id, "schedule_undo": created}})
+		Content: text.String(), Meta: map[string]any{"schedule_note": true, "schedule_id": id, "schedule_undo": created, "text": text}})
 	if err != nil {
 		return err
 	}
@@ -233,31 +234,32 @@ func (s *Service) scheduleNote(ctx context.Context, tx *core.Tx, c *call, id str
 	return tx.EmitMessage(ctx, c.emp().ProjectID, thread, m)
 }
 
-func speaker(c *call) string {
+// speaker, when and wakes are the parts of the schedule notes the user sees (messages, web i18n).
+func speaker(c *call) msg.Text {
 	switch c.emp().Tier {
 	case "coordinator":
-		return "统筹"
+		return msg.T("统筹")
 	case "member":
-		return c.emp().Name
+		return msg.Text{Key: c.emp().Name}
 	}
-	return "组长"
+	return msg.T("组长")
 }
 
-func when(sc timers.Schedule) string {
+func when(sc timers.Schedule) msg.Text {
 	if sc.Kind == timers.KindOnce {
-		return "一次性，" + localTime(sc.RunAt, sc.Timezone)
+		return msg.T("一次性，{at}", "at", localTime(sc.RunAt, sc.Timezone))
 	}
-	return fmt.Sprintf("周期 %s（%s）", sc.Cron, sc.Timezone)
+	return msg.T("周期 {cron}（{tz}）", "cron", sc.Cron, "tz", sc.Timezone)
 }
 
-func wakes(sc timers.Schedule) string {
+func wakes(sc timers.Schedule) msg.Text {
 	switch {
 	case sc.Target == timers.TargetMember && sc.Employee != nil && sc.TaskID != nil:
-		return fmt.Sprintf("唤醒 %s（任务 %s，任务结束即取消）", *sc.Employee, *sc.TaskID)
+		return msg.T("唤醒 {name}（任务 {task}，任务结束即取消）", "name", *sc.Employee, "task", *sc.TaskID)
 	case sc.Target == timers.TargetLead && sc.ThreadNo != nil:
-		return fmt.Sprintf("唤醒 #%d 的组长", *sc.ThreadNo)
+		return msg.T("唤醒 #{no} 的组长", "no", *sc.ThreadNo)
 	}
-	return "唤醒统筹"
+	return msg.T("唤醒统筹")
 }
 
 // whenEn and wakesEn are when and wakes for tool results (when and wakes write the notes the

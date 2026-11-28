@@ -20,6 +20,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Attachment limits (api.md §3.4): what Claude accepts per image or PDF, a text file's size
@@ -46,11 +47,11 @@ const (
 )
 
 // ErrNotImage is returned for uploads that are not an image, a PDF or a text file.
-var ErrNotImage = errors.New("只支持图片（PNG、JPG、GIF、WebP）、PDF 和文本文件（md、txt、json、csv、代码等）")
+var ErrNotImage = msg.Err("只支持图片（PNG、JPG、GIF、WebP）、PDF 和文本文件（md、txt、json、csv、代码等）")
 
 // ErrTooLarge is returned for images and PDFs over MaxInlineAttachmentBytes and text files over
 // MaxTextBytes on the paths that carry the bytes in the request.
-var ErrTooLarge = errors.New("文件太大：图片和 PDF 最多 5 MB，文本文件最多 1 MB")
+var ErrTooLarge = msg.Err("文件太大：图片和 PDF 最多 5 MB，文本文件最多 1 MB")
 
 // textExts are the file name extensions accepted as text files (the bytes must also be UTF-8).
 var textExts = map[string]bool{}
@@ -112,7 +113,7 @@ const DefaultAttachmentTTL = 24 * time.Hour
 
 // ErrAttachmentExpired is an attachment whose retention ran out (state expired): its bytes are
 // gone, messages show it as expired, the API answers 410.
-var ErrAttachmentExpired = errors.New("附件已过期（超过保留期没有再使用，文件已删除）")
+var ErrAttachmentExpired = msg.Err("附件已过期（超过保留期没有再使用，文件已删除）")
 
 func ttlOr(ttl time.Duration) time.Duration {
 	if ttl <= 0 {
@@ -162,7 +163,7 @@ func UseAttachments(ctx context.Context, q DB, projectID string, ids []string, t
 	for _, a := range list {
 		switch a.State {
 		case "expired":
-			return nil, fmt.Errorf("%w：%s", ErrAttachmentExpired, a.Name)
+			return nil, msg.Wrap(ErrAttachmentExpired, "附件已过期（超过保留期没有再使用，文件已删除）：{name}", "name", a.Name)
 		case "uploading", "failed":
 			return nil, ErrNotFound
 		}

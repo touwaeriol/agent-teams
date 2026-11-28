@@ -136,11 +136,11 @@ func (a *API) registerUploads(api huma.API, r gin.IRoutes) {
 func uploadFail(err error) error {
 	switch {
 	case errors.Is(err, core.ErrUploadIncomplete):
-		return httpapi.Fail(http.StatusConflict, "upload_incomplete", err.Error())
+		return httpapi.FailErr(http.StatusConflict, "upload_incomplete", err)
 	case errors.Is(err, core.ErrUploadSize):
-		return httpapi.Fail(http.StatusUnprocessableEntity, "size_mismatch", err.Error())
+		return httpapi.FailErr(http.StatusUnprocessableEntity, "size_mismatch", err)
 	case errors.Is(err, core.ErrAttachmentTooLarge):
-		return httpapi.Fail(http.StatusRequestEntityTooLarge, "file_too_large", err.Error())
+		return httpapi.FailErr(http.StatusRequestEntityTooLarge, "file_too_large", err)
 	case errors.Is(err, core.ErrNotFound):
 		return httpapi.Fail(http.StatusNotFound, "not_found", "没有这个上传（已完成、已取消或超过 24 小时已清理），请重新上传")
 	case errors.Is(err, blobstore.ErrNotConfigured):
@@ -201,7 +201,7 @@ func (a *API) partURLs(ctx context.Context, owner core.AttachmentOwner, id strin
 	out := UploadParts{URLs: make([]PartURL, 0, len(numbers)), ExpiresAt: time.Now().Add(partURLTTL)}
 	for _, num := range numbers {
 		if num < 1 || num > n {
-			return nil, httpapi.Invalid("numbers", fmt.Sprintf("分片号要在 1 到 %d 之间（收到 %d）", n, num))
+			return nil, httpapi.Invalidf("numbers", "分片号要在 1 到 {max} 之间（收到 {got}）", "max", n, "got", num)
 		}
 		// The part's exact length is signed: the declared size is what the store accepts (#62 F2).
 		u, err := a.e.Core.Blobs.PresignPart(ctx, key, uploadID, num, blobstore.PartLength(size, num), partURLTTL)

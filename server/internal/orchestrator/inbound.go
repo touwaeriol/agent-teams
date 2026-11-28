@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -72,17 +72,18 @@ func (o *Orchestrator) policyViolation(ctx context.Context, tx *core.Tx, e core.
 		FROM at_projects p WHERE p.id = $1`, e.ProjectID, s.ID, tool, e.Name); err != nil {
 		return err
 	}
-	return o.postError(ctx, tx, e, fmt.Sprintf("%s 的会话出现了角色不允许的工具 %s，平台已关闭该会话", e.Name, tool))
+	return o.postError(ctx, tx, e, msg.T("{name} 的会话出现了角色不允许的工具 {tool}，平台已关闭该会话", "name", e.Name, "tool", tool))
 }
 
-// postError records an error message in the employee's conversation.
-func (o *Orchestrator) postError(ctx context.Context, tx *core.Tx, e core.Employee, text string) error {
+// postError records an error message in the employee's conversation; meta.text is the message for
+// the web (i18n), content its Chinese.
+func (o *Orchestrator) postError(ctx context.Context, tx *core.Tx, e core.Employee, text msg.Text) error {
 	conv, err := o.conversationOf(ctx, tx, e)
 	if err != nil {
 		return err
 	}
 	m, err := core.InsertMessage(ctx, tx, core.NewMessage{ConversationID: conv, Role: "error", Author: "platform", Kind: "note",
-		Content: text})
+		Content: text.String(), Meta: map[string]any{"text": text}})
 	if err != nil {
 		return err
 	}
@@ -90,7 +91,7 @@ func (o *Orchestrator) postError(ctx context.Context, tx *core.Tx, e core.Employ
 }
 
 // PostError exposes postError.
-func (o *Orchestrator) PostError(ctx context.Context, tx *core.Tx, e core.Employee, text string) error {
+func (o *Orchestrator) PostError(ctx context.Context, tx *core.Tx, e core.Employee, text msg.Text) error {
 	return o.postError(ctx, tx, e, text)
 }
 
@@ -134,11 +135,10 @@ func (o *Orchestrator) crashed(ctx context.Context, tx *core.Tx, s core.AgentSes
 	if err != nil {
 		return err
 	}
-	detail := ""
-	if m.Detail != nil {
-		detail = "：" + *m.Detail
+	if m.Detail != nil && *m.Detail != "" {
+		return o.postError(ctx, tx, e, msg.T("{name} 的会话崩溃了：{detail}。下一条消息到来时平台会尝试恢复。", "name", e.Name, "detail", *m.Detail))
 	}
-	return o.postError(ctx, tx, e, fmt.Sprintf("%s 的会话崩溃了%s。下一条消息到来时平台会尝试恢复。", e.Name, detail))
+	return o.postError(ctx, tx, e, msg.T("{name} 的会话崩溃了。下一条消息到来时平台会尝试恢复。", "name", e.Name))
 }
 
 // HandleDelivered stamps the message as delivered.

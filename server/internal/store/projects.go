@@ -2,6 +2,7 @@ package store
 
 import (
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 
 	"context"
 	"encoding/json"
@@ -203,10 +204,10 @@ func (s *Store) CreateProject(ctx context.Context, userID string, n NewProject) 
 
 var (
 	// ErrAttachmentExpired is an attachment given to a new project whose retention ran out.
-	ErrAttachmentExpired = errors.New("附件已过期（超过保留期没有使用，文件已删除），请重新上传")
+	ErrAttachmentExpired = msg.Err("附件已过期（超过保留期没有使用，文件已删除），请重新上传")
 	// ErrAttachmentUnknown is an id given to a new project that is not one of the user's
 	// attachments uploaded without a project, finished (ready) and not yet in a project.
-	ErrAttachmentUnknown = errors.New("附件不存在、还没传完或已经用过了")
+	ErrAttachmentUnknown = msg.Err("附件不存在、还没传完或已经用过了")
 )
 
 // adoptAttachments moves the user's attachments uploaded without a project into project id

@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Limits of one skill.
@@ -55,11 +57,14 @@ type Skill struct {
 }
 
 // Problem is a validation error shown to the user.
-type Problem struct{ msg string }
+type Problem struct{ text msg.Text }
 
-func (p Problem) Error() string { return p.msg }
+func (p Problem) Error() string { return p.text.String() }
 
-func problem(format string, a ...any) error { return Problem{fmt.Sprintf(format, a...)} }
+// Msg is the translatable message (msg.Of).
+func (p Problem) Msg() msg.Text { return p.text }
+
+func problem(key string, kv ...any) error { return Problem{msg.T(key, kv...)} }
 
 // IsProblem reports whether err is a validation error.
 func IsProblem(err error) bool {
@@ -140,12 +145,12 @@ func Parse(files []File) (Skill, error) {
 	}
 	i := slices.IndexFunc(files, func(f File) bool { return f.Path == EntryFile })
 	if i < 0 {
-		return Skill{}, problem("技能必须在根目录有 %s", EntryFile)
+		return Skill{}, problem("技能必须在根目录有 {file}", "file", EntryFile)
 	}
 	meta := FrontMatter(files[i].Content)
 	name, desc := meta["name"], meta["description"]
 	if !namePattern.MatchString(name) {
-		return Skill{}, problem("SKILL.md 的 front matter 需要 name（小写字母、数字和 -，最多 64 个字符），现在是 %q", name)
+		return Skill{}, problem("SKILL.md 的 front matter 需要 name（小写字母、数字和 -，最多 64 个字符），现在是 “{name}”", "name", name)
 	}
 	if desc == "" {
 		return Skill{}, problem("SKILL.md 的 front matter 需要 description（模型靠它决定何时使用这个技能）")
@@ -157,7 +162,7 @@ func Parse(files []File) (Skill, error) {
 
 func checkFiles(files []File) (int, error) {
 	if len(files) == 0 || len(files) > MaxFiles {
-		return 0, problem("技能需要 1 到 %d 个文件", MaxFiles)
+		return 0, problem("技能需要 1 到 {n} 个文件", "n", MaxFiles)
 	}
 	total := 0
 	seen := map[string]bool{}
@@ -166,13 +171,13 @@ func checkFiles(files []File) (int, error) {
 			return 0, err
 		}
 		if seen[f.Path] {
-			return 0, problem("文件重复：%s", f.Path)
+			return 0, problem("文件重复：{path}", "path", f.Path)
 		}
 		seen[f.Path] = true
 		total += len(f.Content)
 	}
 	if total > MaxBytes {
-		return 0, problem("技能文件合计不能超过 %d KB", MaxBytes>>10)
+		return 0, problem("技能文件合计不能超过 {kb} KB", "kb", MaxBytes>>10)
 	}
 	return total, nil
 }
@@ -180,11 +185,11 @@ func checkFiles(files []File) (int, error) {
 func checkFile(f File) error {
 	switch {
 	case len(f.Path) > 200 || !pathPattern.MatchString(f.Path):
-		return problem("文件路径不合法：%q（只能是相对路径，不能以 . 开头）", f.Path)
+		return problem("文件路径不合法：“{path}”（只能是相对路径，不能以 . 开头）", "path", f.Path)
 	case len(f.Content) > MaxFileBytes:
-		return problem("%s 超过 %d KB", f.Path, MaxFileBytes>>10)
+		return problem("{path} 超过 {kb} KB", "path", f.Path, "kb", MaxFileBytes>>10)
 	case !utf8.ValidString(f.Content) || strings.ContainsRune(f.Content, 0):
-		return problem("%s 不是文本文件（技能只能包含 UTF-8 文本）", f.Path)
+		return problem("{path} 不是文本文件（技能只能包含 UTF-8 文本）", "path", f.Path)
 	}
 	return nil
 }
@@ -220,7 +225,7 @@ func unquote(v string) string {
 // directories, hidden files and macOS metadata are skipped.
 func FromZip(data []byte) ([]File, error) {
 	if len(data) > MaxZipBytes {
-		return nil, problem("压缩包不能超过 %d MB", MaxZipBytes>>20)
+		return nil, problem("压缩包不能超过 {mb} MB", "mb", MaxZipBytes>>20)
 	}
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -233,7 +238,7 @@ func FromZip(data []byte) ([]File, error) {
 			continue
 		}
 		if len(files) >= MaxFiles {
-			return nil, problem("技能最多 %d 个文件", MaxFiles)
+			return nil, problem("技能最多 {n} 个文件", "n", MaxFiles)
 		}
 		f, err := readEntry(zf)
 		if err != nil {
@@ -241,7 +246,7 @@ func FromZip(data []byte) ([]File, error) {
 		}
 		// Count what was really decompressed (headers can lie) so a zip bomb stops early.
 		if total += len(f.Content); total > MaxBytes {
-			return nil, problem("技能文件合计不能超过 %d KB", MaxBytes>>10)
+			return nil, problem("技能文件合计不能超过 {kb} KB", "kb", MaxBytes>>10)
 		}
 		files = append(files, f)
 	}
@@ -259,16 +264,16 @@ func skipEntry(name string) bool {
 
 func readEntry(zf *zip.File) (File, error) {
 	if zf.UncompressedSize64 > MaxFileBytes {
-		return File{}, problem("%s 超过 %d KB", zf.Name, MaxFileBytes>>10)
+		return File{}, problem("{name} 超过 {kb} KB", "name", zf.Name, "kb", MaxFileBytes>>10)
 	}
 	rc, err := zf.Open()
 	if err != nil {
-		return File{}, problem("无法读取 %s", zf.Name)
+		return File{}, problem("无法读取 {name}", "name", zf.Name)
 	}
 	defer rc.Close()
 	raw, err := io.ReadAll(io.LimitReader(rc, MaxFileBytes+1))
 	if err != nil {
-		return File{}, problem("无法读取 %s", zf.Name)
+		return File{}, problem("无法读取 {name}", "name", zf.Name)
 	}
 	return File{Path: zf.Name, Content: string(raw)}, nil
 }

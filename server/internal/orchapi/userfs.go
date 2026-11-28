@@ -93,10 +93,10 @@ func (a *API) getUserFs(ctx context.Context, _ *struct{}) (*fsOutput, error) {
 
 func fsErr(err error) error {
 	if errors.Is(err, userfs.ErrDisabled) {
-		return httpapi.Fail(503, "fs_not_configured", err.Error())
+		return httpapi.FailErr(503, "fs_not_configured", err)
 	}
 	if userfs.IsNotFound(err) {
-		return httpapi.Fail(404, "not_found", err.Error())
+		return httpapi.FailErr(404, "not_found", err)
 	}
 	return err
 }

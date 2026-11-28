@@ -206,9 +206,9 @@ func (a *API) contextRefresh(ctx context.Context, in *cidInput) (*contextRefresh
 	err = a.e.Gateway.RefreshContext(ctx, *s.NodeID, protocol.SessionContextRefresh{SessionID: protocol.SessionID(s.ID), OpenGen: protocol.OpenGen(s.OpenGen), RefreshID: id})
 	switch {
 	case errors.Is(err, platform.ErrNodeOffline):
-		return nil, httpapi.Fail(http.StatusConflict, "node_offline", err.Error())
+		return nil, httpapi.FailErr(http.StatusConflict, "node_offline", err)
 	case errors.Is(err, nodegw.ErrContextDetailUnsupported):
-		return nil, httpapi.Fail(http.StatusConflict, "node_unsupported", err.Error())
+		return nil, httpapi.FailErr(http.StatusConflict, "node_unsupported", err)
 	case err != nil:
 		return nil, err
 	}

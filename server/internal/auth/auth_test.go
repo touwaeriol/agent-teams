@@ -170,10 +170,10 @@ func TestStateCompatibleWithV1(t *testing.T) {
 }
 
 func TestCheckCredentials(t *testing.T) {
-	if CheckCredentials("bad", "12345678") == "" || CheckCredentials("a@b.io", "1234567") == "" {
+	if CheckCredentials("bad", "12345678") == nil || CheckCredentials("a@b.io", "1234567") == nil {
 		t.Fatal("bad credentials accepted")
 	}
-	if CheckCredentials("a@b.io", "密码密码密码密码") != "" {
+	if CheckCredentials("a@b.io", "密码密码密码密码") != nil {
 		t.Fatal("8 code points rejected")
 	}
 	if NormalizeEmail(" A@B.io ") != "a@b.io" {

@@ -231,12 +231,16 @@ func TestRefs(t *testing.T) {
 	cases := map[string][]string{"": {"tinyplug"}, "没有这个插件": {"nope"}, "没有版本 3": {"tinyplug@3"},
 		"重复": {"tinyplug", "tinyplug@1"}, "写法": {"Bad Name"}}
 	for want, refs := range cases {
-		got := CheckRefs(refs, choices)
+		text := ""
+		if m := CheckRefs(refs, choices); m != nil {
+			text = m.String()
+		}
+		got := text
 		if (want == "" && got != "") || !strings.Contains(got, want) {
 			t.Errorf("%v: got %q, want %q", refs, got, want)
 		}
 	}
-	if CheckRefs(make([]string, MaxPerRole+1), nil) == "" {
+	if CheckRefs(make([]string, MaxPerRole+1), nil) == nil {
 		t.Fatal("too many plugins per role")
 	}
 }

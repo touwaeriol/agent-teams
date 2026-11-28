@@ -1,5 +1,6 @@
 // How domain states look on screen (colours and words of the design canvas),
 // plus the small derivations pages share. Pure functions, unit-tested.
+import { statusBubble } from "@/lib/bubble";
 import { $t } from "@/i18n";
 import type { EmployeeBrief, QuestionView, TaskStatus, TaskView, ThreadView } from "@/api/views";
 import { awaitsAcceptance, pauseLine, reviewLine, threadPhase, type PhaseId, type PhaseInput } from "./phase";
@@ -204,8 +205,8 @@ export function busyElsewhereText(m: Pick<EmployeeBrief, "busy_elsewhere" | "thr
 export function memberDoing(m: Pick<EmployeeBrief, "status">): string {
   const s = m.status;
   if (!s) return $t("空闲");
-  if (s.state === "thinking" && s.substate === "waking") return s.bubble || $t("唤醒中");
-  return s.bubble || STATE_TEXT[s.state] || s.state;
+  if (s.state === "thinking" && s.substate === "waking") return statusBubble(s.bubble) || $t("唤醒中");
+  return statusBubble(s.bubble) || STATE_TEXT[s.state] || s.state;
 }
 
 export const RUNTIME_LABEL: Record<string, string> = Object.fromEntries(RUNTIME_SPECS.map((r) => [r.id, r.label]));

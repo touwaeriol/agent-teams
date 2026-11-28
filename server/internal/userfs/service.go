@@ -10,6 +10,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -66,7 +67,7 @@ type Service struct {
 }
 
 // ErrBusy: the folder is being switched on; it can be deleted once that ends.
-var ErrBusy = errors.New("共享文件夹正在开启，请稍后再删除")
+var ErrBusy = msg.Err("共享文件夹正在开启，请稍后再删除")
 
 // New builds the service on st (NewB2 or NewRustFS from cfg in production).
 func New(cfg Config, db store.DB, vault *credvault.Vault, st Store, log *slog.Logger) *Service {

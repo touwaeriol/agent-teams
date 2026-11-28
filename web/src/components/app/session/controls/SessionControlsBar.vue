@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { $t } from "@/i18n";
+import { $t, serverText } from "@/i18n";
 /**
  * The session box's controls (#53): "模型 · 强度" and the permission mode chip, from
  * GET /api/projects/{pid}/session-controls. A pick goes out with PUT and shows 切换中… until the
@@ -61,7 +61,7 @@ const modeNotes = computed(() => {
   return [
     noAutoNote(runtime.value, models.value, v.model),
     v.node_outdated ? $t("会话所在节点的守护进程较旧，只能用这几档；升级节点后可用全部选项。") : "",
-    v.error ? $t("上次切换没有成功：{error}", { error: v.error }) : "",
+    v.error ? $t("上次切换没有成功：{error}", { error: serverText({ key: v.error }, v.error) }) : "",
     $t("{appliesNote}选择记在这个会话上，重开会话沿用，不改岗位设置。", { appliesNote: appliesNote(runtime.value, v.modes) }),
   ].filter(Boolean);
 });
@@ -132,7 +132,7 @@ watch(c, (v) => {
   const a = asked.value;
   if (!v || v.pending || sent.value || !a) return;
   asked.value = null;
-  if (v.error) return void toast.error($t("切换没有成功：{error}", { error: v.error }));
+  if (v.error) return void toast.error($t("切换没有成功：{error}", { error: serverText({ key: v.error }, v.error) }));
   const kept = (Object.keys(a) as (keyof Picks)[]).some((k) => a[k] !== undefined && v[k] !== a[k]);
   if (kept) toast.error($t("节点没有回应，切换未生效"));
 });

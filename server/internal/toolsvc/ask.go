@@ -2,7 +2,6 @@ package toolsvc
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Structured questions (ask_user questions[], or Claude's AskUserQuestion routed to ask_user):
@@ -22,7 +22,7 @@ type AnswerChoice struct {
 }
 
 // ErrBadAnswer is a structured answer that does not fit the card.
-var ErrBadAnswer = errors.New("回答和问题对不上")
+var ErrBadAnswer = msg.Err("回答和问题对不上")
 
 // askSpec is what ask_user stores for one call.
 type askSpec struct {

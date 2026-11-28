@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -175,28 +176,30 @@ func (tx *Tx) EmitMail(ctx context.Context, t Thread, m Mail) error {
 }
 
 // EmitActivity records an employee activity line (persisted, api.md §1.1).
-func (tx *Tx) EmitActivity(ctx context.Context, projectID string, threadID *string, employee, text string) error {
+func (tx *Tx) EmitActivity(ctx context.Context, projectID string, threadID *string, employee string, text msg.Text) error {
 	no, err := threadNoOf(ctx, tx, threadID)
 	if err != nil {
 		return err
 	}
 	_, err = tx.Emit(ctx, projectID, threadID, EvActivity, employee,
-		map[string]any{"thread_no": no, "employee": employee, "text": text, "at": time.Now().UTC()})
+		map[string]any{"thread_no": no, "employee": employee, "text": text.String(), "msg": text, "at": time.Now().UTC()})
 	return err
 }
 
 // Activity is one activity line of a thread.
 type Activity struct {
-	ID       int64     `json:"id"`
-	Employee string    `json:"employee"`
-	Text     string    `json:"text"`
-	At       time.Time `json:"at"`
+	ID       int64  `json:"id"`
+	Employee string `json:"employee"`
+	Text     string `json:"text"`
+	// Msg is the line as a message (key + params, web i18n); absent on lines older than it.
+	Msg *msg.Text `json:"msg,omitempty" gorm:"serializer:json"`
+	At  time.Time `json:"at"`
 }
 
 // ThreadActivity pages a thread's activity newest first before the seq cursor.
 func ThreadActivity(ctx context.Context, q DB, threadID string, before int64, limit int) ([]Activity, error) {
 	g := q.Gorm(ctx).Table("at_events").Select(`seq AS id, COALESCE(payload->>'employee', actor) AS employee,
-		COALESCE(payload->>'text', '') AS text, created_at AS at`).Where("thread_id = ? AND type = 'activity'", threadID)
+		COALESCE(payload->>'text', '') AS text, payload->'msg' AS msg, created_at AS at`).Where("thread_id = ? AND type = 'activity'", threadID)
 	if before != 0 {
 		g = g.Where("seq < ?", before)
 	}

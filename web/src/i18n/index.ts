@@ -83,6 +83,27 @@ export default i18n;
  */
 export const $t = i18n.global.t;
 
+/** A message from the server: { key, params } (server/internal/msg). */
+export interface ServerText {
+  key: string;
+  params?: Record<string, string> | null;
+  /** Params that are messages themselves; params holds their Chinese as a fallback. */
+  nested?: Record<string, ServerText> | null;
+}
+
+/**
+ * Shows a server message in the interface language. Keys are the server's Chinese text with
+ * {placeholders}; a key this build does not know (a newer server, or free text such as an
+ * upstream error) is shown as rendered Chinese, never compiled as a message.
+ */
+export function serverText(m: ServerText | null | undefined, fallback = ""): string {
+  if (!m?.key) return fallback;
+  const params: Record<string, string> = { ...(m.params ?? {}) };
+  for (const [k, inner] of Object.entries(m.nested ?? {})) params[k] = serverText(inner, params[k] ?? "");
+  if (i18n.global.te(m.key, "zh-CN")) return $t(m.key as keyof Messages, params);
+  return Object.entries(params).reduce((s, [k, v]) => s.split(`{${k}}`).join(v), m.key);
+}
+
 /** The current language. */
 export const currentLocale = (): Locale => i18n.global.locale.value as Locale;
 

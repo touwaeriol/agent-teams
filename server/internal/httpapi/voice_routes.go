@@ -10,6 +10,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/voice"
 )
 
@@ -143,7 +144,7 @@ func (s *Server) adminSaveVoice(ctx context.Context, in *voiceAdminSaveInput) (*
 	}
 	b := in.Body
 	if err := voice.CheckBaseURL(b.BaseURL); err != nil {
-		return nil, invalid([]FieldError{{"base_url", err.Error()}}, err.Error())
+		return nil, invalidField("base_url", msg.Of(err))
 	}
 	v, err := s.voiceSettings(ctx)
 	if err != nil {
@@ -160,7 +161,7 @@ func (s *Server) adminSaveVoice(ctx context.Context, in *voiceAdminSaveInput) (*
 	v.Transport = b.Transport
 	v = v.WithDefaults()
 	if v.Enabled && v.SealedKey == "" {
-		return nil, invalid([]FieldError{{"api_key", "先填 API Key 再启用"}}, "先填 API Key 再启用")
+		return nil, invalid([]FieldError{{Path: "api_key", Message: "先填 API Key 再启用"}}, "先填 API Key 再启用")
 	}
 	v.UpdatedAt = time.Now().UTC()
 	if err := s.store.SaveSetting(ctx, voiceSettingKey, v); err != nil {
@@ -198,7 +199,7 @@ func (s *Server) adminTestVoice(ctx context.Context, in *voiceTestInput) (*voice
 		return nil, err
 	}
 	if err := voice.CheckBaseURL(in.Body.BaseURL); err != nil {
-		return nil, invalid([]FieldError{{"base_url", err.Error()}}, err.Error())
+		return nil, invalidField("base_url", msg.Of(err))
 	}
 	v, err := s.voiceSettings(ctx)
 	if err != nil {
@@ -230,8 +231,7 @@ func (s *Server) adminTestVoice(ctx context.Context, in *voiceTestInput) (*voice
 // voiceKeyMoved refuses to send the saved key to a different base URL than it was saved for: a new
 // address needs the key typed again, so the stored key can't be redirected to another host.
 func voiceKeyMoved() error {
-	msg := "改了服务地址，要重新填写 API Key（已保存的 Key 只发往保存时的地址）"
-	return invalid([]FieldError{{"api_key", msg}}, msg)
+	return invalidField("api_key", msg.T("改了服务地址，要重新填写 API Key（已保存的 Key 只发往保存时的地址）"))
 }
 
 func (s *Server) voiceKey(v voice.Settings) (string, error) {
@@ -266,7 +266,7 @@ func (s *Server) voiceSession(ctx context.Context, in *voiceSessionInput) (*voic
 	}
 	lang := strings.ToLower(strings.TrimSpace(in.Body.Language))
 	if !voice.KnownLanguage(lang) {
-		return nil, invalid([]FieldError{{"language", "不支持这个语言"}}, "不支持这个语言："+lang)
+		return nil, invalidf([]FieldError{{Path: "language", Message: "不支持这个语言"}}, "不支持这个语言：{language}", "language", lang)
 	}
 	if lang == "" {
 		lang = "auto"
@@ -308,11 +308,10 @@ func (s *Server) voiceErr(err error) error {
 	case e.Status == http.StatusTooManyRequests:
 		return fail(http.StatusServiceUnavailable, "voice_busy", "语音服务繁忙，请稍后再试")
 	}
-	detail := "语音服务出错"
 	if e.Message != "" {
-		detail += "：" + e.Message
+		return failf(http.StatusBadGateway, "voice_upstream", "语音服务出错：{reason}", "reason", e.Message)
 	}
-	return fail(http.StatusBadGateway, "voice_upstream", detail)
+	return fail(http.StatusBadGateway, "voice_upstream", "语音服务出错")
 }
 
 // voiceHTTPClient calls OpenAI for client secrets.

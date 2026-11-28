@@ -37,13 +37,13 @@ func chromeChanges(b ProjectUpdate) ([]store.Change, error) {
 	if b.Icon != nil {
 		icon := strings.TrimSpace(*b.Icon)
 		if !ValidIcon(icon) {
-			errs = append(errs, FieldError{"icon", "图标只能是一个表情，或 color:#RRGGBB"})
+			errs = append(errs, FieldError{Path: "icon", Message: "图标只能是一个表情，或 color:#RRGGBB"})
 		}
 		ch = append(ch, store.Change{Col: "icon", Val: icon})
 	}
 	if b.ThreadEffort != nil {
 		if !efforts[*b.ThreadEffort] {
-			errs = append(errs, FieldError{"thread_effort", "思考强度只能是 low、medium、high、xhigh 或 max"})
+			errs = append(errs, FieldError{Path: "thread_effort", Message: "思考强度只能是 low、medium、high、xhigh 或 max"})
 		}
 		ch = append(ch, store.Change{Col: "thread_effort", Val: *b.ThreadEffort})
 	}
@@ -96,7 +96,7 @@ func checkProjectModels(models []projectModel) error {
 		if m.val == nil || *m.val == "" || composer.ValidModel(*m.val) {
 			continue
 		}
-		errs = append(errs, FieldError{m.field, composer.ModelFormatProblem})
+		errs = append(errs, FieldError{Path: m.field, Message: composer.ModelFormatProblem})
 	}
 	if len(errs) > 0 {
 		return invalid(errs, errs[0].Message)

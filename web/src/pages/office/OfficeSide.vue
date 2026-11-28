@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { statusBubble } from "@/lib/bubble";
 import { $t } from "@/i18n";
 /** The dark “调度看板”: live / replay switch, what waits, the selected person, recent events, legend. */
 import { computed } from "vue";
@@ -19,7 +20,7 @@ const roster = computed(() => new Map(props.snapshot.employees.map((e) => [e.id,
 const recent = computed(() =>
   recentEvents(props.events, roster.value, props.focus).map((e) => {
     const who = roster.value.get(String(e.employee));
-    return { e, where: who?.thread_no ? `#${who.thread_no}` : $t("统筹"), name: who?.name ?? String(e.employee), color: whoColor(who), what: e.status.bubble || STATE_LABELS[e.status.state] || e.status.state };
+    return { e, where: who?.thread_no ? `#${who.thread_no}` : $t("统筹"), name: who?.name ?? String(e.employee), color: whoColor(who), what: statusBubble(e.status.bubble) || STATE_LABELS[e.status.state] || e.status.state };
   }),
 );
 const btn = (on: boolean) => ({ height: "30px", padding: "0 10px", borderRadius: "8px", border: on ? "none" : "1px solid #4A4D59", background: on ? "#C8622A" : "transparent", color: on ? "#FFFFFF" : "#E6E3DC", fontSize: "12px" });

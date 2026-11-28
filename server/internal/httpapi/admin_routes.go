@@ -126,8 +126,8 @@ func (s *Server) adminCreateUser(ctx context.Context, in *adminCreateUserInput) 
 	}
 	b := in.Body
 	email := auth.NormalizeEmail(b.Email)
-	if reason := auth.CheckEmail(email); reason != "" {
-		return nil, fail(http.StatusUnprocessableEntity, "invalid_email", reason)
+	if err := auth.CheckEmail(email); err != nil {
+		return nil, failErr(http.StatusUnprocessableEntity, "invalid_email", err)
 	}
 	role := b.Role
 	if role == "" {
@@ -136,8 +136,8 @@ func (s *Server) adminCreateUser(ctx context.Context, in *adminCreateUserInput) 
 	password, generated := b.Password, b.Password == ""
 	if generated {
 		password = auth.RandomPassword()
-	} else if reason := auth.CheckPassword(password); reason != "" {
-		return nil, fail(http.StatusUnprocessableEntity, "weak_password", reason)
+	} else if err := auth.CheckPassword(password); err != nil {
+		return nil, failErr(http.StatusUnprocessableEntity, "weak_password", err)
 	}
 	mustChange := b.MustChangePassword == nil || *b.MustChangePassword
 	hash, err := auth.HashPassword(password)
@@ -251,7 +251,7 @@ func (s *Server) adminDeleteUser(ctx context.Context, in *userIDInput) (*struct{
 	// The folder first: when it is being switched on the deletion is refused before anything else
 	// happened to the account.
 	if err := s.hooks.UserDeleting(ctx, in.ID); err != nil {
-		return nil, fail(http.StatusConflict, "folder_busy", err.Error())
+		return nil, failErr(http.StatusConflict, "folder_busy", err)
 	}
 	s.cutOff(ctx, in.ID)
 	// Grouping rules first: if deleting the row then fails, a retry finishes the job and no
@@ -317,10 +317,10 @@ func (s *Server) adminSaveSettings(ctx context.Context, in *adminSettingsInput) 
 	b := in.Body
 	b.NodeURL = strings.TrimRight(strings.TrimSpace(b.NodeURL), "/")
 	if b.NodeURL != "" && !config.IsOrigin(b.NodeURL) {
-		return nil, invalid([]FieldError{{"node_url", "要填 https://域名 这样的地址，不带路径"}}, "节点注册地址要填 https://域名 这样的地址，不带路径")
+		return nil, invalid([]FieldError{{Path: "node_url", Message: "要填 https://域名 这样的地址，不带路径"}}, "节点注册地址要填 https://域名 这样的地址，不带路径")
 	}
 	if _, err := s.office.Get(b.OfficeDefault); err != nil {
-		return nil, invalid([]FieldError{{"office_default", "没有这个布局"}}, "没有这个布局："+b.OfficeDefault)
+		return nil, invalidf([]FieldError{{Path: "office_default", Message: "没有这个布局"}}, "没有这个布局：{name}", "name", b.OfficeDefault)
 	}
 	err = s.store.Tx(ctx, func(tx *store.Store) error {
 		return saveSettings(ctx, tx, b)

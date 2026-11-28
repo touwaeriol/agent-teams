@@ -5,26 +5,30 @@ package httpapi
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // FieldError is one validation problem (api.md §0: fields [{path, message}]).
 type FieldError struct {
-	Path    string `json:"path"`
-	Message string `json:"message"`
+	Path    string    `json:"path"`
+	Message string    `json:"message"`
+	Text    *msg.Text `json:"text,omitempty" doc:"Translatable form of message"`
 }
 
-// APIError keeps the v1 error shape {"detail": "..."} and adds a machine code.
+// APIError keeps the v1 error shape {"detail": "..."} and adds a machine code and the
+// translatable message the web app shows in the user's language.
 type APIError struct {
-	Status int          `json:"-"`
-	Detail string       `json:"detail" doc:"Human-readable message (Chinese)"`
-	Code   string       `json:"code,omitempty" doc:"Machine-readable code such as node_quota"`
-	Fields []FieldError `json:"fields,omitempty"`
-	header http.Header
+	Status  int          `json:"-"`
+	Detail  string       `json:"detail" doc:"Human-readable message (Chinese)"`
+	Code    string       `json:"code,omitempty" doc:"Machine-readable code such as node_quota"`
+	Message *msg.Text    `json:"message,omitempty" doc:"Translatable form of detail (key + params)"`
+	Fields  []FieldError `json:"fields,omitempty"`
+	header  http.Header
 }
 
 func (e *APIError) Error() string { return e.Detail }
@@ -38,12 +42,45 @@ func (e *APIError) GetStatus() int { return e.Status }
 // ContentType keeps errors as plain JSON (not problem+json) like v1.
 func (e *APIError) ContentType(string) string { return "application/json" }
 
+// fail is an error with a fixed message: detail is also its translation key.
 func fail(status int, code, detail string) error {
-	return &APIError{Status: status, Code: code, Detail: detail}
+	return failMsg(status, code, msg.T(detail))
+}
+
+// failf is an error with placeholders: failf(409, "node_exists", "已经有叫 {name} 的节点了", "name", n).
+func failf(status int, code, key string, kv ...any) error {
+	return failMsg(status, code, msg.T(key, kv...))
+}
+
+// failErr reports an error from a lower layer, keeping its translatable message when it has one.
+func failErr(status int, code string, err error) error {
+	return failMsg(status, code, msg.Of(err))
+}
+
+func failMsg(status int, code string, m msg.Text) error {
+	return &APIError{Status: status, Code: code, Detail: m.String(), Message: &m}
+}
+
+// invalidField is a 422 for one field whose problem is the message: invalidField("node_id", msg.T(...)).
+func invalidField(path string, m msg.Text) error {
+	return &APIError{Status: http.StatusUnprocessableEntity, Code: "validation", Detail: m.String(), Message: &m,
+		Fields: []FieldError{{Path: path, Message: m.String(), Text: &m}}}
+}
+
+// invalidf is a 422 with field problems and a summary with placeholders.
+func invalidf(fields []FieldError, key string, kv ...any) error {
+	m := msg.T(key, kv...)
+	return &APIError{Status: http.StatusUnprocessableEntity, Code: "validation", Detail: m.String(), Message: &m, Fields: fields}
+}
+
+func (e *APIError) withFields(fields []FieldError) error {
+	e.Fields = fields
+	return e
 }
 
 func invalid(fields []FieldError, detail string) error {
-	return &APIError{Status: http.StatusUnprocessableEntity, Code: "validation", Detail: detail, Fields: fields}
+	m := msg.T(detail)
+	return &APIError{Status: http.StatusUnprocessableEntity, Code: "validation", Detail: detail, Message: &m, Fields: fields}
 }
 
 var defaultCodes = map[int]string{
@@ -51,9 +88,9 @@ var defaultCodes = map[int]string{
 	409: "conflict", 413: "too_large", 422: "validation", 429: "rate_limited", 500: "internal", 503: "unavailable",
 }
 
-var defaultDetails = map[int]string{
-	400: "请求不正确", 401: "请先登录", 403: "没有权限", 404: "没有找到", 409: "状态冲突",
-	422: "参数不正确", 429: "请求太频繁，请稍后再试", 500: "服务器出错了", 503: "依赖的服务暂时不可用",
+var defaultDetails = map[int]msg.Text{
+	400: msg.T("请求不正确"), 401: msg.T("请先登录"), 403: msg.T("没有权限"), 404: msg.T("没有找到"), 409: msg.T("状态冲突"),
+	422: msg.T("参数不正确"), 429: msg.T("请求太频繁，请稍后再试"), 500: msg.T("服务器出错了"), 503: msg.T("依赖的服务暂时不可用"),
 }
 
 func init() {
@@ -61,8 +98,10 @@ func init() {
 }
 
 // newHumaError turns huma's own errors (validation, parsing) into APIError.
-func newHumaError(status int, msg string, errs ...error) huma.StatusError {
-	e := &APIError{Status: status, Code: defaultCodes[status], Detail: detailFor(status, msg)}
+func newHumaError(status int, text string, errs ...error) huma.StatusError {
+	e := &APIError{Status: status, Code: defaultCodes[status], Detail: detailFor(status, text)}
+	m := msg.T(e.Detail)
+	e.Message = &m
 	for _, err := range errs {
 		if err == nil {
 			continue
@@ -70,19 +109,20 @@ func newHumaError(status int, msg string, errs ...error) huma.StatusError {
 		e.Fields = append(e.Fields, fieldOf(err))
 	}
 	if len(e.Fields) > 0 && status == http.StatusUnprocessableEntity {
-		e.Detail = fmt.Sprintf("参数不正确：%s %s", e.Fields[0].Path, e.Fields[0].Message)
+		m := msg.T("参数不正确：{path} {problem}", "path", e.Fields[0].Path, "problem", e.Fields[0].Message)
+		e.Detail, e.Message = m.String(), &m
 	}
 	return e
 }
 
-func detailFor(status int, msg string) string {
-	if d, ok := defaultDetails[status]; ok && (msg == "" || isEnglish(msg)) {
-		return d
+func detailFor(status int, text string) string {
+	if d, ok := defaultDetails[status]; ok && (text == "" || isEnglish(text)) {
+		return d.Key
 	}
-	if msg == "" {
+	if text == "" {
 		return http.StatusText(status)
 	}
-	return msg
+	return text
 }
 
 func isEnglish(s string) bool {

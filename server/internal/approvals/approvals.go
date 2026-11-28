@@ -20,6 +20,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -28,8 +29,8 @@ import (
 // Errors for the REST layer.
 var (
 	ErrNotApproval = errors.New("这不是审批卡片")
-	ErrAnswered    = errors.New("已经处理过了")
-	ErrBadAnswer   = errors.New("审批只能回答 allow、allow_always 或 deny")
+	ErrAnswered    = msg.Err("已经处理过了")
+	ErrBadAnswer   = msg.Err("审批只能回答 allow、allow_always 或 deny")
 )
 
 // decided_by values must match the protocol pattern (user:… | policy:thread_auto |
@@ -349,18 +350,19 @@ func (e *Engine) answerTx(ctx context.Context, tx *core.Tx, user store.User, q c
 	return e.applyRule(ctx, tx, q, ruleID)
 }
 
-var answerVerbs = map[string]string{"allow": "放行了", "allow_always": "总是允许", "deny": "拒绝了"}
+var answerVerbs = map[string]string{"allow": msg.K("放行了"), "allow_always": msg.K("总是允许"), "deny": msg.K("拒绝了")}
 
 // userActivity logs the user's decision in the thread's activity feed.
 func userActivity(ctx context.Context, tx *core.Tx, q core.Question, answer, reason string) error {
 	if q.ThreadID == nil {
 		return nil
 	}
-	line := fmt.Sprintf("%s %s 的请求 %s", answerVerbs[answer], q.Asker, Summary(q))
+	line := msg.T("{verb} {who} 的请求 {what}", "verb", msg.T(answerVerbs[answer]), "who", q.Asker, "what", Summary(q))
 	if reason != "" {
-		line += "（" + reason + "）"
+		line = msg.T("{verb} {who} 的请求 {what}（{reason}）", "verb", msg.T(answerVerbs[answer]), "who", q.Asker, "what", Summary(q),
+			"reason", reason)
 	}
-	return tx.EmitActivity(ctx, deref(q.ProjectID), q.ThreadID, "你", line)
+	return tx.EmitActivity(ctx, deref(q.ProjectID), q.ThreadID, msg.K("你"), line)
 }
 
 // remember stores an "always allow" rule (sdk_update kept verbatim, destination → session).

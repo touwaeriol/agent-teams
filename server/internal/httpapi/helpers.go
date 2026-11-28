@@ -12,6 +12,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/auth"
 	"github.com/touwaeriol/agent-teams/server/internal/github"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -21,7 +22,8 @@ func (s *Server) rateLimit(ctx context.Context, key string, limit int, window ti
 	if ok {
 		return nil
 	}
-	e := &APIError{Status: http.StatusTooManyRequests, Code: "rate_limited", Detail: "请求太频繁，请稍后再试",
+	m := msg.T("请求太频繁，请稍后再试")
+	e := &APIError{Status: http.StatusTooManyRequests, Code: "rate_limited", Detail: m.String(), Message: &m,
 		header: http.Header{"Retry-After": {strconv.Itoa(int(math.Ceil(wait.Seconds())))}}}
 	return e
 }
@@ -60,6 +62,14 @@ func storeErr(err error, notFound string) error {
 	return err
 }
 
+// storeErrMsg is storeErr with a translatable 404 message.
+func storeErrMsg(err error, notFound msg.Text) error {
+	if errors.Is(err, store.ErrNotFound) {
+		return failMsg(http.StatusNotFound, "not_found", notFound)
+	}
+	return storeErr(err, notFound.Key)
+}
+
 // githubErr maps GitHub failures to 422 (v1) or 409 for configuration problems.
 func githubErr(err error) error {
 	var ge *github.Error
@@ -69,7 +79,7 @@ func githubErr(err error) error {
 	case errors.As(err, &ge):
 		return fail(http.StatusUnprocessableEntity, "github", ge.Message)
 	case errors.Is(err, github.ErrNoApp), errors.Is(err, auth.ErrUnseal), errors.Is(err, auth.ErrNoSecret):
-		return fail(http.StatusConflict, "github_config", err.Error())
+		return failErr(http.StatusConflict, "github_config", err)
 	}
 	return err
 }

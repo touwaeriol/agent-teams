@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -48,26 +49,28 @@ func Choices(ctx context.Context, db store.DB, userID string) (map[string]map[in
 }
 
 // CheckRefs validates a role's plugin entries against Choices; "" when they are fine.
-func CheckRefs(refs []string, choices map[string]map[int]bool) string {
+func CheckRefs(refs []string, choices map[string]map[int]bool) *msg.Text {
+	bad := func(m msg.Text) *msg.Text { return &m }
 	if len(refs) > MaxPerRole {
-		return fmt.Sprintf("一个岗位最多 %d 个插件", MaxPerRole)
+		return bad(msg.T("一个岗位最多 {n} 个插件", "n", MaxPerRole))
 	}
 	seen := map[string]bool{}
 	for _, s := range refs {
 		r, ok := ParseRef(s)
 		switch {
 		case !ok:
-			return "插件写法是 name 或 name@版本号：" + s
+			// "@" is message syntax in the web app, so it travels as a param.
+			return bad(msg.T("插件写法是 name 或 name{at}版本号：{ref}", "at", "@", "ref", s))
 		case seen[r.Name]:
-			return "插件重复：" + r.Name
+			return bad(msg.T("插件重复：{name}", "name", r.Name))
 		case choices != nil && choices[r.Name] == nil:
-			return "没有这个插件：" + r.Name
+			return bad(msg.T("没有这个插件：{name}", "name", r.Name))
 		case choices != nil && r.Version > 0 && !choices[r.Name][r.Version]:
-			return fmt.Sprintf("插件 %s 没有版本 %d", r.Name, r.Version)
+			return bad(msg.T("插件 {name} 没有版本 {version}", "name", r.Name, "version", r.Version))
 		}
 		seen[r.Name] = true
 	}
-	return ""
+	return nil
 }
 
 // Bundles loads a role's plugins at their exact versions for session.open. Disabled or

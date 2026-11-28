@@ -194,9 +194,9 @@ func (a *API) changeJob(ctx context.Context, name, action string, detail map[str
 func jobErr(err error) error {
 	switch {
 	case errors.Is(err, jobs.ErrUnknown):
-		return httpapi.Fail(http.StatusNotFound, "not_found", err.Error())
+		return httpapi.FailErr(http.StatusNotFound, "not_found", err)
 	case errors.Is(err, cronx.ErrCron), errors.Is(err, jobs.ErrSchedule):
-		return httpapi.Fail(http.StatusUnprocessableEntity, "bad_schedule", err.Error())
+		return httpapi.FailErr(http.StatusUnprocessableEntity, "bad_schedule", err)
 	}
 	return err
 }

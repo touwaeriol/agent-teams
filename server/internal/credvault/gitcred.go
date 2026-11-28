@@ -4,9 +4,9 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
-	"fmt"
 	"strings"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -25,7 +25,7 @@ func GitAuthKind(kind string) (string, error) {
 	case GitSSHKey:
 		return AuthPrivateKey, nil
 	}
-	return "", fmt.Errorf("%w：未知凭据类型 %q", ErrInvalidCredential, kind)
+	return "", msg.Wrap(ErrInvalidCredential, "未知凭据类型 “{kind}”", "kind", kind)
 }
 
 // GenerateSSHKey makes a new Ed25519 key pair for a deploy key: the private key in OpenSSH PEM

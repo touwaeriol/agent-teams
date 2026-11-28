@@ -161,7 +161,7 @@ func (s *Server) createProject(ctx context.Context, in *createProjectInput) (*pr
 	b := in.Body
 	name := strings.TrimSpace(b.Name)
 	if name == "" {
-		return nil, invalid([]FieldError{{"name", "请填写项目名称"}}, "请填写项目名称")
+		return nil, invalid([]FieldError{{Path: "name", Message: "请填写项目名称"}}, "请填写项目名称")
 	}
 	repos, err := s.checkRepos(ctx, p.User.ID, b.Repos, nil)
 	if err != nil {
@@ -174,7 +174,7 @@ func (s *Server) createProject(ctx context.Context, in *createProjectInput) (*pr
 	}
 	row, err := s.store.CreateProject(ctx, p.User.ID, np)
 	if errors.Is(err, store.ErrConflict) {
-		return nil, fail(http.StatusConflict, "project_exists", "已经有叫 "+name+" 的项目了")
+		return nil, failf(http.StatusConflict, "project_exists", "已经有叫 {name} 的项目了", "name", name)
 	}
 	if err != nil {
 		return nil, err
@@ -220,7 +220,7 @@ func (s *Server) updateProject(ctx context.Context, in *updateProjectInput) (*pr
 		row, err = s.store.SetProjectRepos(ctx, p.User.ID, in.PID, repos)
 	}
 	if errors.Is(err, store.ErrConflict) {
-		return nil, fail(http.StatusConflict, "project_exists", "已经有叫 "+deref(in.Body.Name)+" 的项目了")
+		return nil, failf(http.StatusConflict, "project_exists", "已经有叫 {name} 的项目了", "name", deref(in.Body.Name))
 	}
 	if err != nil {
 		return nil, storeErr(err, "没有这个项目")
@@ -242,7 +242,7 @@ func (s *Server) projectChanges(ctx context.Context, userID string, cur store.Pr
 		}
 	}
 	if b.Name != nil && strings.TrimSpace(*b.Name) == "" {
-		return nil, invalid([]FieldError{{"name", "请填写项目名称"}}, "请填写项目名称")
+		return nil, invalid([]FieldError{{Path: "name", Message: "请填写项目名称"}}, "请填写项目名称")
 	}
 	add(b.Name != nil, "name", strings.TrimSpace(deref(b.Name)))
 	add(b.Description != nil, "description", deref(b.Description))
@@ -284,7 +284,7 @@ func (s *Server) settingChanges(ctx context.Context, userID string, cur store.Pr
 	}
 	if b.OfficeLayout != nil {
 		if _, err := s.office.Get(*b.OfficeLayout); *b.OfficeLayout != "" && err != nil {
-			return nil, invalid([]FieldError{{"office_layout", "没有这个布局"}}, "没有这个布局："+*b.OfficeLayout)
+			return nil, invalidf([]FieldError{{Path: "office_layout", Message: "没有这个布局"}}, "没有这个布局：{name}", "name", *b.OfficeLayout)
 		}
 		ch = append(ch, store.Change{Col: "office_layout", Val: *b.OfficeLayout})
 	}

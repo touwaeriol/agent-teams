@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/voice"
 )
 
@@ -64,7 +65,7 @@ func (s *Server) voiceStream(c *gin.Context) {
 	}
 	lang := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("language")))
 	if !voice.KnownLanguage(lang) {
-		writeError(c.Writer, invalid([]FieldError{{"language", "不支持这个语言"}}, "不支持这个语言："+lang))
+		writeError(c.Writer, invalidf([]FieldError{{Path: "language", Message: "不支持这个语言"}}, "不支持这个语言：{language}", "language", lang))
 		return
 	}
 	if lang == "" {
@@ -78,7 +79,7 @@ func (s *Server) voiceStream(c *gin.Context) {
 	defer conn.CloseNow()
 	conn.SetReadLimit(voice.MaxFrame)
 	if conn.Subprotocol() != voiceStreamProtocol {
-		voice.SendFatal(ctx, conn, "voice_protocol", "客户端版本不对，请刷新页面")
+		voice.SendFatal(ctx, conn, "voice_protocol", msg.T("客户端版本不对，请刷新页面"))
 		return
 	}
 	s.relayVoice(ctx, conn, p, lang, accepted)
@@ -90,22 +91,22 @@ func (s *Server) voiceStream(c *gin.Context) {
 func (s *Server) relayVoice(ctx context.Context, conn *websocket.Conn, p *principal, lang string, accepted time.Time) {
 	v, err := s.voiceSettings(ctx)
 	if err != nil || !s.voiceUsable(v) {
-		voice.SendFatal(ctx, conn, "voice_disabled", "管理员没有开启语音输入")
+		voice.SendFatal(ctx, conn, "voice_disabled", msg.T("管理员没有开启语音输入"))
 		return
 	}
 	if err := s.rateLimit(ctx, "voice-stream:"+p.User.ID, voiceStreamsPerMinute, time.Minute); err != nil {
-		voice.SendFatal(ctx, conn, "rate_limited", "开始录音太频繁，请稍后再试")
+		voice.SendFatal(ctx, conn, "rate_limited", msg.T("开始录音太频繁，请稍后再试"))
 		return
 	}
 	release, ok := s.voiceSlot(ctx, p.User.ID)
 	if !ok {
-		voice.SendFatal(ctx, conn, "voice_too_many", fmt.Sprintf("同时最多 %d 路语音输入，请先结束其他录音", voiceMaxStreams))
+		voice.SendFatal(ctx, conn, "voice_too_many", msg.T("同时最多 {n} 路语音输入，请先结束其他录音", "n", voiceMaxStreams))
 		return
 	}
 	defer release()
 	key, err := s.voiceKey(v)
 	if err != nil {
-		voice.SendFatal(ctx, conn, "voice_unseal", "服务器读不出语音服务的 API Key，请联系管理员")
+		voice.SendFatal(ctx, conn, "voice_unseal", msg.T("服务器读不出语音服务的 API Key，请联系管理员"))
 		return
 	}
 	req := voice.Request{Model: v.Model, Language: lang, NoiseReduction: v.NoiseReduction, Delay: v.Delay}
@@ -121,13 +122,13 @@ func (s *Server) relayVoice(ctx context.Context, conn *websocket.Conn, p *princi
 	timedOut := dctx.Err() != nil
 	cancel()
 	if err != nil {
-		code, msg := s.voiceDialErr(err)
+		code, why := s.voiceDialErr(err)
 		if timedOut && ctx.Err() == nil {
-			code, msg = "voice_timeout", fmt.Sprintf("%d 秒内没有连上 OpenAI", int(opts.Handshake.Seconds()))
+			code, why = "voice_timeout", msg.T("{n} 秒内没有连上 OpenAI", "n", int(opts.Handshake.Seconds()))
 		}
 		s.log.Warn("voice: relay dial failed", "code", code, "dial_ms", dialMS)
 		s.audit(ctx, p.User.ID, "voice_stream_stop", "voice", "", map[string]any{"model": v.Model, "language": lang, "ok": false, "reason": code, "dial_ms": dialMS})
-		voice.SendFatal(ctx, conn, code, "连不上语音服务："+msg)
+		voice.SendFatal(ctx, conn, code, msg.T("连不上语音服务：{reason}", "reason", why))
 		return
 	}
 	opts.OnReady = func(sessionID string, handshake time.Duration) {
@@ -147,25 +148,24 @@ func (s *Server) relayVoice(ctx context.Context, conn *websocket.Conn, p *princi
 	s.audit(context.WithoutCancel(ctx), p.User.ID, "voice_stream_stop", "voice", res.SessionID, detail)
 }
 
-func (s *Server) voiceDialErr(err error) (string, string) {
+func (s *Server) voiceDialErr(err error) (string, msg.Text) {
 	e, ok := err.(*voice.Error)
 	if !ok {
-		return "voice_unreachable", "无法连接"
+		return "voice_unreachable", msg.T("无法连接")
 	}
 	s.log.Warn("voice: relay dial", "status", e.Status, "code", e.Code, "msg", e.Message)
 	switch {
 	case e.Status == 0:
-		return "voice_unreachable", "服务器连不上 OpenAI"
+		return "voice_unreachable", msg.T("服务器连不上 OpenAI")
 	case e.Unauthorized():
-		return "voice_key_rejected", "OpenAI 拒绝了 API Key"
+		return "voice_key_rejected", msg.T("OpenAI 拒绝了 API Key")
 	case e.Status == http.StatusTooManyRequests:
-		return "voice_busy", "OpenAI 繁忙，请稍后再试"
+		return "voice_busy", msg.T("OpenAI 繁忙，请稍后再试")
 	}
-	msg := fmt.Sprintf("OpenAI 返回 %d", e.Status)
 	if e.Message != "" {
-		msg += "：" + e.Message
+		return "voice_upstream", msg.T("OpenAI 返回 {status}：{reason}", "status", e.Status, "reason", e.Message)
 	}
-	return "voice_upstream", msg
+	return "voice_upstream", msg.T("OpenAI 返回 {status}", "status", e.Status)
 }
 
 // voiceSlot claims one of the user's voiceMaxStreams relay slots in Valkey (shared by every

@@ -9,6 +9,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/blobgc"
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -19,13 +20,13 @@ import (
 
 var (
 	// ErrUploadIncomplete is an upload whose parts are not all in the object store yet.
-	ErrUploadIncomplete = errors.New("文件还没有传完：有分片没传上去，传完再完成上传")
+	ErrUploadIncomplete = msg.Err("文件还没有传完：有分片没传上去，传完再完成上传")
 	// ErrUploadSize is an upload whose object does not have the declared size: it is dropped.
-	ErrUploadSize = errors.New("上传的文件大小和声明的不一致，已丢弃，请重新上传")
+	ErrUploadSize = msg.Err("上传的文件大小和声明的不一致，已丢弃，请重新上传")
 	// ErrAttachmentTooLarge is an attachment over MaxAttachmentBytes.
-	ErrAttachmentTooLarge = fmt.Errorf("附件太大：单个附件最多 %d MB", MaxAttachmentBytes>>20)
+	ErrAttachmentTooLarge = msg.Err("附件太大：单个附件最多 {mb} MB", "mb", MaxAttachmentBytes>>20)
 	// ErrTooManyUploads is a new upload over the user's limit on uploads in flight.
-	ErrTooManyUploads = errors.New("同时进行中的上传太多")
+	ErrTooManyUploads = msg.Err("同时进行中的上传太多")
 )
 
 // Limits on a user's uploads in flight (#62 F2): attachments still uploading plus shared-file
@@ -51,8 +52,8 @@ func CheckUploadsInFlight(ctx context.Context, q DB, userID string, size int64) 
 		return err
 	}
 	if n+1 > MaxUploadsInFlight || total+size > MaxUploadBytesInFlight {
-		return fmt.Errorf("%w：最多 %d 个、共 %d MB（现在 %d 个、%d MB）；请等已有的上传完成或取消，没传完的上传 24 小时后自动清理",
-			ErrTooManyUploads, MaxUploadsInFlight, MaxUploadBytesInFlight>>20, n, total>>20)
+		return msg.Wrap(ErrTooManyUploads, "同时进行中的上传太多：最多 {max} 个、共 {max_mb} MB（现在 {n} 个、{mb} MB）；请等已有的上传完成或取消，没传完的上传 24 小时后自动清理",
+			"max", MaxUploadsInFlight, "max_mb", MaxUploadBytesInFlight>>20, "n", n, "mb", total>>20)
 	}
 	return nil
 }
@@ -84,7 +85,7 @@ func BeginAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, ttl ti
 	case size > MaxAttachmentBytes:
 		return Attachment{}, ErrAttachmentTooLarge
 	case size <= 0:
-		return Attachment{}, fmt.Errorf("%w：空文件不能作为附件", ErrUploadSize)
+		return Attachment{}, msg.Wrap(ErrUploadSize, "空文件不能作为附件")
 	}
 	bs = blobstore.Or(bs)
 	if !bs.Configured() {
@@ -149,7 +150,7 @@ func CompleteAttachmentUpload(ctx context.Context, q DB, bs blobstore.Store, ttl
 	}
 	key := *a.StorageKey
 	if n := blobstore.PartCount(int64(a.Size)); len(parts) == 0 || len(parts) > int(n) {
-		return a, fmt.Errorf("%w（应有 %d 个分片，收到 %d 个）", ErrUploadIncomplete, n, len(parts))
+		return a, msg.Wrap(ErrUploadIncomplete, "文件还没有传完：有分片没传上去，传完再完成上传（应有 {want} 个分片，收到 {got} 个）", "want", n, "got", len(parts))
 	}
 	if err := bs.CompleteMultipart(ctx, key, uploadID, parts); err != nil {
 		if _, herr := bs.Head(ctx, key); herr != nil { // not a repeated complete

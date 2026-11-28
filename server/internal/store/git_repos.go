@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Standalone Git repositories (git-repos.md §3, data-model.md §2.15): credentials shared by the
@@ -19,7 +20,7 @@ var (
 	// ErrInUse: the credential or repository is still used (by a repository / a project).
 	ErrInUse = errors.New("still in use")
 	// ErrHostMismatch: a repository may only use a credential of its own host.
-	ErrHostMismatch = errors.New("凭据和仓库不是同一个主机")
+	ErrHostMismatch = msg.Err("凭据和仓库不是同一个主机")
 )
 
 // GitCredential is a row of at_git_credentials without its sealed value.

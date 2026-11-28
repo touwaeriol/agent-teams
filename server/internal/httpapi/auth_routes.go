@@ -97,8 +97,8 @@ func (s *Server) registerUser(ctx context.Context, in *credentialsInput) (*userW
 		return nil, err
 	}
 	email := auth.NormalizeEmail(in.Body.Email)
-	if reason := auth.CheckCredentials(email, in.Body.Password); reason != "" {
-		return nil, fail(http.StatusUnprocessableEntity, "invalid_credentials", reason)
+	if err := auth.CheckCredentials(email, in.Body.Password); err != nil {
+		return nil, failErr(http.StatusUnprocessableEntity, "invalid_credentials", err)
 	}
 	role, err := s.newUserRole(ctx, email)
 	if err != nil {
@@ -204,8 +204,8 @@ func (s *Server) changePassword(ctx context.Context, in *passwordInput) (*struct
 	if !auth.VerifyPassword(in.Body.Current, hash) {
 		return nil, fail(http.StatusUnprocessableEntity, "bad_password", "当前密码不对")
 	}
-	if reason := auth.CheckPassword(in.Body.New); reason != "" {
-		return nil, fail(http.StatusUnprocessableEntity, "weak_password", reason)
+	if err := auth.CheckPassword(in.Body.New); err != nil {
+		return nil, failErr(http.StatusUnprocessableEntity, "weak_password", err)
 	}
 	newHash, err := auth.HashPassword(in.Body.New)
 	if err != nil {

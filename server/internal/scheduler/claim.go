@@ -12,6 +12,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 )
@@ -139,7 +140,7 @@ func (s *Scheduler) claim(ctx context.Context, tx *core.Tx, t core.Thread, task 
 	if err := tx.EmitTask(ctx, task); err != nil {
 		return err
 	}
-	if err := tx.EmitActivity(ctx, t.ProjectID, &t.ID, m.Name, fmt.Sprintf("领取 %s：%s", task.ID, clip(task.Instruction, 80))); err != nil {
+	if err := tx.EmitActivity(ctx, t.ProjectID, &t.ID, m.Name, msg.T("领取 {task}：{instruction}", "task", task.ID, "instruction", clip(task.Instruction, 80))); err != nil {
 		return err
 	}
 	tx.AfterCommit(func(ctx context.Context) {
@@ -411,7 +412,7 @@ func (s *Scheduler) retryReviewSync(ctx context.Context, tx *core.Tx, t core.Thr
 func (s *Scheduler) reviewPlatformError(ctx context.Context, tx *core.Tx, t core.Thread, gate core.Task, why string) (core.Task, error) {
 	clear := map[string]any{"sync": map[string]core.TaskSync{}, "sync_pending": 0, "sync_round": "", "wait_since": nil,
 		"attempt": gate.Attempt + 1}
-	if err := tx.EmitActivity(ctx, t.ProjectID, &t.ID, "platform", fmt.Sprintf("%s %s 平台错误：%s", gateName(gate), gate.ID, clip(why, 200))); err != nil {
+	if err := tx.EmitActivity(ctx, t.ProjectID, &t.ID, "platform", msg.T("{gate} {task} 平台错误：{why}", "gate", msg.T(gateName(gate)), "task", gate.ID, "why", clip(why, 200))); err != nil {
 		return gate, err
 	}
 	if gate.Attempt+1 < MaxAttempts {

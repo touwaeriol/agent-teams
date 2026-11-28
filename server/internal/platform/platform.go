@@ -13,11 +13,12 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // ErrNodeOffline is returned for commands to a node without a live link.
-var ErrNodeOffline = errors.New("节点不在线")
+var ErrNodeOffline = msg.Err("节点不在线")
 
 // ErrUsageUnsupported: the node's daemon does not report usage (hello.features lacks "usage").
 var ErrUsageUnsupported = errors.New("节点不支持查询余量")

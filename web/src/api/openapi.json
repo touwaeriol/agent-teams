@@ -20,6 +20,10 @@
               "array",
               "null"
             ]
+          },
+          "message": {
+            "$ref": "#/components/schemas/Text",
+            "description": "Translatable form of detail (key + params)"
           }
         },
         "required": [
@@ -40,6 +44,9 @@
           "id": {
             "format": "int64",
             "type": "integer"
+          },
+          "msg": {
+            "$ref": "#/components/schemas/Text"
           },
           "text": {
             "type": "string"
@@ -2271,6 +2278,10 @@
           },
           "path": {
             "type": "string"
+          },
+          "text": {
+            "$ref": "#/components/schemas/Text",
+            "description": "Translatable form of message"
           }
         },
         "required": [
@@ -2972,6 +2983,10 @@
           },
           "ok": {
             "type": "boolean"
+          },
+          "text": {
+            "$ref": "#/components/schemas/Text",
+            "description": "Translatable form of message"
           }
         },
         "required": [
@@ -7151,6 +7166,10 @@
           "ok": {
             "description": "The host key matched (or was pinned now) and the credential logged in",
             "type": "boolean"
+          },
+          "text": {
+            "$ref": "#/components/schemas/Text",
+            "description": "Translatable form of message"
           }
         },
         "required": [
@@ -7993,6 +8012,33 @@
         },
         "required": [
           "url"
+        ],
+        "type": "object"
+      },
+      "Text": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "description": "Message key: the Simplified Chinese text with {name} placeholders",
+            "type": "string"
+          },
+          "nested": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Text"
+            },
+            "description": "Params that are messages themselves (translate them too; params holds their Chinese)",
+            "type": "object"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values for the placeholders",
+            "type": "object"
+          }
+        },
+        "required": [
+          "key"
         ],
         "type": "object"
       },
@@ -9603,6 +9649,10 @@
           },
           "role": {
             "type": "string"
+          },
+          "text": {
+            "$ref": "#/components/schemas/Text",
+            "description": "Translatable form of message"
           }
         },
         "required": [

@@ -7,6 +7,7 @@ import { schedules as scheduleActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
 import { keys, useSchedules } from "@/api/queries";
 import type { MessageView } from "@/api/views";
+import { messageText } from "@/lib/chat";
 
 const props = defineProps<{ pid: string; message: MessageView }>();
 const id = computed(() => (props.message.meta?.schedule_undo ? props.message.meta.schedule_id : undefined));
@@ -17,7 +18,7 @@ const undo = useAction(() => scheduleActions.remove(id.value ?? ""), { invalidat
 
 <template>
   <p class="text-center text-xs text-muted-foreground" data-schedule-note>
-    {{ message.content }}
+    {{ messageText(message) }}
     <button v-if="pending" type="button" class="ml-1 text-primary hover:underline underline-offset-2" :disabled="undo.isPending.value" @click="undo.mutate()">{{ $t("撤销") }}</button>
   </p>
 </template>

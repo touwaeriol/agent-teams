@@ -2705,6 +2705,8 @@ export interface components {
             /** @description Human-readable message (Chinese) */
             detail: string;
             fields?: components["schemas"]["FieldError"][] | null;
+            /** @description Translatable form of detail (key + params) */
+            message?: components["schemas"]["Text"];
         };
         Activity: {
             /** Format: date-time */
@@ -2712,6 +2714,7 @@ export interface components {
             employee: string;
             /** Format: int64 */
             id: number;
+            msg?: components["schemas"]["Text"];
             text: string;
         };
         ActivityPage: {
@@ -3392,6 +3395,8 @@ export interface components {
         FieldError: {
             message: string;
             path: string;
+            /** @description Translatable form of message */
+            text?: components["schemas"]["Text"];
         };
         File: {
             content: string;
@@ -3615,6 +3620,8 @@ export interface components {
             latency_ms: number;
             message?: string;
             ok: boolean;
+            /** @description Translatable form of message */
+            text?: components["schemas"]["Text"];
         };
         GrantableRoleView: {
             grantable: boolean;
@@ -4886,6 +4893,8 @@ export interface components {
             message?: string;
             /** @description The host key matched (or was pinned now) and the credential logged in */
             ok: boolean;
+            /** @description Translatable form of message */
+            text?: components["schemas"]["Text"];
         };
         ServerView: {
             /** @enum {string} */
@@ -5110,6 +5119,18 @@ export interface components {
             credential?: components["schemas"]["GitCredentialInput"];
             credential_id?: string;
             url: string;
+        };
+        Text: {
+            /** @description Message key: the Simplified Chinese text with {name} placeholders */
+            key: string;
+            /** @description Params that are messages themselves (translate them too; params holds their Chinese) */
+            nested?: {
+                [key: string]: components["schemas"]["Text"];
+            };
+            /** @description Values for the placeholders */
+            params?: {
+                [key: string]: string;
+            };
         };
         ThreadCounts: {
             /** Format: int64 */
@@ -5651,6 +5672,8 @@ export interface components {
         Warning: {
             message: string;
             role: string;
+            /** @description Translatable form of message */
+            text?: components["schemas"]["Text"];
         };
         WorkSessionView: {
             project: components["schemas"]["ProjectView"];

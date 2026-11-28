@@ -10,6 +10,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/approvals"
 	"github.com/touwaeriol/agent-teams/server/internal/composer"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 	"github.com/touwaeriol/agent-teams/server/internal/status"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -18,8 +19,8 @@ import (
 // Errors for the REST answer endpoint.
 var (
 	ErrNotQuestion = errors.New("这是审批卡片，请用 allow / deny / allow_always 回答")
-	ErrAnswered    = errors.New("已经回答过了")
-	ErrNotForUser  = errors.New("这个问题是问组长的")
+	ErrAnswered    = msg.Err("已经回答过了")
+	ErrNotForUser  = msg.Err("这个问题是问组长的")
 )
 
 // ask creates a question card. Blocking questions keep the call waiting until answered.
@@ -486,7 +487,7 @@ func (s *Service) reportProgress(ctx context.Context, tx *core.Tx, c *call) (Res
 	if err := core.SetTaskProgress(ctx, tx, c.emp(), in.Text); err != nil {
 		return Result{}, err
 	}
-	return okText("ok"), tx.EmitActivity(ctx, c.emp().ProjectID, c.emp().WorkThreadID(), c.emp().Name, in.Text)
+	return okText("ok"), tx.EmitActivity(ctx, c.emp().ProjectID, c.emp().WorkThreadID(), c.emp().Name, msg.Text{Key: in.Text})
 }
 
 // publish registers a deliverable link.

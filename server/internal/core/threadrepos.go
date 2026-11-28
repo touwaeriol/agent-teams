@@ -2,16 +2,16 @@ package core
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 // ErrBaseFixed means the thread branch already exists in the repository, cut from another base.
-var ErrBaseFixed = errors.New("这个仓库的讨论串分支已经从另一个基准分支创建了，不能再改基准分支")
+var ErrBaseFixed = msg.Err("这个仓库的讨论串分支已经从另一个基准分支创建了，不能再改基准分支")
 
 // ThreadRepo is a row of at_thread_repos: one repository of a thread's project as the thread
 // uses it. The row appears when a base is set or the thread branch is created in the repository.

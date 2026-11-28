@@ -3,7 +3,6 @@ package timers
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 	_ "time/tzdata" // schedules name IANA zones; the image may have no zoneinfo
@@ -12,6 +11,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Schedule kinds, targets, creators and statuses (00390).
@@ -94,9 +94,17 @@ type Owner struct {
 }
 
 // ErrInvalid is a schedule the user (or agent) has to fix; its message is shown as is.
-type ErrInvalid struct{ Field, Message string }
+type ErrInvalid struct {
+	Field string
+	Text  msg.Text
+}
 
-func (e ErrInvalid) Error() string { return e.Message }
+func (e ErrInvalid) Error() string { return e.Text.String() }
+
+// Msg is the translatable message (web i18n).
+func (e ErrInvalid) Msg() msg.Text { return e.Text }
+
+func invalid(field, key string, kv ...any) ErrInvalid { return ErrInvalid{field, msg.T(key, kv...)} }
 
 // Limits.
 const (
@@ -174,40 +182,40 @@ func Normalize(s Schedule, now time.Time, byAgent, runAtChanged bool) (Schedule,
 	}
 	switch {
 	case s.Name == "":
-		return s, ErrInvalid{"name", "请填写名称"}
+		return s, invalid("name", "请填写名称")
 	case s.Message == "":
-		return s, ErrInvalid{"message", "请填写到点要发的消息"}
+		return s, invalid("message", "请填写到点要发的消息")
 	}
 	loc, err := time.LoadLocation(s.Timezone)
 	if err != nil {
-		return s, ErrInvalid{"timezone", "没有这个时区：" + s.Timezone}
+		return s, invalid("timezone", "没有这个时区：{tz}", "tz", s.Timezone)
 	}
 	switch s.Kind {
 	case KindCron:
 		if s.CreatedBy == ByMember {
-			return s, ErrInvalid{"cron", "员工只能设置一次性的唤醒（at 或 in_minutes）"}
+			return s, invalid("cron", "员工只能设置一次性的唤醒（at 或 in_minutes）")
 		}
 		return normalizeCron(s, now, loc, byAgent)
 	case KindOnce:
 		return normalizeOnce(s, now, byAgent, runAtChanged)
 	}
-	return s, ErrInvalid{"kind", "kind 只能是 cron 或 once"}
+	return s, invalid("kind", "kind 只能是 cron 或 once")
 }
 
 func normalizeCron(s Schedule, now time.Time, loc *time.Location, byAgent bool) (Schedule, error) {
 	s.RunAt = nil
 	c, err := ParseCron(s.Cron)
 	if err != nil {
-		return s, ErrInvalid{"cron", "时间表达式不对（分 时 日 月 周，例如 0 9 * * *，或 @daily）"}
+		return s, invalid("cron", "时间表达式不对（分 时 日 月 周，例如 0 9 * * *，或 {daily}）", "daily", "@daily")
 	}
 	if c.Next(now, loc).IsZero() {
-		return s, ErrInvalid{"cron", "这个时间表达式不会触发"}
+		return s, invalid("cron", "这个时间表达式不会触发")
 	}
 	if byAgent && c.MinGap(now, loc, 6) < MinAgentInterval {
-		return s, ErrInvalid{"cron", fmt.Sprintf("定时任务两次之间至少隔 %d 分钟", int(MinAgentInterval/time.Minute))}
+		return s, invalid("cron", "定时任务两次之间至少隔 {n} 分钟", "n", int(MinAgentInterval/time.Minute))
 	}
 	if s.EndsAt != nil && !s.EndsAt.After(now) {
-		return s, ErrInvalid{"ends_at", "结束时间要在现在之后"}
+		return s, invalid("ends_at", "结束时间要在现在之后")
 	}
 	return s, nil
 }
@@ -215,7 +223,7 @@ func normalizeCron(s Schedule, now time.Time, loc *time.Location, byAgent bool) 
 func normalizeOnce(s Schedule, now time.Time, byAgent, runAtChanged bool) (Schedule, error) {
 	s.Cron, s.EndsAt, s.MaxRuns = "", nil, nil
 	if s.RunAt == nil {
-		return s, ErrInvalid{"run_at", "请填写触发时间"}
+		return s, invalid("run_at", "请填写触发时间")
 	}
 	at := s.RunAt.UTC().Truncate(time.Second)
 	s.RunAt = &at
@@ -224,13 +232,13 @@ func normalizeOnce(s Schedule, now time.Time, byAgent, runAtChanged bool) (Sched
 	}
 	switch {
 	case byAgent && at.Before(now.Add(MinAgentDelay-time.Second)):
-		return s, ErrInvalid{"at", "触发时间至少在 1 分钟之后"}
+		return s, invalid("at", "触发时间至少在 1 分钟之后")
 	case s.CreatedBy == ByMember && at.After(now.Add(MaxMemberDelay+time.Second)):
-		return s, ErrInvalid{"at", "员工的唤醒最多在 24 小时之内"}
+		return s, invalid("at", "员工的唤醒最多在 24 小时之内")
 	case byAgent && at.After(now.Add(MaxAgentDelay)):
-		return s, ErrInvalid{"at", "触发时间最多在 30 天之内"}
+		return s, invalid("at", "触发时间最多在 30 天之内")
 	case !at.After(now):
-		return s, ErrInvalid{"run_at", "触发时间要在现在之后"}
+		return s, invalid("run_at", "触发时间要在现在之后")
 	}
 	return s, nil
 }
@@ -336,9 +344,9 @@ func checkLimit(ctx context.Context, tx *core.Tx, projectID, kind string) error 
 	case err != nil:
 		return err
 	case kind == KindCron && n >= MaxPerProject:
-		return ErrInvalid{"name", fmt.Sprintf("一个项目最多 %d 个周期定时任务", MaxPerProject)}
+		return invalid("name", "一个项目最多 {n} 个周期定时任务", "n", MaxPerProject)
 	case kind == KindOnce && n >= MaxOncePerProject:
-		return ErrInvalid{"name", fmt.Sprintf("一个项目最多 %d 个待触发的一次性定时任务", MaxOncePerProject)}
+		return invalid("name", "一个项目最多 {n} 个待触发的一次性定时任务", "n", MaxOncePerProject)
 	}
 	return nil
 }
@@ -352,7 +360,7 @@ func checkMemberLimit(ctx context.Context, tx *core.Tx, o Owner) error {
 	var n int64
 	err := tx.Gorm(ctx).Model(&Schedule{}).Where("employee_id = ? AND status = ?", *o.EmployeeID, StatusActive).Count(&n).Error
 	if err == nil && n >= MaxPerMember {
-		return ErrInvalid{"name", fmt.Sprintf("每个员工最多 %d 个待触发的唤醒", MaxPerMember)}
+		return invalid("name", "每个员工最多 {n} 个待触发的唤醒", "n", MaxPerMember)
 	}
 	return err
 }
@@ -360,7 +368,7 @@ func checkMemberLimit(ctx context.Context, tx *core.Tx, o Owner) error {
 // updateSchedule changes a schedule; the next run is recomputed from now (the caller enqueues it).
 func updateSchedule(ctx context.Context, tx *core.Tx, cur Schedule, in ScheduleInput, now time.Time, byAgent bool) (Schedule, error) {
 	if cur.Status != StatusActive {
-		return cur, ErrInvalid{"status", "这个定时任务已经结束，不能再改"}
+		return cur, invalid("status", "这个定时任务已经结束，不能再改")
 	}
 	runAtChanged := in.RunAt != nil || (in.Kind != nil && *in.Kind != cur.Kind)
 	s, err := Normalize(apply(cur, in), now, byAgent, runAtChanged)
@@ -374,7 +382,7 @@ func updateSchedule(ctx context.Context, tx *core.Tx, cur Schedule, in ScheduleI
 	}
 	next := NextRun(s, now)
 	if next == nil && s.Enabled {
-		return s, ErrInvalid{"cron", "按这个设置定时任务不会再触发"}
+		return s, invalid("cron", "按这个设置定时任务不会再触发")
 	}
 	err = core.Changed(tx.Gorm(ctx).Table("at_schedules").Where("id = ?", s.ID).Updates(map[string]any{"name": s.Name,
 		"kind": s.Kind, "cron": s.Cron, "run_at": s.RunAt, "timezone": s.Timezone, "message": s.Message, "enabled": s.Enabled,

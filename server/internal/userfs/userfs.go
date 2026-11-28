@@ -16,9 +16,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Volume states (at_user_fs.state).
@@ -37,9 +38,9 @@ func ProjectDir(projectID string) string { return "projects/" + projectID }
 
 var (
 	// ErrDisabled: the console has no AGENT_TEAMS_FS_* settings.
-	ErrDisabled = errors.New("共享文件夹没有配置（AGENT_TEAMS_FS_*）")
+	ErrDisabled = msg.Err("共享文件夹没有配置（AGENT_TEAMS_FS_*）")
 	// ErrNotFound: the user has no volume.
-	ErrNotFound = errors.New("还没有开启共享文件夹")
+	ErrNotFound = msg.Err("还没有开启共享文件夹")
 )
 
 // Asset is one platform's mount client download (fs.mount client.assets).

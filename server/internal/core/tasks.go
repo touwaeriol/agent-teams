@@ -11,11 +11,12 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
 // ErrTaskDone refuses moving a done task to another status: done is final.
-var ErrTaskDone = errors.New("任务已完成，done 是终态，不能再改状态")
+var ErrTaskDone = msg.Err("任务已完成，done 是终态，不能再改状态")
 
 func tasks(ctx context.Context, q DB) *gorm.DB { return q.Gorm(ctx).Model(&Task{}) }
 

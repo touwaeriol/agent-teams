@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Remote servers (讨论串 #38, remote-servers.md, data-model.md §2.14): the user's servers
@@ -25,10 +25,10 @@ import (
 var (
 	// ErrCredentialRequired: host, port, username or auth kind changed without a new credential
 	// (the old one is sealed for the old values and would no longer open).
-	ErrCredentialRequired = errors.New("改了主机、端口、用户名或认证方式，必须重新填写凭证")
+	ErrCredentialRequired = msg.Err("改了主机、端口、用户名或认证方式，必须重新填写凭证")
 	// ErrRoleNotGrantable: the coordinator, the lead, read-only roles and unknown roles cannot be
 	// granted a server.
-	ErrRoleNotGrantable = errors.New("这个岗位不能使用远程服务器")
+	ErrRoleNotGrantable = msg.Err("这个岗位不能使用远程服务器")
 	// ErrNotGranted: the session may not use that server (not in the project, role not granted,
 	// session closed, coordinator / lead / read-only).
 	ErrNotGranted = errors.New("not granted")
@@ -540,11 +540,11 @@ func (s *Store) GrantableRoles(ctx context.Context, userID, projectID string, ro
 		r, ok := byRole[role]
 		switch {
 		case !ok:
-			return fmt.Errorf("%w：没有岗位 %q", ErrRoleNotGrantable, role)
+			return msg.Wrap(ErrRoleNotGrantable, "这个岗位不能使用远程服务器：没有岗位 “{role}”", "role", role)
 		case r.Reason == "coordinator" || r.Reason == "lead":
-			return fmt.Errorf("%w：%q 是统筹或组长", ErrRoleNotGrantable, role)
+			return msg.Wrap(ErrRoleNotGrantable, "这个岗位不能使用远程服务器：“{role}” 是统筹或组长", "role", role)
 		case r.Reason != "":
-			return fmt.Errorf("%w：%q 是只读岗位", ErrRoleNotGrantable, role)
+			return msg.Wrap(ErrRoleNotGrantable, "这个岗位不能使用远程服务器：“{role}” 是只读岗位", "role", role)
 		}
 	}
 	return nil

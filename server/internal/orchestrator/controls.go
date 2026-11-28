@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"slices"
 	"time"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -29,25 +29,25 @@ const FeatureSessionControls = "session_controls"
 const controlsPendingFor = 2 * time.Minute
 
 // errNoAnswer is the session's controls error once a switch got no session.mode_set in time.
-const errNoAnswer = "节点没有回应，切换未生效"
+var errNoAnswer = msg.K("节点没有回应，切换未生效")
 
 // modeLabels are the menu labels of the set_mode values.
 var modeLabels = map[string]string{
-	"auto":              "自动",
-	"default":           "手动",
-	"acceptEdits":       "接受编辑",
-	"plan":              "计划",
-	"bypassPermissions": "跳过权限确认",
+	"auto":              msg.K("自动"),
+	"default":           msg.K("手动"),
+	"acceptEdits":       msg.K("接受编辑"),
+	"plan":              msg.K("计划"),
+	"bypassPermissions": msg.K("跳过权限确认"),
 }
 
 // modeHints say what each mode does, by runtime where it differs.
 var modeHints = map[string]string{
-	"auto":              "模型自动判断哪些操作可以直接做，有风险的才拦下",
-	"default":           "需要权限的操作逐条请你确认，不会超时",
-	"acceptEdits":       "文件编辑直接通过，其他需要权限的操作请你确认",
-	"plan":              "只读代码、给出计划，不改文件",
-	"bypassPermissions": "所有操作直接执行，不再确认",
-	"codex:auto":        "Codex 的审核子代理判断哪些请求可以放行",
+	"auto":              msg.K("模型自动判断哪些操作可以直接做，有风险的才拦下"),
+	"default":           msg.K("需要权限的操作逐条请你确认，不会超时"),
+	"acceptEdits":       msg.K("文件编辑直接通过，其他需要权限的操作请你确认"),
+	"plan":              msg.K("只读代码、给出计划，不改文件"),
+	"bypassPermissions": msg.K("所有操作直接执行，不再确认"),
+	"codex:auto":        msg.K("Codex 的审核子代理判断哪些请求可以放行"),
 }
 
 // ModeOption is one entry of the permission menu.
@@ -102,15 +102,21 @@ var legacyModes = []string{"default", "acceptEdits", "bypassPermissions"}
 
 // Errors of SetSessionControls.
 var (
-	ErrNotSession   = errors.New("只有普通会话可以切换权限模式、模型和思考强度")
+	ErrNotSession   = msg.Err("只有普通会话可以切换权限模式、模型和思考强度")
 	ErrBadControl   = errors.New("invalid session control")
-	ErrControlsBusy = errors.New("上一次切换还没有回音，请稍后再试")
+	ErrControlsBusy = msg.Err("上一次切换还没有回音，请稍后再试")
 )
 
 // ControlError is a refused value: the field and why.
-type ControlError struct{ Field, Message string }
+type ControlError struct {
+	Field string
+	Text  msg.Text
+}
 
-func (e *ControlError) Error() string { return e.Message }
+func (e *ControlError) Error() string { return e.Text.String() }
+
+// Msg is the translatable message (web i18n).
+func (e *ControlError) Msg() msg.Text { return e.Text }
 func (e *ControlError) Unwrap() error { return ErrBadControl }
 
 // soloMode is the permission mode (a set_mode value) a session's employee opens in: the user's
@@ -406,7 +412,7 @@ func checkChange(cur SessionControls, in ControlsChange) (ControlsPending, error
 	model := cur.Model
 	if in.Model != nil && *in.Model != "" && *in.Model != cur.Model {
 		if len(cur.Models) > 0 && !slices.ContainsFunc(cur.Models, func(m ModelChoice) bool { return m.ID == *in.Model }) {
-			return ch, &ControlError{"model", fmt.Sprintf("这个会话不能切换到模型 %s", *in.Model)}
+			return ch, &ControlError{"model", msg.T("这个会话不能切换到模型 {model}", "model", *in.Model)}
 		}
 		ch.Model, model = *in.Model, *in.Model
 	}
@@ -420,24 +426,24 @@ func checkChange(cur SessionControls, in ControlsChange) (ControlsPending, error
 	onMenu := func(id string) bool { return slices.ContainsFunc(modes, func(m ModeOption) bool { return m.ID == id }) }
 	if in.PermissionMode != nil && *in.PermissionMode != "" && *in.PermissionMode != cur.PermissionMode {
 		if !onMenu(*in.PermissionMode) {
-			return ch, &ControlError{"permission_mode", fmt.Sprintf("这个会话不能用 %s 模式", *in.PermissionMode)}
+			return ch, &ControlError{"permission_mode", msg.T("这个会话不能用 {mode} 模式", "mode", *in.PermissionMode)}
 		}
 		ch.PermissionMode = *in.PermissionMode
 	}
 	// (On an outdated daemon the menu is the legacy one, which may not hold the mode the session
 	// opened in, e.g. a Codex role's bypass: a model switch alone keeps that mode.)
 	if ch.Model != "" && ch.PermissionMode == "" && cur.PermissionMode != "" && !cur.NodeOutdated && !onMenu(cur.PermissionMode) {
-		return ch, &ControlError{"model", fmt.Sprintf("模型 %s 不支持当前的%s模式，请先换一个权限模式", model, modeLabels[cur.PermissionMode])}
+		return ch, &ControlError{"model", msg.T("模型 {model} 不支持当前的{mode}模式，请先换一个权限模式", "model", model, "mode", msg.T(modeLabels[cur.PermissionMode]))}
 	}
 	if in.Effort != nil && *in.Effort != "" && (*in.Effort != cur.Effort || ch.Model != "") {
 		if cur.NodeOutdated {
-			return ch, &ControlError{"effort", "会话所在节点的守护进程太旧，不能切换思考强度，请先升级节点"}
+			return ch, &ControlError{"effort", msg.T("会话所在节点的守护进程太旧，不能切换思考强度，请先升级节点")}
 		}
 		if !runtimes.Of(cur.Runtime).Efforts {
-			return ch, &ControlError{"effort", "这个运行时的思考强度写在模型里，请切换模型"}
+			return ch, &ControlError{"effort", msg.T("这个运行时的思考强度写在模型里，请切换模型")}
 		}
 		if efforts := effortsOf(cur.Models, model); len(cur.Models) > 0 && !slices.Contains(efforts, *in.Effort) {
-			return ch, &ControlError{"effort", fmt.Sprintf("模型 %s 没有 %s 这一档思考强度", model, *in.Effort)}
+			return ch, &ControlError{"effort", msg.T("模型 {model} 没有 {effort} 这一档思考强度", "model", model, "effort", *in.Effort)}
 		}
 		ch.Effort = *in.Effort
 	}

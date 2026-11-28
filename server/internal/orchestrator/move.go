@@ -9,6 +9,7 @@ import (
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -206,7 +207,7 @@ func (o *Orchestrator) startMove(ctx context.Context, tx *core.Tx, env sessionEn
 		return err
 	}
 	o.log.Info("moving session after usage limit", "employee", e.Name, "session_id", s.ID, "to", target.Name, "move_id", id)
-	return tx.EmitActivity(ctx, e.ProjectID, e.WorkThreadID(), e.Name, "额度用完，正在把会话迁移到节点 "+target.Name)
+	return tx.EmitActivity(ctx, e.ProjectID, e.WorkThreadID(), e.Name, msg.T("额度用完，正在把会话迁移到节点 {node}", "node", target.Name))
 }
 
 // movedFirst is the moved session's first message: the note, then the messages the old session

@@ -13,7 +13,7 @@ import { RouterLink, useRoute } from "vue-router";
 import { dropPending, retryMessage } from "@/api/pending";
 import type { ThreadView } from "@/api/views";
 import Markdown from "@/components/Markdown.vue";
-import type { ChatBlock } from "@/lib/chat";
+import { messageText, type ChatBlock } from "@/lib/chat";
 import { backLink, forwardLine, messageAnchor } from "@/lib/forward";
 import { clock, cn } from "@/lib/utils";
 import ChatCard from "./chatcards/ChatCard.vue";
@@ -110,10 +110,10 @@ const remove = () => local.value && dropPending(local.value.key);
     </div>
   </div>
   <p v-else-if="block.kind === 'line' && forwardedTo" class="text-center text-xs text-muted-foreground">
-    <button type="button" class="hover:text-foreground hover:underline" @click="emit('openThread', forwardedTo.no)">{{ block.message.content }}</button>
+    <button type="button" class="hover:text-foreground hover:underline" @click="emit('openThread', forwardedTo.no)">{{ messageText(block.message) }}</button>
   </p>
   <ScheduleNoteLine v-else-if="block.kind === 'line' && block.message.meta?.schedule_note" :pid="pid" :message="block.message" />
-  <p v-else-if="block.kind === 'line'" :class="cn('text-center text-xs', block.message.role === 'error' ? 'text-destructive' : 'text-muted-foreground')">{{ block.message.content }}</p>
+  <p v-else-if="block.kind === 'line'" :class="cn('text-center text-xs', block.message.role === 'error' ? 'text-destructive' : 'text-muted-foreground')">{{ messageText(block.message) }}</p>
   <article v-else class="flex flex-col gap-2.5">
     <span class="flex items-center gap-1.5 text-xs text-muted-foreground">
       <Dot :color="speakerColor" :size="8" />

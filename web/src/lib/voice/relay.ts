@@ -8,7 +8,7 @@
 // opening, capture starts as soon as the microphone is there, and frames recorded before the
 // server's ready (OpenAI accepted the session) are kept in order (at most MAX_BUFFER_BYTES, the
 // oldest dropped beyond) and sent first once it comes. Commits wait for ready and their audio.
-import { $t } from "@/i18n";
+import { $t, serverText, type ServerText } from "@/i18n";
 import { csrfToken } from "@/api/client";
 import { CONNECT_TIMEOUT, ConnectError, type Connect, type RealtimeEvent, type Transport, type TransportHandlers, type VoiceSessionInfo } from "./openai";
 import { OUT_RATE, startCapture, type Capture } from "./pcm";
@@ -205,7 +205,7 @@ class RelayConnection {
     }
     if (m.type === "ready") return this.ready?.(m);
     if (m.type === "error" && m.fatal) {
-      this.fatal = m.error?.message || $t("语音服务出错");
+      this.fatal = serverText((m.error as { text?: ServerText } | undefined)?.text, m.error?.message ?? "") || $t("语音服务出错");
       return this.failed?.(new ConnectError(0, this.fatal));
     }
     if (this.live) this.h.onEvent(m);

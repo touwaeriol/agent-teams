@@ -8,6 +8,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/timers"
 )
 
@@ -68,7 +69,7 @@ func (a *API) registerSchedules(api huma.API) {
 // scheduleErr shows a validation error on its field.
 func scheduleErr(err error) error {
 	if bad, ok := timers.IsInvalid(err); ok {
-		return httpapi.Invalid(bad.Field, bad.Message)
+		return httpapi.InvalidMsg(bad.Field, bad.Text)
 	}
 	return fail(err, "没有这个定时任务")
 }
@@ -93,7 +94,7 @@ func (a *API) createSchedule(ctx context.Context, in *createScheduleInput) (*sch
 		if in.Body.ThreadNo != nil {
 			t, err := core.ThreadByNo(ctx, tx, p.ID, *in.Body.ThreadNo)
 			if err != nil {
-				return timers.ErrInvalid{Field: "thread_no", Message: "没有这个讨论串"}
+				return timers.ErrInvalid{Field: "thread_no", Text: msg.T("没有这个讨论串")}
 			}
 			o.Target, o.ThreadID = timers.TargetLead, &t.ID
 		}

@@ -17,6 +17,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/blobstore"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/userfs"
 )
 
@@ -102,9 +103,9 @@ func (a *API) registerProjectFiles(api huma.API) {
 func filesFail(err error) error {
 	switch {
 	case errors.Is(err, userfs.ErrBadPath):
-		return httpapi.Invalid("path", err.Error())
+		return httpapi.InvalidMsg("path", msg.Of(err))
 	case errors.Is(err, userfs.ErrNoFile):
-		return httpapi.Fail(http.StatusNotFound, "not_found", err.Error())
+		return httpapi.FailErr(http.StatusNotFound, "not_found", err)
 	case userfs.Unavailable(err):
 		return httpapi.Fail(http.StatusConflict, "folder_unavailable", userfs.UnavailableMessage)
 	}
@@ -214,10 +215,10 @@ func uploadTargets(form *multipart.Form) ([]string, []*multipart.FileHeader, err
 		}
 		p, err := userfs.Join(dir, name)
 		if err != nil || p == "" {
-			return nil, nil, httpapi.Invalid("path", fmt.Sprintf("路径不合法：%s", name))
+			return nil, nil, httpapi.Invalidf("path", "路径不合法：{path}", "path", name)
 		}
 		if seen[p] {
-			return nil, nil, httpapi.Invalid("path", fmt.Sprintf("同一次上传里有两个 %s", p))
+			return nil, nil, httpapi.Invalidf("path", "同一次上传里有两个 {path}", "path", p)
 		}
 		if managed(p) {
 			return nil, nil, errManaged
@@ -258,12 +259,16 @@ func partialUpload(err error, rel string, written []string) error {
 	if len(written) == 0 {
 		return err
 	}
-	status, why := http.StatusInternalServerError, "写入失败"
+	status, why := http.StatusInternalServerError, msg.T("写入失败")
 	var ae *httpapi.APIError
 	if errors.As(err, &ae) {
-		status, why = ae.Status, ae.Detail
+		status, why = ae.Status, msg.T(ae.Detail)
+		if ae.Message != nil {
+			why = *ae.Message
+		}
 	}
-	return httpapi.Fail(status, "upload_partial", fmt.Sprintf("%s 没有上传（%s）；这次上传里已经写入的文件：%s", rel, why, strings.Join(written, "、")))
+	return httpapi.Failf(status, "upload_partial", "{file} 没有上传（{why}）；这次上传里已经写入的文件：{written}", "file", rel, "why", why,
+		"written", strings.Join(written, "、"))
 }
 
 func putPart(ctx context.Context, f userfs.Files, name string, h *multipart.FileHeader) error {

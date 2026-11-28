@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -36,11 +37,24 @@ func RequireAdmin(ctx context.Context) (store.User, error) {
 	return p.User, nil
 }
 
-// Fail builds an API error {"detail", "code"} with the given status.
+// Fail builds an API error {"detail", "code", "message"} with the given status; detail is also
+// the message key (web i18n).
 func Fail(status int, code, detail string) error { return fail(status, code, detail) }
+
+// Failf is Fail with placeholders: Failf(409, "bad_state", "讨论串现在是 {status}", "status", s).
+func Failf(status int, code, key string, kv ...any) error { return failf(status, code, key, kv...) }
+
+// FailErr reports an engine error, keeping its translatable message when it has one (msg.Of).
+func FailErr(status int, code string, err error) error { return failErr(status, code, err) }
 
 // StoreError maps store.ErrNotFound/ErrConflict to 404/409 with the given 404 message.
 func StoreError(err error, notFound string) error { return storeErr(err, notFound) }
 
 // Invalid is a 422 validation error on one field.
-func Invalid(field, message string) error { return invalid([]FieldError{{field, message}}, message) }
+func Invalid(field, message string) error { return invalidField(field, msg.T(message)) }
+
+// Invalidf is Invalid with placeholders.
+func Invalidf(field, key string, kv ...any) error { return invalidField(field, msg.T(key, kv...)) }
+
+// InvalidMsg is a 422 on one field with a message from a lower layer (msg.Of(err), msg.T).
+func InvalidMsg(field string, m msg.Text) error { return invalidField(field, m) }

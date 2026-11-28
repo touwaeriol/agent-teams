@@ -14,12 +14,14 @@ import (
 	"errors"
 	"io"
 	"time"
+
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // ErrNotConfigured is returned by every method of a nil or unconfigured store: no
 // AGENT_TEAMS_S3_* settings. New uploads then fail with 503; bytes still in the database
 // (rows without a storage key) stay readable.
-var ErrNotConfigured = errors.New("文件存储未配置")
+var ErrNotConfigured = msg.Err("文件存储未配置")
 
 // ErrNotFound is a missing object (or multipart upload).
 var ErrNotFound = errors.New("object not found")

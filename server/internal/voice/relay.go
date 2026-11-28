@@ -31,7 +31,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -39,6 +38,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Relay limits.
@@ -156,15 +156,15 @@ type RelayResult struct {
 
 // Fatal is a problem the browser is told about before the relay closes.
 type Fatal struct {
-	Code    string
-	Message string
+	Code string
+	Text msg.Text
 }
 
-func (f *Fatal) Error() string { return f.Code + ": " + f.Message }
+func (f *Fatal) Error() string { return f.Code + ": " + f.Text.String() }
 
 // SendFatal tells the browser why the stream ends and closes it.
-func SendFatal(ctx context.Context, browser *websocket.Conn, code, message string) {
-	raw, _ := json.Marshal(map[string]any{"type": "error", "fatal": true, "error": map[string]string{"code": code, "message": message}})
+func SendFatal(ctx context.Context, browser *websocket.Conn, code string, m msg.Text) {
+	raw, _ := json.Marshal(map[string]any{"type": "error", "fatal": true, "error": map[string]any{"code": code, "message": m.String(), "text": m}})
 	wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	_ = browser.Write(wctx, websocket.MessageText, raw)
@@ -182,9 +182,9 @@ func Relay(ctx context.Context, browser, upstream *websocket.Conn, o RelayOption
 	if err := r.handshake(ctx); err != nil {
 		var f *Fatal
 		if !errors.As(err, &f) {
-			f = &Fatal{Code: "voice_unreachable", Message: "语音服务没有响应"}
+			f = &Fatal{Code: "voice_unreachable", Text: msg.T("语音服务没有响应")}
 		}
-		SendFatal(ctx, browser, f.Code, "连不上语音服务："+f.Message)
+		SendFatal(ctx, browser, f.Code, msg.T("连不上语音服务：{reason}", "reason", f.Text))
 		r.res.Reason = "handshake: " + f.Code
 		return r.result()
 	}
@@ -220,15 +220,15 @@ func (r *relay) handshake(ctx context.Context) error {
 	sent := time.Now()
 	defer func() { r.res.Handshake = time.Since(sent) }()
 	if err := writeJSON(hctx, r.upstream, SessionUpdate(r.o.Request)); err != nil {
-		return &Fatal{Code: "voice_unreachable", Message: "发不出会话设置"}
+		return &Fatal{Code: "voice_unreachable", Text: msg.T("发不出会话设置")}
 	}
 	for {
 		_, raw, err := r.upstream.Read(hctx)
 		if err != nil {
 			if hctx.Err() != nil {
-				return &Fatal{Code: "voice_timeout", Message: fmt.Sprintf("语音服务 %d 秒内没有接受会话", int(r.o.Handshake.Seconds()))}
+				return &Fatal{Code: "voice_timeout", Text: msg.T("语音服务 {n} 秒内没有接受会话", "n", int(r.o.Handshake.Seconds()))}
 			}
-			return &Fatal{Code: "voice_unreachable", Message: "语音服务断开了连接"}
+			return &Fatal{Code: "voice_unreachable", Text: msg.T("语音服务断开了连接")}
 		}
 		var ev upstreamEvent
 		if json.Unmarshal(raw, &ev) != nil {
@@ -244,7 +244,7 @@ func (r *relay) handshake(ctx context.Context) error {
 					"client_commits": ClientCommits(r.o.Request.Model), "max_seconds": int(r.o.MaxDuration / time.Second)})
 			}
 		case "error":
-			return &Fatal{Code: "voice_upstream", Message: redact(ev.Error.Message, r.o.APIKey)}
+			return &Fatal{Code: "voice_upstream", Text: msg.T(redact(ev.Error.Message, r.o.APIKey))}
 		}
 	}
 }
@@ -291,15 +291,15 @@ func (r *relay) finish(reason string) {
 	bg := context.Background()
 	switch reason {
 	case "max_duration":
-		SendFatal(bg, r.browser, "voice_max_duration", "单次录音最长 5 分钟")
+		SendFatal(bg, r.browser, "voice_max_duration", msg.T("单次录音最长 5 分钟"))
 	case "idle":
-		SendFatal(bg, r.browser, "voice_idle", "太久没有收到声音，已停止")
+		SendFatal(bg, r.browser, "voice_idle", msg.T("太久没有收到声音，已停止"))
 	case "too_fast":
-		SendFatal(bg, r.browser, "voice_too_fast", "音频发送太快")
+		SendFatal(bg, r.browser, "voice_too_fast", msg.T("音频发送太快"))
 	case "bad_frame":
-		SendFatal(bg, r.browser, "voice_bad_frame", "音频格式不对")
+		SendFatal(bg, r.browser, "voice_bad_frame", msg.T("音频格式不对"))
 	case "upstream_closed", "upstream_error":
-		SendFatal(bg, r.browser, "voice_upstream_closed", "和语音服务的连接断开了")
+		SendFatal(bg, r.browser, "voice_upstream_closed", msg.T("和语音服务的连接断开了"))
 	default:
 		_ = r.browser.Close(websocket.StatusNormalClosure, "")
 	}

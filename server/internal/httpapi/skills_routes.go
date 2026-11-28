@@ -81,7 +81,7 @@ func uploadedFiles(zipB64 string, files []skills.File) ([]skills.File, error) {
 
 func skillError(err error) error {
 	if skills.IsProblem(err) {
-		return fail(http.StatusUnprocessableEntity, "validation", err.Error())
+		return failErr(http.StatusUnprocessableEntity, "validation", err)
 	}
 	return err
 }

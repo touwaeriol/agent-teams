@@ -209,7 +209,10 @@ func nonNil(list []store.CustomCommand) []store.CustomCommand {
 func rolesInvalid(problems []roles.Problem) error {
 	fields := make([]FieldError, len(problems))
 	for i, p := range problems {
-		fields[i] = FieldError{Path: p.Path, Message: p.Message}
+		fields[i] = FieldError{Path: p.Path, Message: p.Message, Text: p.Text}
+	}
+	if t := problems[0].Text; t != nil {
+		return failMsg(http.StatusUnprocessableEntity, "validation", *t).(*APIError).withFields(fields)
 	}
 	return invalid(fields, problems[0].Message)
 }
@@ -280,7 +283,7 @@ func (s *Server) saveYAML(ctx context.Context, userID, text string) ([]string, e
 	}
 	parsed, err := roles.FromYAML(text, byName)
 	if err != nil {
-		return nil, fail(http.StatusUnprocessableEntity, "validation", err.Error())
+		return nil, failErr(http.StatusUnprocessableEntity, "validation", err)
 	}
 	current, err := s.store.Roles(ctx, userID)
 	if err != nil {

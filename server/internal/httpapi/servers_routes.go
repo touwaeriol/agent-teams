@@ -12,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/sshdial"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -115,14 +116,15 @@ type updateServerInput struct {
 
 // ServerTestResult is the answer of POST /api/servers/{id}/test.
 type ServerTestResult struct {
-	OK             bool   `json:"ok" doc:"The host key matched (or was pinned now) and the credential logged in"`
-	Error          string `json:"error,omitempty" enum:"host_key_mismatch,host_key_invalid,auth_failed,address_blocked,resolve_failed,connect_failed,timeout,handshake_failed,credential_unreadable"`
-	Message        string `json:"message,omitempty"`
-	HostKeyFP      string `json:"host_key_fp,omitempty" doc:"Fingerprint the target showed"`
-	HostKeyType    string `json:"host_key_type,omitempty"`
-	HostKeyPinned  bool   `json:"host_key_pinned" doc:"This test pinned the host key (first test)"`
-	ExpectedHostFP string `json:"expected_host_key_fp,omitempty" doc:"host_key_mismatch: the pinned fingerprint"`
-	LatencyMS      int64  `json:"latency_ms"`
+	OK             bool      `json:"ok" doc:"The host key matched (or was pinned now) and the credential logged in"`
+	Error          string    `json:"error,omitempty" enum:"host_key_mismatch,host_key_invalid,auth_failed,address_blocked,resolve_failed,connect_failed,timeout,handshake_failed,credential_unreadable"`
+	Message        string    `json:"message,omitempty"`
+	Text           *msg.Text `json:"text,omitempty" doc:"Translatable form of message"`
+	HostKeyFP      string    `json:"host_key_fp,omitempty" doc:"Fingerprint the target showed"`
+	HostKeyType    string    `json:"host_key_type,omitempty"`
+	HostKeyPinned  bool      `json:"host_key_pinned" doc:"This test pinned the host key (first test)"`
+	ExpectedHostFP string    `json:"expected_host_key_fp,omitempty" doc:"host_key_mismatch: the pinned fingerprint"`
+	LatencyMS      int64     `json:"latency_ms"`
 }
 
 type serverTestOutput struct{ Body ServerTestResult }
@@ -154,7 +156,7 @@ func (s *Server) registerServers(api huma.API) {
 
 func (s *Server) requireVault() error {
 	if !s.vault.Ready() {
-		return fail(http.StatusServiceUnavailable, "no_secret_key", credvault.ErrNoKey.Error())
+		return failErr(http.StatusServiceUnavailable, "no_secret_key", credvault.ErrNoKey)
 	}
 	return nil
 }
@@ -182,9 +184,9 @@ func (s *Server) checkTarget(ctx context.Context, host string) error {
 	case errors.Is(err, sshdial.ErrInvalidHost):
 		return invalid([]FieldError{{Path: "body.host", Message: "主机名或 IP 地址不合法"}}, "主机名或 IP 地址不合法")
 	case errors.Is(err, sshdial.ErrResolve):
-		return fail(http.StatusUnprocessableEntity, "resolve_failed", "主机名解析不到地址："+host)
+		return failf(http.StatusUnprocessableEntity, "resolve_failed", "主机名解析不到地址：{host}", "host", host)
 	case errors.Is(err, sshdial.ErrBlockedAddress):
-		return fail(http.StatusUnprocessableEntity, "address_blocked", err.Error())
+		return failErr(http.StatusUnprocessableEntity, "address_blocked", err)
 	}
 	return err
 }
@@ -208,8 +210,7 @@ func checkServerFields(name, username *string, port *int) error {
 
 func credErr(err error) error {
 	if errors.Is(err, credvault.ErrInvalidCredential) {
-		msg := strings.TrimPrefix(err.Error(), credvault.ErrInvalidCredential.Error()+"：")
-		return invalid([]FieldError{{Path: "body.auth", Message: msg}}, msg)
+		return invalidField("body.auth", msg.Of(err))
 	}
 	return err
 }
@@ -219,7 +220,7 @@ func serverStoreErr(err error) error {
 	case errors.Is(err, store.ErrConflict):
 		return fail(http.StatusConflict, "server_name_taken", "已经有同名的服务器了")
 	case errors.Is(err, store.ErrCredentialRequired):
-		return fail(http.StatusUnprocessableEntity, "credential_required", store.ErrCredentialRequired.Error())
+		return failErr(http.StatusUnprocessableEntity, "credential_required", store.ErrCredentialRequired)
 	}
 	return storeErr(err, "没有这台服务器")
 }
@@ -445,14 +446,16 @@ func (s *Server) testServer(ctx context.Context, in *serverIDInput) (*serverTest
 }
 
 func (s *Server) runServerTest(ctx context.Context, userID string, sec store.RemoteServerSecret) ServerTestResult {
-	failed := func(code, msg string) ServerTestResult { return ServerTestResult{Error: code, Message: msg} }
+	failed := func(code string, m msg.Text) ServerTestResult {
+		return ServerTestResult{Error: code, Message: m.String(), Text: &m}
+	}
 	cred, err := s.vault.OpenCredential(credvault.ServerAAD(userID, sec.ID, sec.AuthKind, sec.Host, sec.Port, sec.Username), sec.Sealed)
 	if err != nil {
-		return failed("credential_unreadable", "保存的凭证解不开（主密钥变过，或数据被改动过），请重新填写凭证")
+		return failed("credential_unreadable", msg.T("保存的凭证解不开（主密钥变过，或数据被改动过），请重新填写凭证"))
 	}
 	if sec.HostKey != "" {
 		if ok, _ := s.vault.VerifyMAC(credvault.HostKeyMACData(sec.ID, sec.Host, sec.Port, sec.HostKey), sec.HostKeyMAC); !ok {
-			return failed("host_key_invalid", "已固定的主机密钥校验不通过（可能被直接改过数据库），请重置主机密钥后重新测试")
+			return failed("host_key_invalid", msg.T("已固定的主机密钥校验不通过（可能被直接改过数据库），请重置主机密钥后重新测试"))
 		}
 	}
 	start := time.Now()
@@ -478,28 +481,36 @@ func (s *Server) runServerTest(ctx context.Context, userID string, sec store.Rem
 	if dial.Client != nil {
 		_ = dial.Client.Close()
 	}
-	switch {
-	case err == nil:
+	if err == nil {
 		res.OK = true
-	case errors.Is(err, sshdial.ErrHostKeyMismatch):
-		res.Error, res.ExpectedHostFP = "host_key_mismatch", sec.HostKeyFP
-		res.Message = "目标服务器的主机密钥和已固定的不一样，没有发送凭证。请核实服务器是否重装或被冒充；确认无误后重置主机密钥再测试"
-	case errors.Is(err, sshdial.ErrAuth):
-		res.Error, res.Message = "auth_failed", "认证失败：密码或私钥不对，或用户不存在"
-	case errors.Is(err, sshdial.ErrBlockedAddress):
-		res.Error, res.Message = "address_blocked", err.Error()
-	case errors.Is(err, sshdial.ErrResolve), errors.Is(err, sshdial.ErrInvalidHost):
-		res.Error, res.Message = "resolve_failed", "主机名解析不到地址："+sec.Host
-	case errors.Is(err, sshdial.ErrTimeout):
-		res.Error, res.Message = "timeout", "连接超时"
-	case errors.Is(err, sshdial.ErrConnect):
-		res.Error, res.Message = "connect_failed", "连不上 "+sec.Host+"，请检查主机、端口和防火墙"
-	case errors.Is(err, credvault.ErrInvalidCredential):
-		res.Error, res.Message = "credential_unreadable", err.Error()
-	default:
-		res.Error, res.Message = "handshake_failed", "SSH 握手失败："+err.Error()
+		return res
+	}
+	code, m := serverTestError(err, sec.Host)
+	res.Error, res.Message, res.Text = code, m.String(), &m
+	if code == "host_key_mismatch" {
+		res.ExpectedHostFP = sec.HostKeyFP
 	}
 	return res
+}
+
+func serverTestError(err error, host string) (string, msg.Text) {
+	switch {
+	case errors.Is(err, sshdial.ErrHostKeyMismatch):
+		return "host_key_mismatch", msg.T("目标服务器的主机密钥和已固定的不一样，没有发送凭证。请核实服务器是否重装或被冒充；确认无误后重置主机密钥再测试")
+	case errors.Is(err, sshdial.ErrAuth):
+		return "auth_failed", msg.T("认证失败：密码或私钥不对，或用户不存在")
+	case errors.Is(err, sshdial.ErrBlockedAddress):
+		return "address_blocked", msg.Of(err)
+	case errors.Is(err, sshdial.ErrResolve), errors.Is(err, sshdial.ErrInvalidHost):
+		return "resolve_failed", msg.T("主机名解析不到地址：{host}", "host", host)
+	case errors.Is(err, sshdial.ErrTimeout):
+		return "timeout", msg.T("连接超时")
+	case errors.Is(err, sshdial.ErrConnect):
+		return "connect_failed", msg.T("连不上 {host}，请检查主机、端口和防火墙", "host", host)
+	case errors.Is(err, credvault.ErrInvalidCredential):
+		return "credential_unreadable", msg.Of(err)
+	}
+	return "handshake_failed", msg.T("SSH 握手失败：{reason}", "reason", err.Error())
 }
 
 // ---- project servers ---------------------------------------------------------------------
@@ -607,7 +618,7 @@ func (s *Server) setProjectServers(ctx context.Context, in *setProjectServersInp
 	revoked, err := s.store.SetProjectServers(ctx, p.User.ID, in.PID, list)
 	switch {
 	case errors.Is(err, store.ErrRoleNotGrantable):
-		return nil, fail(http.StatusUnprocessableEntity, "role_not_grantable", err.Error())
+		return nil, failErr(http.StatusUnprocessableEntity, "role_not_grantable", err)
 	case errors.Is(err, store.ErrNotFound):
 		return nil, fail(http.StatusNotFound, "not_found", "没有这台服务器")
 	case err != nil:

@@ -177,7 +177,7 @@ func checkName(ctx context.Context, db store.DB, owner Owner, name string) error
 	var n int64
 	err := db.Gorm(ctx).Table("at_plugins").Where("user_id IS NULL AND name = ?", name).Count(&n).Error
 	if err == nil && n > 0 {
-		return problem("%s 是内置插件的名字，请在 plugin.json 里换一个 name", name)
+		return problem("{name} 是内置插件的名字，请在 plugin.json 里换一个 name", "name", name)
 	}
 	return err
 }

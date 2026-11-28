@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/orchestrator"
 )
 
@@ -17,8 +18,8 @@ var (
 	ErrUnknownAssignee = errors.New("没有这个岗位或成员")
 	ErrUnknownMain     = errors.New("计划里没有这个主任务（先 update_plan）")
 	ErrUnknownDep      = errors.New("依赖的任务不存在")
-	ErrDepEnded        = errors.New("依赖的任务已失败或已取消，等它的任务永远不会开始（先重试它，或改依赖别的任务）")
-	ErrTaskState       = errors.New("任务当前状态不允许这个操作")
+	ErrDepEnded        = msg.Err("依赖的任务已失败或已取消，等它的任务永远不会开始（先重试它，或改依赖别的任务）")
+	ErrTaskState       = msg.Err("任务当前状态不允许这个操作")
 	ErrRoleExcluded    = errors.New("这个讨论串不用这个岗位（开讨论串时限定了岗位）")
 )
 

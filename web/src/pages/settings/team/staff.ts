@@ -1,5 +1,6 @@
 // 项目编制 (shared-members.md §9): a project's members — the headcount — with the thread and task
 // each one works on now, grouped by member role in template order. Pure helpers of StaffPanel.vue.
+import { statusBubble } from "@/lib/bubble";
 import { $t } from "@/i18n";
 import type { EmployeeBrief, OfficeSnapshot, RoleView, ThreadView } from "@/api/views";
 import { isStaff } from "@/lib/office";
@@ -45,7 +46,7 @@ export function staffRow(e: EmployeeBrief, threads: Pick<ThreadView, "no" | "tit
     name: e.name,
     role: e.role,
     thread: task || !thread ? thread : $t("上次在 {thread}", { thread }),
-    work: task ? [task, e.status?.bubble].filter(Boolean).join(" · ") : state,
+    work: task ? [task, statusBubble(e.status?.bubble)].filter(Boolean).join(" · ") : state,
     busy: Boolean(task),
   };
 }

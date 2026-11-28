@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/core"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // Forward limits: messages per forward, attachments they may carry in all, and how long a
@@ -23,10 +24,10 @@ const (
 
 // Forward errors (422 for the REST layer, explanations for the coordinator).
 var (
-	ErrForwardEmpty   = errors.New("请选择要转发的消息")
-	ErrForwardNotUser = errors.New("只能转发你自己在这个项目对话里发的消息")
-	ErrForwardTooMany = fmt.Errorf("一次最多转发 %d 条消息", MaxForwardMessages)
-	ErrForwardFiles   = fmt.Errorf("所选消息一共带了太多附件（最多 %d 个），请少选几条", MaxForwardAttachments)
+	ErrForwardEmpty   = msg.Err("请选择要转发的消息")
+	ErrForwardNotUser = msg.Err("只能转发你自己在这个项目对话里发的消息")
+	ErrForwardTooMany = msg.Err("一次最多转发 {n} 条消息", "n", MaxForwardMessages)
+	ErrForwardFiles   = msg.Err("所选消息一共带了太多附件（最多 {n} 个），请少选几条", "n", MaxForwardAttachments)
 )
 
 // ForwardRequest forwards the user's own project-chat messages to a thread's lead.
@@ -343,16 +344,16 @@ func titleFrom(items []forwarded) string {
 // forwardNote tells the project chat where the messages went (meta.forwarded_to).
 func (o *Orchestrator) forwardNote(ctx context.Context, tx *core.Tx, req ForwardRequest, conv, key string, res ForwardResult) error {
 	ids := res.Sources
-	text := fmt.Sprintf("已转发 %d 条消息到 #%d · %s", len(res.Messages), res.Thread.No, res.Thread.Title)
+	text := msg.T("已转发 {n} 条消息到 #{no} · {title}", "n", len(res.Messages), "no", res.Thread.No, "title", res.Thread.Title)
 	if res.Created {
-		text = fmt.Sprintf("已转发 %d 条消息，新开讨论串 #%d · %s", len(res.Messages), res.Thread.No, res.Thread.Title)
+		text = msg.T("已转发 {n} 条消息，新开讨论串 #{no} · {title}", "n", len(res.Messages), "no", res.Thread.No, "title", res.Thread.Title)
 	}
 	author := "user"
 	if req.By == "coordinator" {
 		author = "coordinator"
 	}
-	m, err := core.InsertMessage(ctx, tx, core.NewMessage{ConversationID: conv, Role: "system", Author: author, Kind: "note", Content: text,
-		Meta: map[string]any{"forwarded_to": map[string]any{"no": res.Thread.No, "key": key, "message_ids": ids, "count": len(ids),
+	m, err := core.InsertMessage(ctx, tx, core.NewMessage{ConversationID: conv, Role: "system", Author: author, Kind: "note", Content: text.String(),
+		Meta: map[string]any{"text": text, "forwarded_to": map[string]any{"no": res.Thread.No, "key": key, "message_ids": ids, "count": len(ids),
 			"created": res.Created, "by": req.By}}})
 	if err != nil {
 		return err

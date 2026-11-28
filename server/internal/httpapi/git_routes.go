@@ -154,7 +154,7 @@ func (s *Server) addConnection(ctx context.Context, in *newConnectionInput) (*co
 	}
 	c, err := s.store.CreateConnection(ctx, p.User.ID, name, login, sealed, nil)
 	if errors.Is(err, store.ErrConflict) {
-		return nil, fail(http.StatusConflict, "connection_exists", "已经有叫 "+name+" 的连接了")
+		return nil, failf(http.StatusConflict, "connection_exists", "已经有叫 {name} 的连接了", "name", name)
 	}
 	if err != nil {
 		return nil, err

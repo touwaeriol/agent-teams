@@ -9,12 +9,12 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 
 	protocol "github.com/touwaeriol/agent-teams/protocol"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/nodegw"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
@@ -39,17 +39,17 @@ func builtinModel(runtime string) string {
 
 // Errors the REST layer maps to status codes.
 var (
-	ErrNoNode        = errors.New("没有可用的节点：请先在“节点”页添加并启动一个节点")
-	ErrNotActive     = errors.New("讨论串不在进行中")
-	ErrNotArchived   = errors.New("讨论串没有归档")
-	ErrArchived      = errors.New("讨论串已归档，取消归档后再继续")
-	ErrTooManyImages = errors.New("一条消息最多 20 个附件")
-	ErrNoEmployee    = errors.New("没有这个员工")
-	ErrBadState      = errors.New("当前状态不允许这个操作")
+	ErrNoNode        = msg.Err("没有可用的节点：请先在“节点”页添加并启动一个节点")
+	ErrNotActive     = msg.Err("讨论串不在进行中")
+	ErrNotArchived   = msg.Err("讨论串没有归档")
+	ErrArchived      = msg.Err("讨论串已归档，取消归档后再继续")
+	ErrTooManyImages = msg.Err("一条消息最多 20 个附件")
+	ErrNoEmployee    = msg.Err("没有这个员工")
+	ErrBadState      = msg.Err("当前状态不允许这个操作")
 	ErrNotFound      = core.ErrNotFound
-	ErrRoleNotFound  = errors.New("团队里没有这个岗位")
-	ErrPRAwaiting    = errors.New("讨论串还有等待合并的 PR：请先接受（合并）或拒绝，不能直接标记为完成")
-	ErrMerging       = errors.New("合并队列里还有正在合并的条目，等它们处理完再标记为完成")
+	ErrRoleNotFound  = msg.Err("团队里没有这个岗位")
+	ErrPRAwaiting    = msg.Err("讨论串还有等待合并的 PR：请先接受（合并）或拒绝，不能直接标记为完成")
+	ErrMerging       = msg.Err("合并队列里还有正在合并的条目，等它们处理完再标记为完成")
 )
 
 // Orchestrator is the session and thread engine.

@@ -7,12 +7,12 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"golang.org/x/crypto/scrypt"
 )
 
@@ -73,29 +73,29 @@ func scryptParams(raw []string) (n, r, p int, ok bool) {
 // NormalizeEmail trims and lowercases, as v1 does.
 func NormalizeEmail(email string) string { return strings.ToLower(strings.TrimSpace(email)) }
 
-// CheckCredentials returns why the credentials are unacceptable, or "".
-func CheckCredentials(email, password string) string {
-	if reason := CheckEmail(email); reason != "" {
-		return reason
+// CheckCredentials returns why the credentials are unacceptable (a translatable msg error), or nil.
+func CheckCredentials(email, password string) error {
+	if err := CheckEmail(email); err != nil {
+		return err
 	}
 	return CheckPassword(password)
 }
 
-// CheckEmail returns why a (normalized) email address is unacceptable, or "".
-func CheckEmail(email string) string {
+// CheckEmail returns why a (normalized) email address is unacceptable, or nil.
+func CheckEmail(email string) error {
 	if !emailPattern.MatchString(email) {
-		return "请输入有效的邮箱地址"
+		return msg.Err("请输入有效的邮箱地址")
 	}
-	return ""
+	return nil
 }
 
-// CheckPassword returns why a new password is unacceptable, or "".
+// CheckPassword returns why a new password is unacceptable, or nil.
 // Python's len() counts code points, so this does too.
-func CheckPassword(password string) string {
+func CheckPassword(password string) error {
 	if utf8.RuneCountInString(password) < MinPasswordLength {
-		return fmt.Sprintf("密码至少 %d 位", MinPasswordLength)
+		return msg.Err("密码至少 {n} 位", "n", MinPasswordLength)
 	}
-	return ""
+	return nil
 }
 
 func b64(data []byte) string { return base64.RawURLEncoding.EncodeToString(data) }

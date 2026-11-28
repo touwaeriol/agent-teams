@@ -12,6 +12,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
 	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -77,7 +78,7 @@ func (s *Server) createSession(ctx context.Context, in *createSessionInput) (*se
 	b := in.Body
 	message := strings.TrimSpace(b.Message)
 	if message == "" {
-		return nil, invalid([]FieldError{{"message", "请写下要做什么"}}, "请写下要做什么")
+		return nil, invalid([]FieldError{{Path: "message", Message: "请写下要做什么"}}, "请写下要做什么")
 	}
 	// No repository: the employee works in a local folder on the node it starts on (#53).
 	start, err := s.sessionStart(ctx, p.User.ID, b)
@@ -93,9 +94,9 @@ func (s *Server) createSession(ctx context.Context, in *createSessionInput) (*se
 	row, err := s.createSessionProject(ctx, p.User.ID, start.Title, repos, start.Attachments)
 	switch {
 	case errors.Is(err, store.ErrAttachmentExpired):
-		return nil, fail(http.StatusGone, "attachment_expired", err.Error())
+		return nil, failErr(http.StatusGone, "attachment_expired", err)
 	case errors.Is(err, store.ErrAttachmentUnknown):
-		return nil, invalid([]FieldError{{"attachments", err.Error()}}, err.Error())
+		return nil, invalidField("attachments", msg.Of(err))
 	case err != nil:
 		return nil, err
 	}
@@ -122,7 +123,7 @@ func (s *Server) sessionStart(ctx context.Context, userID string, b SessionInput
 	if b.NodeID != "" {
 		n, err := s.store.NodeOf(ctx, userID, b.NodeID)
 		if err != nil {
-			return platform.SessionStart{}, invalid([]FieldError{{"node_id", "没有这个节点"}}, "没有这个节点")
+			return platform.SessionStart{}, invalid([]FieldError{{Path: "node_id", Message: "没有这个节点"}}, "没有这个节点")
 		}
 		node = &n
 	}
@@ -132,22 +133,22 @@ func (s *Server) sessionStart(ctx context.Context, userID string, b SessionInput
 	}
 	rt := strings.TrimSpace(b.Runtime)
 	if rt != "" && !slices.Contains(role.RuntimeList(), rt) {
-		msg := "这个岗位没有配置 " + runtimes.Of(rt).Title
+		m := msg.T("这个岗位没有配置 {runtime}", "runtime", runtimes.Of(rt).Title)
 		if runtimes.Of(rt).ID != rt {
-			msg = "没有这个 agent：" + rt
+			m = msg.T("没有这个 agent：{runtime}", "runtime", rt)
 		}
-		return platform.SessionStart{}, invalid([]FieldError{{"runtime", msg}}, msg)
+		return platform.SessionStart{}, invalidField("runtime", m)
 	}
 	sessRT := rt
 	if sessRT == "" {
 		sessRT = role.Runtime
 	}
 	if node != nil && (rt != "" || len(role.RuntimeList()) == 1) {
-		if msg, err := s.nodeCannotRun(ctx, *node, sessRT); err != nil || msg != "" {
+		if why, err := s.nodeCannotRun(ctx, *node, sessRT); err != nil || why != nil {
 			if err != nil {
 				return platform.SessionStart{}, err
 			}
-			return platform.SessionStart{}, invalid([]FieldError{{"node_id", msg}}, msg)
+			return platform.SessionStart{}, invalidField("node_id", *why)
 		}
 	}
 	if err := checkSessionControls(role, sessRT, b.PermissionMode, b.Effort); err != nil {
@@ -161,14 +162,18 @@ func (s *Server) sessionStart(ctx context.Context, userID string, b SessionInput
 // can): a runtime that needs an isolated node on one that is not, or a daemon that reports its CLIs
 // (at_node_runtimes) without that one installed and logged in. A daemon that never reported is
 // not judged (the session waits for it as before).
-func (s *Server) nodeCannotRun(ctx context.Context, n store.Node, runtime string) (string, error) {
+func (s *Server) nodeCannotRun(ctx context.Context, n store.Node, runtime string) (*msg.Text, error) {
 	rt := runtimes.Of(runtime)
+	why := func(key string) (*msg.Text, error) {
+		m := msg.T(key, "node", n.Name, "runtime", rt.Title)
+		return &m, nil
+	}
 	if !runtimes.RunsOn(rt.ID, n.Isolated, n.Isolation) {
-		return fmt.Sprintf("节点 %s 没有隔离运行，不能跑 %s", n.Name, rt.Title), nil
+		return why("节点 {node} 没有隔离运行，不能跑 {runtime}")
 	}
 	rows, err := s.store.NodeRuntimes(ctx, []string{n.ID})
 	if err != nil || len(rows[n.ID]) == 0 {
-		return "", err
+		return nil, err
 	}
 	for _, r := range rows[n.ID] {
 		if r.Runtime != rt.ID {
@@ -176,15 +181,15 @@ func (s *Server) nodeCannotRun(ctx context.Context, n store.Node, runtime string
 		}
 		switch {
 		case !r.Installed:
-			return fmt.Sprintf("节点 %s 上没有安装 %s", n.Name, rt.Title), nil
+			return why("节点 {node} 上没有安装 {runtime}")
 		case r.Expired:
-			return fmt.Sprintf("节点 %s 上 %s 的登录已过期", n.Name, rt.Title), nil
+			return why("节点 {node} 上 {runtime} 的登录已过期")
 		case !r.Ready(time.Now()):
-			return fmt.Sprintf("节点 %s 上 %s 没有登录", n.Name, rt.Title), nil
+			return why("节点 {node} 上 {runtime} 没有登录")
 		}
-		return "", nil
+		return nil, nil
 	}
-	return fmt.Sprintf("节点 %s 上没有检测到 %s", n.Name, rt.Title), nil
+	return why("节点 {node} 上没有检测到 {runtime}")
 }
 
 // checkSessionControls refuses a mode the session's runtime does not have, bypass on an ask role and
@@ -192,10 +197,10 @@ func (s *Server) nodeCannotRun(ctx context.Context, n store.Node, runtime string
 func checkSessionControls(role store.Role, runtime, mode, effort string) error {
 	rt := runtimes.Of(runtime)
 	if mode != "" && (!slices.Contains(rt.Modes, mode) || (mode == "bypassPermissions" && role.PermissionMode == store.PermAsk)) {
-		return invalid([]FieldError{{"permission_mode", "这个岗位的会话不能用这个权限模式"}}, "这个岗位的会话不能用这个权限模式")
+		return invalid([]FieldError{{Path: "permission_mode", Message: "这个岗位的会话不能用这个权限模式"}}, "这个岗位的会话不能用这个权限模式")
 	}
 	if strings.TrimSpace(effort) != "" && !rt.Efforts {
-		return invalid([]FieldError{{"effort", "这个运行时的思考强度写在模型里"}}, "这个运行时的思考强度写在模型里")
+		return invalid([]FieldError{{Path: "effort", Message: "这个运行时的思考强度写在模型里"}}, "这个运行时的思考强度写在模型里")
 	}
 	return nil
 }
@@ -211,11 +216,11 @@ func (s *Server) sessionRole(ctx context.Context, userID, name string) (store.Ro
 			return r, nil
 		}
 	}
-	msg := "没有这个岗位：" + name
+	m := msg.T("没有这个岗位：{role}", "role", name)
 	if name == "" {
-		msg = "团队里还没有成员岗位，先在设置里添加一个"
+		m = msg.T("团队里还没有成员岗位，先在设置里添加一个")
 	}
-	return store.Role{}, invalid([]FieldError{{"role", msg}}, msg)
+	return store.Role{}, invalidField("role", m)
 }
 
 // sessionTitleRunes bounds a title taken from the first message.

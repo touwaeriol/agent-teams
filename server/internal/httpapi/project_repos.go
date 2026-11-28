@@ -10,6 +10,7 @@ import (
 
 	"github.com/touwaeriol/agent-teams/server/internal/github"
 	"github.com/touwaeriol/agent-teams/server/internal/gitremote"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -43,8 +44,7 @@ func (s *Server) checkRepos(ctx context.Context, userID string, in []RepoRef, kn
 		}
 		key := strings.ToLower(repo.Repo)
 		if seen[key] {
-			msg := "仓库 " + repo.Repo + " 重复了"
-			return nil, invalid([]FieldError{{fmt.Sprintf("repos[%d].repo", i), msg}}, msg)
+			return nil, invalidField(fmt.Sprintf("repos[%d].repo", i), msg.T("仓库 {repo} 重复了", "repo", repo.Repo))
 		}
 		seen[key] = true
 		out = append(out, repo)
@@ -64,7 +64,7 @@ func (s *Server) checkOneRepo(ctx context.Context, userID string, r RepoRef, kno
 		return s.checkStandaloneRepo(ctx, userID, id, base)
 	}
 	if deref(r.GitConnectionID) == "" {
-		return store.ProjectRepo{}, invalid([]FieldError{{"git_connection_id", "关联仓库需要先选择一个 Git 连接"}}, "关联仓库需要先选择一个 Git 连接")
+		return store.ProjectRepo{}, invalid([]FieldError{{Path: "git_connection_id", Message: "关联仓库需要先选择一个 Git 连接"}}, "关联仓库需要先选择一个 Git 连接")
 	}
 	slug, err := github.ParseRepo(r.Repo)
 	if err != nil {
@@ -130,16 +130,16 @@ func standaloneBase(slug, want string, refs gitremote.Refs) (string, error) {
 	return base, nil
 }
 
-func emptyRepoMsg(slug string) string {
-	return "仓库 " + slug + " 是空的，还没有任何分支，讨论串没有可以开始的分支。请先推送一个分支，再添加这个仓库"
+func emptyRepoMsg(slug string) msg.Text {
+	return msg.T("仓库 {repo} 是空的，还没有任何分支，讨论串没有可以开始的分支。请先推送一个分支，再添加这个仓库", "repo", slug)
 }
 
-func missingBranchMsg(slug, branch string) string {
-	return "仓库 " + slug + " 里没有分支 " + branch + "，请填一个已经存在的分支作为起点分支"
+func missingBranchMsg(slug, branch string) msg.Text {
+	return msg.T("仓库 {repo} 里没有分支 {branch}，请填一个已经存在的分支作为起点分支", "repo", slug, "branch", branch)
 }
 
-func baseErr(msg string) error {
-	return invalid([]FieldError{{"repos.base_branch", msg}}, msg)
+func baseErr(m msg.Text) error {
+	return invalidField("repos.base_branch", m)
 }
 
 // escapeBranch escapes each segment of a branch name for a URL path (feature/x stays two segments).
@@ -186,14 +186,14 @@ func (s *Server) checkStandaloneRepo(ctx context.Context, userID, id, want strin
 	}
 	remote, err := s.GitRemote(ctx, userID, g)
 	if err != nil {
-		return store.ProjectRepo{}, fail(http.StatusConflict, "credential_unreadable", err.Error())
+		return store.ProjectRepo{}, failErr(http.StatusConflict, "credential_unreadable", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, gitTestTimeout)
 	defer cancel()
 	refs, err := s.gitRunner().LsRemote(ctx, remote)
 	if err != nil {
-		_, msg := gitTestError(err)
-		return store.ProjectRepo{}, fail(http.StatusBadGateway, "git_failed", "读取仓库 "+g.Slug+" 的分支失败："+msg)
+		_, why := gitTestError(err)
+		return store.ProjectRepo{}, failf(http.StatusBadGateway, "git_failed", "读取仓库 {repo} 的分支失败：{reason}", "repo", g.Slug, "reason", why)
 	}
 	base, err := standaloneBase(g.Slug, want, refs)
 	if err != nil {

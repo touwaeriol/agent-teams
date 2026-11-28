@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net/http"
 	"path"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/artifacts"
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/httpapi"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -84,7 +84,7 @@ func (a *API) registerLibrary(api huma.API) {
 }
 
 // librarySupported lists the files a user may add as deliverables (images are not deliverables).
-const librarySupported = "支持 html、md、pdf、txt、json、csv"
+var librarySupported = msg.T("支持 html、md、pdf、txt、json、csv")
 
 // LibraryKind is the deliverable kind of an uploaded file, from how it renders.
 func LibraryKind(contentType string) string {
@@ -127,18 +127,19 @@ func storedName(name string) string {
 func libraryFile(b UploadBody) (artifacts.ArtifactFile, error) {
 	name := storedName(uploadName(b.Name))
 	if !artifacts.ValidPath(name) {
-		return artifacts.ArtifactFile{}, httpapi.Invalid("name", "不支持的文件："+uploadName(b.Name)+"（"+librarySupported+"）")
+		return artifacts.ArtifactFile{}, httpapi.Invalidf("name", "不支持的文件：{name}（{supported}）", "name", uploadName(b.Name), "supported", librarySupported)
 	}
 	if artifacts.Render(artifacts.ContentType(name)) == "image" {
-		return artifacts.ArtifactFile{}, httpapi.Invalid("name",
-			"截图和图片（含 SVG）不是交付物："+uploadName(b.Name)+"。可以把图片直接内联进 HTML（data: 地址或内嵌 SVG）再上传，或作为附件发在讨论串消息里（"+librarySupported+"）")
+		return artifacts.ArtifactFile{}, httpapi.Invalidf("name",
+			"截图和图片（含 SVG）不是交付物：{name}。可以把图片直接内联进 HTML（data: 地址或内嵌 SVG）再上传，或作为附件发在讨论串消息里（{supported}）",
+			"name", uploadName(b.Name), "supported", librarySupported)
 	}
 	data, err := base64.StdEncoding.DecodeString(b.Data)
 	if err != nil || len(data) == 0 {
 		return artifacts.ArtifactFile{}, httpapi.Invalid("data", "文件内容不对")
 	}
 	if len(data) > artifacts.MaxBytes {
-		return artifacts.ArtifactFile{}, httpapi.Invalid("data", fmt.Sprintf("文件超过 %d MB", artifacts.MaxBytes>>20))
+		return artifacts.ArtifactFile{}, httpapi.Invalidf("data", "文件超过 {n} MB", "n", artifacts.MaxBytes>>20)
 	}
 	sum := sha256.Sum256(data)
 	return artifacts.ArtifactFile{Path: name, ContentType: artifacts.ContentType(name), Size: len(data),
@@ -173,7 +174,7 @@ func (a *API) uploadLibraryFile(ctx context.Context, in *uploadInput) (*delivera
 		return tx.EmitDeliverable(ctx, d)
 	})
 	if errors.Is(err, artifacts.ErrFolderNotReady) {
-		return nil, httpapi.Fail(http.StatusConflict, "folder_not_ready", err.Error())
+		return nil, httpapi.FailErr(http.StatusConflict, "folder_not_ready", err)
 	}
 	if err != nil {
 		return nil, err
