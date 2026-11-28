@@ -167,6 +167,13 @@ export const skills = {
   remove: (id: string) => unwrap(client.DELETE("/api/skills/{id}", { params: { path: { id } } })),
 };
 
+/** Workflows (流程图): a lead follows its project's flow as a reference. */
+export const workflows = {
+  create: (body: S["FlowDraft"]) => unwrap(client.POST("/api/workflows", { body })),
+  update: (id: string, body: S["FlowDraft"]) => unwrap(client.PUT("/api/workflows/{id}", { params: { path: { id } }, body })),
+  remove: (id: string) => unwrap(client.DELETE("/api/workflows/{id}", { params: { path: { id } } })),
+};
+
 export const plugins = {
   /** zip: base64 of a plugin zip; the same name again becomes a new version. */
   upload: (zip: string) => unwrap(client.POST("/api/plugins", { body: { zip } })),

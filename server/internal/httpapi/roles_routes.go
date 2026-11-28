@@ -65,6 +65,7 @@ func (s *Server) registerRoles(api huma.API) {
 		Summary: "Ready-made member roles (designer …) the Team page offers"}, s.rolePresets)
 	s.registerSkills(api)
 	s.registerPlugins(api)
+	s.registerWorkflows(api)
 }
 
 func (s *Server) currentLooks(ctx context.Context) office.Looks {

@@ -11,6 +11,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/core"
 	"github.com/touwaeriol/agent-teams/server/internal/ghops"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
+	"github.com/touwaeriol/agent-teams/server/internal/workflows"
 )
 
 const coordinatorGuide = `You are this project's coordinator. You cannot run commands and cannot read or write files except the memory files (see "## Memory"); you only use platform tools:
@@ -223,6 +224,15 @@ func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Emplo
 			return "", err
 		}
 		parts = append(parts, "## Team (members are shared by the project; list_team shows who is busy in which thread)\n"+roster)
+	}
+	if e.Tier == "lead" {
+		flow, err := workflows.LeadSection(ctx, q, p.UserID, p.Workflows)
+		if err != nil {
+			return "", err
+		}
+		if flow != "" {
+			parts = append(parts, flow)
+		}
 	}
 	return strings.Join(parts, "\n\n"), nil
 }

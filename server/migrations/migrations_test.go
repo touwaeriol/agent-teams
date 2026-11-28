@@ -196,7 +196,7 @@ func monthSuffix(t *testing.T, db *sql.DB) string {
 }
 
 func TestLatest(t *testing.T) {
-	if migrations.Latest() != 550 {
+	if migrations.Latest() != 560 {
 		t.Fatalf("latest %d", migrations.Latest())
 	}
 }
@@ -2286,5 +2286,50 @@ func TestUserLocaleMigration(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT locale FROM at_users WHERE id = 'u1'`).Scan(&l); err == nil {
 		t.Fatal("locale after down")
+	}
+}
+
+// TestWorkflowsMigration: 00560 adds at_workflows (names unique per user, at most one default
+// per user) and at_projects.workflows ({} for existing projects); Down drops both.
+func TestWorkflowsMigration(t *testing.T) {
+	db := open(t, testdb.URL(t))
+	ctx := context.Background()
+	p, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 550); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO at_users (id, email, password_hash) VALUES ('u1', 'a@example.com', 'x'), ('u2', 'b@example.com', 'x');
+INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'P');`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.UpTo(ctx, 560); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT cardinality(workflows) FROM at_projects WHERE id = 'p1'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("existing project picks %d %v", n, err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_workflows (id, user_id, name, is_default) VALUES
+		('wf1', 'u1', 'a', TRUE), ('wf2', 'u1', 'b', FALSE), ('wf3', 'u2', 'a', TRUE)`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO at_workflows (id, user_id, name) VALUES ('wf4', 'u1', 'a')`); err == nil {
+		t.Fatal("duplicate name for one user")
+	}
+	if _, err := db.Exec(`UPDATE at_workflows SET is_default = TRUE WHERE id = 'wf2'`); err == nil {
+		t.Fatal("two defaults for one user")
+	}
+	if _, err := p.DownTo(ctx, 550); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`SELECT 1 FROM at_workflows`); err == nil {
+		t.Fatal("at_workflows survived down")
+	}
+	if _, err := db.Exec(`SELECT workflows FROM at_projects`); err == nil {
+		t.Fatal("at_projects.workflows survived down")
 	}
 }

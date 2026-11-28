@@ -4,9 +4,11 @@
 // and how thread branches are named and cleaned up (fixed by the platform, shown for reference).
 import { $t } from "@/i18n";
 import { computed } from "vue";
-import { useRoles } from "@/api/queries";
+import { RouterLink } from "vue-router";
+import { useRoles, useWorkflows } from "@/api/queries";
 import type { ProjectView } from "@/api/views";
 import { usesAsk } from "@/lib/roles";
+import { NO_FLOW, pickFlows } from "@/pages/settings/workflows/flow";
 import ApprovalRows from "./ApprovalRows.vue";
 import Heading from "./Heading.vue";
 import Row from "./Row.vue";
@@ -17,6 +19,14 @@ const props = defineProps<{ project: ProjectView }>();
 const update = useUpdate(() => props.project.id);
 const roles = useRoles();
 const ask = computed(() => usesAsk(roles.data.value?.roles ?? []));
+const flows = useWorkflows();
+const flowList = computed(() => flows.data.value?.workflows ?? []);
+const flowOptions = computed(() => [{ value: NO_FLOW, label: $t("不用流程") }, ...flowList.value.map((f) => ({ value: f.id, label: f.name }))]);
+const flowHint = computed(() => {
+  const def = flowList.value.find((f) => f.is_default);
+  return def ? $t("没选时用默认流程（{name}）", { name: def.name }) : $t("没选时不用流程");
+});
+const picked = computed(() => (props.project.workflows ?? []).filter((id) => id === NO_FLOW || flowList.value.some((f) => f.id === id)));
 const POLICY: { value: ProjectView["merge_policy"]; label: string }[] = [
   { value: "pr", label: $t("提交 PR 即完成") },
   { value: "auto", label: $t("检查通过后自动合并") },
@@ -32,6 +42,22 @@ const MERGE = [
 <template>
   <div class="flex flex-col">
     <Heading>{{ $t("高级") }}</Heading>
+    <Row :title="$t('工作流程')" :desc="$t('讨论串的组长拆任务时参考的流程图，可以选多个，组长按每个任务挑合适的流程。改了以后，新开的组长会话按新流程。')">
+      <el-select
+        :model-value="picked"
+        multiple
+        collapse-tags
+        collapse-tags-tooltip
+        :max-collapse-tags="2"
+        :placeholder="flowHint"
+        :aria-label="$t('工作流程')"
+        class="at-select-36 at-raised !w-64"
+        @update:model-value="(v: string[]) => update.mutate({ workflows: pickFlows(v, picked) })"
+      >
+        <el-option v-for="f in flowOptions" :key="f.value" :value="f.value" :label="f.label" />
+      </el-select>
+      <RouterLink to="/settings/workflows" class="text-[13px] text-brand hover:underline">{{ $t("编辑流程") }}</RouterLink>
+    </Row>
     <span class="pb-1 text-[13px] text-muted-foreground">{{ $t("审批与交付") }}</span>
     <span v-if="!ask" class="pb-2 text-xs leading-[18px] text-muted-foreground">{{ $t("成员都是“直接执行”，不会弹权限确认。有岗位改成“逐条问”时，这里才有审批方式可设。") }}</span>
     <ApprovalRows v-else :project="project" />

@@ -59,6 +59,7 @@ export const keys = {
   rolesYaml: ["roles", "yaml"] as const,
   rolePresets: ["roles", "presets"] as const,
   skills: ["skills"] as const,
+  workflows: ["workflows"] as const,
   builtinCommands: ["commands", "builtin"] as const,
   conversationModel: (cid: string) => ["c", cid, "model"] as const,
   sessionControls: (pid: string) => ["p", pid, "session-controls"] as const,
@@ -351,6 +352,7 @@ export const useContextDetail = (cid: Arg, enabled: () => boolean = () => true) 
   });
 export const useRolePresets = () => useQuery({ queryKey: keys.rolePresets, queryFn: () => unwrap(client.GET("/api/roles/presets")), staleTime: 300_000 });
 
+export const useWorkflows = () => useQuery({ queryKey: keys.workflows, queryFn: () => unwrap(client.GET("/api/workflows")) });
 export const useSkills = () => useQuery({ queryKey: keys.skills, queryFn: () => unwrap(client.GET("/api/skills")) });
 
 export const usePlugins = () => useQuery({ queryKey: keys.plugins, queryFn: () => unwrap(client.GET("/api/plugins")) });

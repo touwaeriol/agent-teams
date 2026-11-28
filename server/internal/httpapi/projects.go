@@ -33,6 +33,7 @@ type ProjectView struct {
 	ThreadCodexModel string    `json:"thread_codex_model" doc:"Codex model of Codex leads and members; '' = each role's model"`
 	ThreadEffort     string    `json:"thread_effort" doc:"'' = each role's effort; low | medium | high | xhigh | max"`
 	AutoResume       bool      `json:"auto_resume" doc:"Continue threads paused by a usage limit once it resets"`
+	Workflows        []string  `json:"workflows" doc:"The workflows (流程图) its thread leads follow, any number (the lead picks the one that fits each task): [] = my default workflow, [none] = no workflow, else workflow ids"`
 	Kind             string    `json:"kind" enum:"project,session" doc:"project, or session (多仓库会话: one employee the user talks to directly in thread 1; no coordinator)"`
 	Waiting          int       `json:"waiting"`
 	ThreadsActive    int       `json:"threads_active"`
@@ -51,7 +52,7 @@ func ProjectViewOf(p store.Project, d Delivery) ProjectView {
 		Pinned: p.Pinned, Archived: p.Archived,
 		WorkMode: p.WorkMode, AutoApprove: p.AutoApprove, MergePolicy: p.MergePolicy,
 		Delivery: d, OfficeLayout: p.OfficeLayout, Icon: p.Icon, CoordinatorModel: p.CoordinatorModel,
-		ThreadModel: p.ThreadModel, ThreadCodexModel: p.ThreadCodexModel, ThreadEffort: p.ThreadEffort, AutoResume: p.AutoResume, Kind: p.Kind, Waiting: p.Waiting,
+		ThreadModel: p.ThreadModel, ThreadCodexModel: p.ThreadCodexModel, ThreadEffort: p.ThreadEffort, AutoResume: p.AutoResume, Workflows: nonNilStrings(p.Workflows), Kind: p.Kind, Waiting: p.Waiting,
 		ThreadsActive: p.ThreadsActive, SessionStatus: p.SessionStatus, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }
 
@@ -90,6 +91,7 @@ type ProjectUpdate struct {
 	ThreadCodexModel *string        `json:"thread_codex_model,omitempty" maxLength:"100" doc:"Codex model of Codex leads and members; '' = each role's model"`
 	ThreadEffort     *string        `json:"thread_effort,omitempty" maxLength:"16" doc:"'' | low | medium | high | xhigh | max"`
 	AutoResume       *bool          `json:"auto_resume,omitempty"`
+	Workflows        *[]string      `json:"workflows,omitempty" maxItems:"10" doc:"[] = my default workflow, [none] = no workflow, else workflow ids (at most 10)"`
 }
 
 type projectsInput struct {
@@ -288,7 +290,11 @@ func (s *Server) settingChanges(ctx context.Context, userID string, cur store.Pr
 		}
 		ch = append(ch, store.Change{Col: "office_layout", Val: *b.OfficeLayout})
 	}
-	return ch, nil
+	wf, err := s.workflowChange(ctx, userID, b.Workflows)
+	if err != nil {
+		return nil, err
+	}
+	return append(ch, wf...), nil
 }
 
 func (s *Server) deleteProject(ctx context.Context, in *projectIDInput) (*struct{}, error) {
