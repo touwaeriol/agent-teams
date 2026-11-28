@@ -141,7 +141,7 @@ function globWalksProc(tool: string, input: Record<string, unknown>, root: strin
 
 function readOnlyDecision(policy: ToolPolicy, tool: string, input: Record<string, unknown>, cwd: string): Decision {
   if (!policy.readOnly) return null;
-  if (tool === "Bash") return bashDecision(policy.bash, String(input.command ?? ""));
+  if (tool === "Bash") return bashDecision(policy.bash, String(input.command ?? ""), { cwd, readRoots: policy.readRoots });
   if (FILE_TOOLS[tool] && !READ_TOOLS.has(tool)) return { deny: "This is a read-only session." };
   const path = filePathOf(tool, input, cwd) ?? cwd;
   if (READ_TOOLS.has(tool) && !policy.readRoots.some((r) => isInside(r, path))) return { deny: "Read-only sessions can only read inside their worktree." };
@@ -165,16 +165,56 @@ function filePathOf(tool: string, input: Record<string, unknown>, cwd: string): 
   return isAbsolute(raw) ? resolve(raw) : resolve(cwd, raw);
 }
 
-/** argv-based allow list for read-only Bash (not regex matching of the whole command). */
-export function bashDecision(policy: BashPolicy | null, command: string): Decision {
+/** Where a read-only Bash command runs: lets `git -C <dir>` point at a repository inside the read roots. */
+export interface BashContext {
+  cwd: string;
+  readRoots: string[];
+}
+
+/**
+ * argv-based allow list for read-only Bash (not regex matching of the whole command).
+ * `git -C <dir> …` is accepted when every <dir> is inside the read roots (literally and by real
+ * path); the -C pairs are then dropped before matching the allow list. Sessions work above their
+ * repositories (one subdirectory per repository) and may not cd, so this is how they reach them.
+ */
+export function bashDecision(policy: BashPolicy | null, command: string, ctx?: BashContext): Decision {
   if (!policy) return { deny: "Bash is not available in this read-only session." };
   if (policy.deny_metachar !== false && METACHARS.test(command)) return { deny: "Shell operators, redirection and substitution are not allowed here." };
-  const argv = splitArgv(command);
-  if (!argv) return { deny: "Could not parse the command." };
+  const parsed = splitArgv(command);
+  if (!parsed) return { deny: "Could not parse the command." };
+  const argv = stripGitDirs(parsed, ctx);
+  if (typeof argv === "string") return { deny: argv };
   const denyFlags = policy.deny_flags ?? DEFAULT_DENY_FLAGS;
   const bad = argv.find((a) => denyFlags.some((f) => deniedFlag(a, f)));
   if (bad) return { deny: `The flag ${bad} is not allowed in read-only sessions.` };
   return policy.allow.some((rule) => matchesRule(rule, argv)) ? null : { deny: `Read-only sessions may only run: ${policy.allow.join(", ")}.` };
+}
+
+const GIT_DIR_OPTION = /^-C(.*)$/;
+
+/**
+ * Removes leading `-C <dir>` (or `-C<dir>`) options from a git command, checking each directory.
+ * Returns the remaining argv, or a deny reason.
+ */
+function stripGitDirs(argv: string[], ctx: BashContext | undefined): string[] | string {
+  if (argv[0] !== "git") return argv;
+  let i = 1;
+  let cwd = ctx?.cwd;
+  while (i < argv.length) {
+    const m = GIT_DIR_OPTION.exec(argv[i]!);
+    if (!m) break;
+    const dir = m[1] ? m[1] : argv[i + 1];
+    i += m[1] ? 1 : 2;
+    if (!dir) return "git -C needs a directory.";
+    if (!ctx || !cwd) return "git -C is not available in this session.";
+    // Successive -C options are relative to the previous one, as git does.
+    const abs = isAbsolute(dir) ? resolve(dir) : resolve(cwd, dir);
+    const real = realpathLoose(abs);
+    const inside = real !== null && ctx.readRoots.some((r) => isInside(r, abs) && isInside(realpathLoose(resolve(r)) ?? resolve(r), real));
+    if (!inside) return `git -C ${dir}: read-only sessions can only run git inside their working directory.`;
+    cwd = abs;
+  }
+  return ["git", ...argv.slice(i)];
 }
 
 /** Exact options git also accepts as unambiguous abbreviations (`--outp=x` is `--output=x`). */

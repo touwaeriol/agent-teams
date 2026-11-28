@@ -186,15 +186,33 @@ func sedArgs(args []string) bool {
 	return sedPrint.MatchString(args[1]) && !slices.ContainsFunc(args[2:], func(a string) bool { return strings.HasPrefix(a, "-") })
 }
 
-// gitArgs allows the read subcommands, and `git branch` in its list form.
+// gitArgs allows the read subcommands, and `git branch` in its list form. Leading
+// `-C <dir>` options are allowed (insideWorktree has already refused absolute and parent
+// paths): sessions work one directory above their repositories and cannot cd.
 func gitArgs(args []string) bool {
-	if len(args) == 0 || hasFlag(args, gitDeny) {
+	args, ok := stripGitDirs(args)
+	if !ok || len(args) == 0 || hasFlag(args, gitDeny) {
 		return false
 	}
 	if args[0] == "branch" {
 		return listOnly(args[1:])
 	}
 	return slices.Contains(gitRead, args[0])
+}
+
+// stripGitDirs drops leading `-C <dir>` / `-C<dir>` options; ok is false for a -C without a directory.
+func stripGitDirs(args []string) ([]string, bool) {
+	for len(args) > 0 && strings.HasPrefix(args[0], "-C") {
+		if args[0] != "-C" {
+			args = args[1:]
+			continue
+		}
+		if len(args) < 2 || args[1] == "" {
+			return nil, false
+		}
+		args = args[2:]
+	}
+	return args, true
 }
 
 func listOnly(args []string) bool {

@@ -21,6 +21,8 @@ func TestReadOnlyCommandAllows(t *testing.T) {
 		"git show abc123", "git branch -a", "git branch", "pwd", "find src -maxdepth 2",
 		"ls *.go", "cat src/*.ts", "wc -l web/src/*.tsx", "grep -n foo *.md", "git log --oneline -- 'src/*.go'",
 		"rg -g '*.go' foo", "git diff --stat", "git log --output-indicator-new=+",
+		"git -C owner__repo log --oneline -5", "git -C owner__repo status", "git -Cowner__repo diff", "git -C a -C b show HEAD",
+		"git -C owner__repo branch -a",
 	} {
 		if !ReadOnlyCommand("Bash", bash(cmd)) {
 			t.Errorf("should allow %q", cmd)
@@ -44,7 +46,9 @@ func TestReadOnlyCommandRefusesWrites(t *testing.T) {
 		"grep -f/etc/passwd x", "grep -f~/.ssh/id_rsa x", "git diff --outp=x", "git show --ext", "git log --textc",
 		"rg -nz foo", "rg --hostname-bin=./x foo", "rg --pre=./x foo", "git log -po",
 		"find . -execdir sh ;", "find . -okdir rm {} +", "find . -fprintf out x", "find . -fls out",
-		"git branch --list x", "git -c core.pager=sh log", "git --no-pager log", "FOO=1 ls", "ls\tsrc;id",
+		"git branch --list x", "git -c core.pager=sh log",
+		"git -C ../x log", "git -C a/../.. log", "git -C ~ log", "git -C a push", "git -C a branch new", "git -C", "git -C a",
+		"git -C a -c core.pager=sh log", "git -C a log --output=x", "git --no-pager log", "FOO=1 ls", "ls\tsrc;id",
 	} {
 		if ReadOnlyCommand("Bash", bash(cmd)) {
 			t.Errorf("must not allow %q", cmd)

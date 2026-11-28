@@ -196,6 +196,48 @@ describe("read-only bash argv policy", () => {
     expect(splitArgv(`git log ""`)).toEqual(["git", "log", ""]);
   });
 
+  describe("git -C into a repository subdirectory", () => {
+    const lead = mkdtempSync(join(tmpdir(), "lead-"));
+    const outside = mkdtempSync(join(tmpdir(), "outside-"));
+    mkdirSync(join(lead, "owner__repo", "sub"), { recursive: true });
+    symlinkSync(outside, join(lead, "escape"));
+    const ctx = { cwd: lead, readRoots: [lead] };
+
+    it.each([
+      ["git -C owner__repo log --oneline -5", true],
+      ["git -C owner__repo status", true],
+      ["git -C ./owner__repo diff HEAD~1", true],
+      ["git -Cowner__repo log", true],
+      ["git -C owner__repo -C sub log", true],
+      ["git -C 'owner__repo' branch -a", true],
+      [`git -C ${join(lead, "owner__repo")} log`, true],
+      ["git -C owner__repo push origin HEAD", false],
+      ["git -C owner__repo branch new", false],
+      ["git -C owner__repo -c core.pager=sh log", false],
+      ["git -C owner__repo log --output=/tmp/x", false],
+      ["git -C .. log", false],
+      ["git -C owner__repo/../.. log", false],
+      ["git -C owner__repo -C ../.. log", false],
+      [`git -C ${outside} log`, false],
+      ["git -C escape log", false],
+      ["git -C /etc log", false],
+      ["git -C", false],
+      ["git -C owner__repo", false],
+    ])("%s → %s", (cmd, ok) => {
+      expect(bashDecision(BASH, cmd, ctx) === null).toBe(ok);
+    });
+
+    it("refuses -C without a working directory context", () => {
+      expect(bashDecision(BASH, "git -C owner__repo log")).not.toBeNull();
+    });
+
+    it("goes through decideTool with the session's read roots", () => {
+      const policy: ToolPolicy = { denyNonPlatform: false, readOnly: true, bash: BASH, readRoots: [lead], secretPaths: [] };
+      expect(decideTool(policy, "Bash", { command: "git -C owner__repo log" }, lead)).toBeNull();
+      expect(decideTool(policy, "Bash", { command: `git -C ${outside} log` }, lead)).not.toBeNull();
+    });
+  });
+
   it("denies bash entirely without a policy", () => {
     expect(bashDecision(null, "git log")).not.toBeNull();
   });
