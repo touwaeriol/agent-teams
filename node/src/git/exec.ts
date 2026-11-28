@@ -46,7 +46,7 @@ const PROXY_VARS = ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "a
  * the 407 and retries on the same connection, which proxies that close after a 407 reset
  * ("Send failure: Connection reset by peer"). An explicit GIT_HTTP_PROXY_AUTHMETHOD wins.
  */
-function proxyAuth(env: NodeJS.ProcessEnv): Record<string, string> {
+export function proxyAuth(env: NodeJS.ProcessEnv): Record<string, string> {
   if (env.GIT_HTTP_PROXY_AUTHMETHOD) return {};
   const withCreds = PROXY_VARS.some((k) => /^[a-z][a-z0-9+.-]*:\/\/[^/@]+@/i.test(env[k] ?? ""));
   return withCreds ? { GIT_HTTP_PROXY_AUTHMETHOD: "basic" } : {};

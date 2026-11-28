@@ -56,6 +56,16 @@ describe("session env", () => {
     expect(env).toEqual({ PATH: "/p/bin:/usr/bin", HOME: "/r/agent-home", LANG: "C.UTF-8", ANTHROPIC_API_KEY: "k", AWS_REGION: "x", MCP_TOOL_TIMEOUT: "86400000" });
   });
 
+  it("makes the employee's git send proxy credentials on the first CONNECT", () => {
+    const proxied = buildEnv({ base: { HTTPS_PROXY: "http://u:p@proxy:8080" }, passList: DEFAULT_PASS_ENV, home: "/h" });
+    expect(proxied.GIT_HTTP_PROXY_AUTHMETHOD).toBe("basic");
+    expect(buildEnv({ base: { HTTPS_PROXY: "http://proxy:8080" }, passList: DEFAULT_PASS_ENV, home: "/h" }).GIT_HTTP_PROXY_AUTHMETHOD).toBeUndefined();
+    const chosen = buildEnv({ base: { HTTPS_PROXY: "http://u:p@proxy:8080", GIT_HTTP_PROXY_AUTHMETHOD: "anyauth" }, passList: DEFAULT_PASS_ENV, home: "/h" });
+    expect(chosen.GIT_HTTP_PROXY_AUTHMETHOD).toBe("anyauth");
+    const spec = buildEnv({ base: { HTTPS_PROXY: "http://u:p@proxy:8080" }, passList: DEFAULT_PASS_ENV, home: "/h", extra: { GIT_HTTP_PROXY_AUTHMETHOD: "digest" } });
+    expect(spec.GIT_HTTP_PROXY_AUTHMETHOD).toBe("digest");
+  });
+
   it("passes the Claude auth variables by default (env-only logins, e.g. the node image)", () => {
     const base = { CLAUDE_CODE_OAUTH_TOKEN: "o", ANTHROPIC_API_KEY: "k", AGENT_TEAMS_NODE_TOKEN: "secret", RANDOM: "no" };
     expect(pickPassEnv(base, DEFAULT_PASS_ENV)).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "o", ANTHROPIC_API_KEY: "k" });
