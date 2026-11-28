@@ -258,8 +258,9 @@ func (c *client) do(method, path string, body any, headers ...string) response {
 	}
 	for i := 0; i+1 < len(headers); i += 2 {
 		if strings.EqualFold(headers[i], "Host") {
-			req.Host = headers[i+1] // net/http ignores a Host entry in Header, and the jar then
-			for _, ck := range c.http.Jar.Cookies(req.URL) { // looks cookies up by that host
+			// net/http ignores a Host entry in Header, and the jar then looks cookies up by that host.
+			req.Host = headers[i+1]
+			for _, ck := range c.http.Jar.Cookies(req.URL) {
 				req.AddCookie(ck)
 			}
 			continue
