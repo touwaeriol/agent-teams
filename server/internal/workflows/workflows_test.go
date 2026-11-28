@@ -178,3 +178,42 @@ func TestLibrary(t *testing.T) {
 		t.Fatalf("project pick after delete %q %v", pick, err)
 	}
 }
+
+// TestBranchesAndMermaid: a branch edge needs its condition; branches order like next edges,
+// render as "按条件只走一条" and appear in the Mermaid chart with their conditions, next
+// edges plain and reject edges dashed; quotes in names cannot break the chart.
+func TestBranchesAndMermaid(t *testing.T) {
+	d := FlowDraft{Name: "分支", Steps: []FlowStep{
+		{ID: "ask", Name: "判断\"要不要\"设计", Role: "lead", Kind: "decision"},
+		{ID: "design", Name: "设计", Role: "dev"},
+		{ID: "dev", Name: "开发", Role: "dev"},
+		{ID: "review", Name: "审查", Role: "reviewer", Kind: "review"},
+	}, Edges: []FlowEdge{
+		{From: "ask", To: "design", Kind: "branch", Label: "需要设计"},
+		{From: "ask", To: "dev", Kind: "branch", Label: "不需要"},
+		{From: "design", To: "dev"},
+		{From: "dev", To: "review"},
+		{From: "review", To: "dev", Kind: "reject"},
+	}}
+	Normalize(&d)
+	if err := Validate(d, team); err != nil {
+		t.Fatalf("valid branches: %v", err)
+	}
+	unlabeled := d
+	unlabeled.Edges = append([]FlowEdge{}, d.Edges...)
+	unlabeled.Edges[0].Label = ""
+	if err := Validate(unlabeled, team); !IsProblem(err) {
+		t.Fatalf("a branch without its condition: %v", err)
+	}
+	w := Flow{Name: d.Name, Steps: d.Steps, Edges: d.Edges}
+	text := Render(w, map[string]string{"dev": "开发", "reviewer": "审查员"})
+	for _, want := range []string{
+		"按条件只走一条：如果需要设计 → 设计；如果不需要 → 开发", "条件分支”时只走其中一条",
+		"```mermaid\nflowchart LR\n", `s1["判断#quot;要不要#quot;设计<br/>组长 · 决策"]`, `s1 -->|"需要设计"| s2`,
+		"s2 --> s3", `s4 -.->|"不通过退回"| s3`, "每一步的详细说明",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("render lacks %q:\n%s", want, text)
+		}
+	}
+}

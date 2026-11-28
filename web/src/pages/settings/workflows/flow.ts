@@ -14,6 +14,7 @@ export const STEP_KINDS: { value: StepKind; label: string; hint: string }[] = [
 
 export const EDGE_KINDS: { value: EdgeKind; label: string }[] = [
   { value: "next", label: "然后" },
+  { value: "branch", label: "条件分支" },
   { value: "reject", label: "不通过退回" },
 ];
 
@@ -64,12 +65,12 @@ export function removeStep(d: FlowDraft, id: string): FlowDraft {
 }
 
 /**
- * Lays the steps out left to right by depth along the next edges (a step sits one column after
+ * Lays the steps out left to right by depth along the next and branch edges (a step sits one column after
  * its deepest predecessor; parallel steps share a column, one per row). Steps on a cycle keep
  * the depth they reached first.
  */
 export function layout(steps: FlowStep[], edges: FlowEdge[]): FlowStep[] {
-  const next = edges.filter((e) => (e.kind ?? "next") === "next");
+  const next = edges.filter((e) => (e.kind ?? "next") !== "reject");
   const depth = new Map<string, number>();
   const visit = (id: string, d: number, path: Set<string>) => {
     if (path.has(id) || (depth.get(id) ?? -1) >= d) return;
@@ -132,7 +133,7 @@ export function presets(roles: RoleView[]): { label: string; draft: FlowDraft }[
 
 /** The editable copy of a saved flow. */
 export function draftOf(f: FlowView): FlowDraft {
-  return { name: f.name, description: f.description, is_default: f.is_default, steps: structuredClone(f.steps ?? []), edges: structuredClone(f.edges ?? []) };
+  return { name: f.name, description: f.description, is_default: f.is_default, steps: clone(f.steps ?? []), edges: clone(f.edges ?? []) };
 }
 
 /** A name not used by the user's other flows ("新流程", "新流程 2"…). */
@@ -148,4 +149,14 @@ export function looseSteps(d: FlowDraft): string[] {
   if (steps.length < 2) return [];
   const edges = d.edges ?? [];
   return steps.filter((s) => !edges.some((e) => e.from === s.id || e.to === s.id)).map((s) => s.name);
+}
+
+/** Branch edges still missing their condition (the server refuses them). */
+export function unlabeledBranches(d: FlowDraft): number {
+  return (d.edges ?? []).filter((e) => e.kind === "branch" && !(e.label ?? "").trim()).length;
+}
+
+/** A deep copy that also works on Vue's reactive proxies (structuredClone refuses them). */
+function clone<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v)) as T;
 }

@@ -41,14 +41,15 @@ const nodes = computed<Node[]>(() =>
 const flowEdges = computed<Edge[]>(() =>
   edges.value.map((e) => {
     const reject = e.kind === "reject";
+    const branch = e.kind === "branch";
     const on = selected.value?.kind === "edge" && selected.value.key === edgeKey(e);
-    const color = on ? "#d97706" : reject ? "#c2410c" : "#8a8780";
+    const color = on ? "#d97706" : reject ? "#c2410c" : branch ? "#2563eb" : "#8a8780";
     return {
       id: edgeKey(e),
       source: e.from,
       target: e.to,
       type: reject ? "smoothstep" : "default",
-      label: e.label || (reject ? "退回" : ""),
+      label: e.label || (reject ? "退回" : branch ? "条件？" : ""),
       animated: false,
       selected: on,
       markerEnd: { type: MarkerType.ArrowClosed, color },
@@ -182,17 +183,18 @@ const stepName = (id: string) => steps.value.find((s) => s.id === id)?.name ?? i
           <el-radio-group :model-value="edge.kind ?? 'next'" size="small" @update:model-value="(v) => patchEdge(edgeKey(edge!), { kind: v as EdgeKind })">
             <el-radio-button v-for="k in EDGE_KINDS" :key="k.value" :value="k.value">{{ k.label }}</el-radio-button>
           </el-radio-group>
-          <template #hint>“不通过退回”：前一步审查或决策没通过时，回到箭头指向的步骤返工。</template>
+          <template #hint>“然后”：从同一步连出几条会并行做。“条件分支”：从同一步连出的几条只走一条，由组长按线上的条件判断。“不通过退回”：审查或决策没通过时，回到箭头指向的步骤返工。</template>
         </Field>
-        <Field v-slot="{ id }" label="线上的文字（可选）">
-          <el-input :id="id" :model-value="edge.label ?? ''" maxlength="20" placeholder="比如：有问题" @update:model-value="(v: string) => patchEdge(edgeKey(edge!), { label: v })" />
+        <Field v-slot="{ id }" :label="edge.kind === 'branch' ? '条件（必填）' : '线上的文字（可选）'">
+          <el-input :id="id" :model-value="edge.label ?? ''" maxlength="20" :placeholder="edge.kind === 'branch' ? '比如：需要设计' : '比如：有问题'" @update:model-value="(v: string) => patchEdge(edgeKey(edge!), { label: v })" />
         </Field>
       </template>
       <div v-else class="flex flex-col gap-2 text-[13px] leading-5 text-muted-foreground">
         <span class="text-sm font-semibold text-foreground">怎么画</span>
         <span>点“添加步骤”加一个方框，给它选岗位和类型。</span>
         <span>从方框右边的圆点拖到另一个方框，就连上一条“然后”的箭头；点箭头可以改成“不通过退回”。</span>
-        <span>一个步骤连出几条箭头，这几步会并行做；几条箭头指向同一步，它要等前面都完成。</span>
+        <span>一个步骤连出几条“然后”，这几步会并行做；几条箭头指向同一步，它要等前面都完成。</span>
+        <span>要“是 / 否”这样只走一条路，就把箭头改成“条件分支”，在线上写条件。</span>
         <span>组长拆任务时会参考这张图，遇到特殊情况可以调整，并会说明原因。</span>
       </div>
     </aside>

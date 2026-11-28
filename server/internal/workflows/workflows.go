@@ -30,13 +30,14 @@ const (
 	approvalKind    = "approval"
 	nextEdge        = "next"
 	rejectEdge      = "reject"
+	branchEdge      = "branch"
 	defaultStepKind = "work"
 )
 
 // FlowStep kinds and edge kinds.
 var (
 	StepKinds = []string{"work", "review", "decision", approvalKind}
-	EdgeKinds = []string{nextEdge, rejectEdge}
+	EdgeKinds = []string{nextEdge, branchEdge, rejectEdge}
 	stepID    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
 )
 
@@ -58,8 +59,8 @@ type FlowStep struct {
 type FlowEdge struct {
 	From  string `json:"from" maxLength:"32"`
 	To    string `json:"to" maxLength:"32"`
-	Kind  string `json:"kind" required:"false" enum:"next,reject" doc:"next = then; reject = back to this step when the step rejects"`
-	Label string `json:"label,omitempty" maxLength:"20"`
+	Kind  string `json:"kind" required:"false" enum:"next,branch,reject" doc:"next = then (several out of one step run in parallel); branch = then only when the label's condition holds (one branch of a step is taken); reject = back to this step when the step rejects"`
+	Label string `json:"label,omitempty" maxLength:"20" doc:"The condition of a branch edge (required there)"`
 }
 
 // Flow is a row of at_workflows.
@@ -203,7 +204,9 @@ func checkEdge(i int, e FlowEdge, ids map[string]bool, seen map[FlowEdge]bool) e
 	case e.From == e.To:
 		return problem("第 %d 条连线首尾是同一个步骤", i+1)
 	case !slices.Contains(EdgeKinds, e.Kind):
-		return problem("第 %d 条连线的类型只能是“然后”或“不通过退回”", i+1)
+		return problem("第 %d 条连线的类型只能是“然后”“条件分支”或“不通过退回”", i+1)
+	case e.Kind == branchEdge && e.Label == "":
+		return problem("第 %d 条连线是条件分支，请在线上写条件（比如：需要设计）", i+1)
 	case utf8.RuneCountInString(e.Label) > MaxLabelRunes:
 		return problem("第 %d 条连线的文字最多 %d 个字", i+1, MaxLabelRunes)
 	case seen[FlowEdge{From: e.From, To: e.To, Kind: e.Kind}]:

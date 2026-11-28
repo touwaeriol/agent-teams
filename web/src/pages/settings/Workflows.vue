@@ -16,7 +16,7 @@ import Loading from "@/components/common/Loading.vue";
 import NavButton from "@/components/shell/NavButton.vue";
 import { cn } from "@/lib/utils";
 import FlowEditor from "./workflows/FlowEditor.vue";
-import { draftOf, freeName, looseSteps, presets, roleChoices } from "./workflows/flow";
+import { draftOf, freeName, looseSteps, presets, roleChoices, unlabeledBranches } from "./workflows/flow";
 
 const list = useWorkflows();
 const roles = useRoles();
@@ -43,7 +43,7 @@ function open(f: FlowView) {
 }
 
 function startNew(draft: FlowDraft) {
-  current.value = { id: null, draft: { ...structuredClone(draft), name: freeName(draft.name, flows.value), is_default: flows.value.length === 0 } };
+  current.value = { id: null, draft: { ...(JSON.parse(JSON.stringify(draft)) as FlowDraft), name: freeName(draft.name, flows.value), is_default: flows.value.length === 0 } };
   dirty.value = true;
 }
 
@@ -76,6 +76,7 @@ const remove = useAction((id: string) => flowActions.remove(id), {
 });
 
 const loose = computed(() => (current.value ? looseSteps(current.value.draft) : []));
+const unlabeled = computed(() => (current.value ? unlabeledBranches(current.value.draft) : 0));
 </script>
 
 <template>
@@ -144,9 +145,11 @@ const loose = computed(() => (current.value ? looseSteps(current.value.draft) : 
             </label>
           </div>
 
-          <FlowEditor :model-value="current.draft" :roles="choices" @update:model-value="edit" />
+          <FlowEditor :key="current.id ?? 'new'" :model-value="current.draft" :roles="choices" @update:model-value="edit" />
 
           <p v-if="loose.length" class="text-[13px] text-amber-700 dark:text-amber-300">这些步骤还没连线：{{ loose.join("、") }}。组长会把它们当作和别的步骤无关、可以单独做的事。</p>
+
+          <p v-if="unlabeled" class="text-[13px] text-destructive">有 {{ unlabeled }} 条条件分支还没写条件，写上才能保存。</p>
 
           <div class="flex flex-wrap items-center justify-end gap-2">
             <ConfirmAction
@@ -157,7 +160,7 @@ const loose = computed(() => (current.value ? looseSteps(current.value.draft) : 
             />
             <el-button v-if="dirty && current.id" @click="open(flows.find((f) => f.id === current!.id)!)">放弃修改</el-button>
             <el-button v-if="!current.id" @click="current = null; flows[0] && open(flows[0])">取消</el-button>
-            <el-button type="primary" :loading="save.isPending.value" :disabled="!dirty" @click="save.mutate(current!)">保存</el-button>
+            <el-button type="primary" :loading="save.isPending.value" :disabled="!dirty || unlabeled > 0" @click="save.mutate(current!)">保存</el-button>
           </div>
         </template>
       </div>

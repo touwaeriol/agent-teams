@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { reactive } from "vue";
 import type { RoleView } from "@/api/views";
-import { addEdge, freeName, layout, looseSteps, newStepId, presets, removeStep, roleChoices, roleLabel } from "./flow";
+import { addEdge, draftOf, freeName, layout, looseSteps, newStepId, presets, removeStep, roleChoices, roleLabel, unlabeledBranches } from "./flow";
 
 const role = (tier: string, key: string, title: string) => ({ tier, role: key, title }) as unknown as RoleView;
 const team = [role("coordinator", "coordinator", "统筹"), role("lead", "lead", "组长"), role("member", "dev", "开发"), role("member", "qa", "测试")];
@@ -49,5 +50,24 @@ describe("workflow page logic", () => {
     const flows = [{ name: "新流程" }, { name: "新流程 2" }] as never[];
     expect(freeName("新流程", flows)).toBe("新流程 3");
     expect(looseSteps({ name: "x", steps: [{ id: "a", name: "A", role: "" }, { id: "b", name: "B", role: "" }], edges: [] })).toEqual(["A", "B"]);
+  });
+
+  it("lays branches out like next edges and counts branches without a condition", () => {
+    const steps = ["q", "a", "b"].map((id) => ({ id, name: id, role: "dev" }));
+    const edges = [
+      { from: "q", to: "a", kind: "branch" as const, label: "是" },
+      { from: "q", to: "b", kind: "branch" as const },
+    ];
+    const pos = Object.fromEntries(layout(steps, edges).map((s) => [s.id, s.x]));
+    expect(pos.a).toBe(pos.b);
+    expect(pos.a).toBeGreaterThan(pos.q ?? 0);
+    expect(unlabeledBranches({ name: "x", steps, edges })).toBe(1);
+  });
+
+  it("copies a saved flow out of Vue's reactive cache (the page opens it on load)", () => {
+    const saved = reactive({ id: "wf1", name: "f", description: "", is_default: true, created_at: "", updated_at: "", steps: [{ id: "a", name: "A", role: "dev" }], edges: [] });
+    const d = draftOf(saved);
+    d.steps![0]!.name = "B";
+    expect(saved.steps[0]!.name).toBe("A");
   });
 });

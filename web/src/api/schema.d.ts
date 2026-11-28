@@ -3431,10 +3431,11 @@ export interface components {
         FlowEdge: {
             from: string;
             /**
-             * @description next = then; reject = back to this step when the step rejects
+             * @description next = then (several out of one step run in parallel); branch = then only when the label's condition holds (one branch of a step is taken); reject = back to this step when the step rejects
              * @enum {string}
              */
-            kind?: "next" | "reject";
+            kind?: "next" | "branch" | "reject";
+            /** @description The condition of a branch edge (required there) */
             label?: string;
             to: string;
         };
