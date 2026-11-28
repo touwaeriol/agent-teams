@@ -28,7 +28,7 @@ python3/make/gcc 打在一个镜像里，不用在宿主机装 Node 或 systemd 
 ```bash
 docker run -d --name agent-teams-node-mynode --hostname mynode \
   --restart unless-stopped --stop-timeout 60 \
-  --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined \
+  --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined --ulimit core=0 \
   -e AGENT_TEAMS_CONSOLE=__CONSOLE__ \
   -e AGENT_TEAMS_NODE_TOKEN='<节点令牌>' \
   -v agent-teams-node-mynode-claude:/home/agent/.claude \
@@ -58,6 +58,7 @@ services:
     devices: ["/dev/fuse"]          # 共享文件夹：守护进程在容器里用 geesefs 挂载（第 8 节）
     cap_add: ["SYS_ADMIN"]
     security_opt: ["apparmor:unconfined"]
+    ulimits: { core: 0 }            # 不生成 core dump：进程崩溃留下的几 GB 文件会被员工提交进仓库、GitHub 拒收
     environment:
       AGENT_TEAMS_CONSOLE: "__CONSOLE__"
       AGENT_TEAMS_NODE_TOKEN: "<节点令牌>"
@@ -149,6 +150,7 @@ volumes:                             # 和 docker run 方式同名的卷：两�
 - 它是对象存储挂成的目录，不支持硬链接和文件锁；Git 仓库、SQLite 这类数据库和 `node_modules` 不要放进去。别的节点改过的文件，最多几秒后可见。
 - 写满容量后新的写入会失败，通常在保存或关闭文件时报 I/O 错误。
 - 想让员工会话拿不到这些权限，可以在环境变量里加 `AGENT_TEAMS_CONFINE=on`：会话以 no_new_privs 运行，sudo 和 fusermount3 都无法提权（员工也就不能 sudo 装软件）。默认关闭。
+- 守护进程启动时会关掉 core dump（自己和员工会话都不生成 core 文件），免得进程崩溃留下的几 GB 文件被员工 `git add -A` 提交、GitHub 拒收；compose 里的 `ulimits: { core: 0 }` 是同样的作用。确实要调试崩溃时在环境变量里加 `AGENT_TEAMS_CORE_DUMPS=on`。
 
 ## 9. 排错
 
