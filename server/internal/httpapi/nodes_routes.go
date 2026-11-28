@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
@@ -273,7 +272,7 @@ func (s *Server) addNode(ctx context.Context, in *newNodeInput) (*newNodeOutput,
 	token, hash := auth.NewToken()
 	node, err := s.store.CreateNode(ctx, p.User.ID, name, hash)
 	if errors.Is(err, store.ErrConflict) {
-		return nil, fail(http.StatusConflict, "node_exists", fmt.Sprintf("已经有叫 %s 的节点了", name))
+		return nil, failf(http.StatusConflict, "node_exists", "已经有叫 {name} 的节点了", "name", name)
 	}
 	if err != nil {
 		return nil, err
@@ -299,7 +298,7 @@ func (s *Server) checkNodeQuota(ctx context.Context, u store.User) error {
 		return err
 	}
 	if count >= limit {
-		return fail(http.StatusForbidden, "node_quota", fmt.Sprintf("最多可以添加 %d 个节点", limit))
+		return failf(http.StatusForbidden, "node_quota", "最多可以添加 {n} 个节点", "n", limit)
 	}
 	return nil
 }

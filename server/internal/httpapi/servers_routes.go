@@ -182,7 +182,7 @@ func (s *Server) checkTarget(ctx context.Context, host string) error {
 	case errors.Is(err, sshdial.ErrInvalidHost):
 		return invalid([]FieldError{{Path: "body.host", Message: "主机名或 IP 地址不合法"}}, "主机名或 IP 地址不合法")
 	case errors.Is(err, sshdial.ErrResolve):
-		return fail(http.StatusUnprocessableEntity, "resolve_failed", "主机名解析不到地址："+host)
+		return failf(http.StatusUnprocessableEntity, "resolve_failed", "主机名解析不到地址：{host}", "host", host)
 	case errors.Is(err, sshdial.ErrBlockedAddress):
 		return fail(http.StatusUnprocessableEntity, "address_blocked", err.Error())
 	}

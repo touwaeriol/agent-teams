@@ -20,6 +20,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
 	"github.com/touwaeriol/agent-teams/server/internal/gitremote"
 	"github.com/touwaeriol/agent-teams/server/internal/kv"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/platform"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
@@ -247,7 +248,7 @@ func (s *Server) OpenAPI() ([]byte, error) { return json.MarshalIndent(s.api.Ope
 func writeError(w http.ResponseWriter, err error) {
 	e, ok := err.(*APIError)
 	if !ok {
-		e = &APIError{Status: http.StatusInternalServerError, Code: "internal", Detail: "服务器出错了"}
+		e = failMsg(http.StatusInternalServerError, "internal", msg.T("服务器出错了")).(*APIError)
 	}
 	writeJSON(w, e.Status, e)
 }

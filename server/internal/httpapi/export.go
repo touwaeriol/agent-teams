@@ -43,4 +43,6 @@ func Fail(status int, code, detail string) error { return fail(status, code, det
 func StoreError(err error, notFound string) error { return storeErr(err, notFound) }
 
 // Invalid is a 422 validation error on one field.
-func Invalid(field, message string) error { return invalid([]FieldError{{field, message}}, message) }
+func Invalid(field, message string) error {
+	return invalid([]FieldError{{Path: field, Message: message}}, message)
+}

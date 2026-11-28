@@ -1,7 +1,7 @@
 // The one HTTP client of the web app: openapi-fetch over the generated core
 // paths plus the orchestration paths, same-origin cookies, CSRF header on
 // writes, and `{detail, code, fields}` errors turned into ApiError.
-import { $t } from "@/i18n";
+import { $t, currentLocale, serverText, type ServerText } from "@/i18n";
 import createClient, { type Middleware } from "openapi-fetch";
 import type { OrchestrationPaths } from "./orchestration";
 import type { paths as CorePaths } from "./schema";
@@ -14,6 +14,7 @@ export const CSRF_HEADER = "X-CSRF-Token";
 export interface FieldProblem {
   path: string;
   message: string;
+  text?: ServerText | null;
 }
 
 export class ApiError extends Error {
@@ -55,11 +56,17 @@ const csrf: Middleware = {
 /** Turns an error body (api.md §0) into a message; falls back to the status text. */
 export function toApiError(status: number, body: unknown, statusText = ""): ApiError {
   if (body && typeof body === "object") {
-    const b = body as { detail?: unknown; code?: unknown; fields?: unknown; title?: unknown; errors?: unknown };
-    const fields = Array.isArray(b.fields) ? (b.fields as FieldProblem[]) : [];
-    const detail = typeof b.detail === "string" && b.detail ? b.detail : typeof b.title === "string" ? b.title : "";
-    const extra = fields.length ? `：${fields.map((f) => f.message).join("；")}` : "";
-    return new ApiError(status, (detail || statusText || $t("请求失败（{status}）", { status })) + extra, typeof b.code === "string" ? b.code : "", fields);
+    const b = body as { detail?: unknown; code?: unknown; message?: ServerText | null; fields?: unknown; title?: unknown; errors?: unknown };
+    // Field and summary texts in the interface language (the server sends key + params beside its Chinese).
+    const fields = (Array.isArray(b.fields) ? (b.fields as FieldProblem[]) : []).map((f) => ({ ...f, message: serverText(f.text ?? { key: f.message }, f.message) }));
+    const raw = typeof b.detail === "string" && b.detail ? b.detail : typeof b.title === "string" ? b.title : "";
+    const detail = serverText(b.message, raw);
+    const head = detail || statusText || $t("请求失败（{status}）", { status });
+    // Field problems not already said by the summary (a one-field error repeats it).
+    const problems = fields.map((f) => f.message).filter((m) => m && m !== head);
+    const cjk = currentLocale() === "zh-CN" || currentLocale() === "ja";
+    const message = problems.length ? $t("{detail}：{problems}", { detail: head, problems: problems.join(cjk ? "；" : "; ") }) : head;
+    return new ApiError(status, message, typeof b.code === "string" ? b.code : "", fields);
   }
   return new ApiError(status, typeof body === "string" && body ? body : statusText || $t("请求失败（{status}）", { status }));
 }

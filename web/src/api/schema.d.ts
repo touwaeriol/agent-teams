@@ -2705,6 +2705,8 @@ export interface components {
             /** @description Human-readable message (Chinese) */
             detail: string;
             fields?: components["schemas"]["FieldError"][] | null;
+            /** @description Translatable form of detail (key + params) */
+            message?: components["schemas"]["Text"];
         };
         Activity: {
             /** Format: date-time */
@@ -3392,6 +3394,8 @@ export interface components {
         FieldError: {
             message: string;
             path: string;
+            /** @description Translatable form of message */
+            text?: components["schemas"]["Text"];
         };
         File: {
             content: string;
@@ -5110,6 +5114,14 @@ export interface components {
             credential?: components["schemas"]["GitCredentialInput"];
             credential_id?: string;
             url: string;
+        };
+        Text: {
+            /** @description Message key: the Simplified Chinese text with {name} placeholders */
+            key: string;
+            /** @description Values for the placeholders */
+            params?: {
+                [key: string]: string;
+            };
         };
         ThreadCounts: {
             /** Format: int64 */

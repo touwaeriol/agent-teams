@@ -14,6 +14,7 @@ import (
 	"github.com/touwaeriol/agent-teams/server/internal/credvault"
 	"github.com/touwaeriol/agent-teams/server/internal/gitrelay"
 	"github.com/touwaeriol/agent-teams/server/internal/gitremote"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/sshdial"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -202,7 +203,7 @@ func (s *Server) registerGitRepos(api huma.API) {
 func gitStoreErr(err error, notFound string) error {
 	switch {
 	case errors.Is(err, store.ErrInUse):
-		return fail(http.StatusConflict, "in_use", "还在使用中，不能删除："+notFound)
+		return failMsg(http.StatusConflict, "in_use", gitNouns[notFound].inUse)
 	case errors.Is(err, store.ErrHostMismatch):
 		return fail(http.StatusUnprocessableEntity, "host_mismatch", store.ErrHostMismatch.Error())
 	case errors.Is(err, store.ErrCredentialRequired):
@@ -212,7 +213,15 @@ func gitStoreErr(err error, notFound string) error {
 	case errors.Is(err, store.ErrConflict):
 		return fail(http.StatusConflict, "name_taken", "已经有同名的凭据了")
 	}
-	return storeErr(err, "没有找到："+notFound)
+	m := gitNouns[notFound].notFound
+	return storeErrMsg(err, m)
+}
+
+// The messages for what gitStoreErr is about (repositories or credentials), spelled out so each is one key.
+var gitNouns = map[string]struct{ inUse, notFound msg.Text }{
+	"仓库": {msg.T("还在使用中，不能删除：仓库"), msg.T("没有找到：仓库")},
+	"凭据": {msg.T("还在使用中，不能删除：凭据"), msg.T("没有找到：凭据")},
+	"凭据（先把用它的仓库换成别的凭据或删除）": {msg.T("还在使用中，不能删除：凭据（先把用它的仓库换成别的凭据或删除）"), msg.T("没有找到：凭据（先把用它的仓库换成别的凭据或删除）")},
 }
 
 var gitProviders = map[string]bool{"github": true, "gitlab": true, "gitea": true, "bitbucket": true, "generic": true}
@@ -509,7 +518,7 @@ func (s *Server) checkCredForRepo(ctx context.Context, userID, credID string, pa
 	want := map[string]string{"https": credvault.GitHTTPSToken, "ssh": credvault.GitSSHKey}[parsed.Transport]
 	switch {
 	case c.Host != parsed.Host:
-		return fail(http.StatusUnprocessableEntity, "host_mismatch", "凭据属于 "+c.Host+"，不能用在 "+parsed.Host+" 的仓库上")
+		return failf(http.StatusUnprocessableEntity, "host_mismatch", "凭据属于 {host}，不能用在 {repo_host} 的仓库上", "host", c.Host, "repo_host", parsed.Host)
 	case c.Kind != want:
 		return fail(http.StatusUnprocessableEntity, "kind_mismatch", "HTTPS 地址要用令牌，SSH 地址要用 SSH 私钥")
 	}
@@ -571,7 +580,7 @@ func (s *Server) deleteGitRepo(ctx context.Context, in *gitIDInput) (*struct{}, 
 			for _, pr := range used[in.ID] {
 				names = append(names, pr.Name)
 			}
-			return nil, fail(http.StatusConflict, "in_use", "还有项目在用这个仓库："+strings.Join(names, "、")+"。先在项目设置里移除")
+			return nil, failf(http.StatusConflict, "in_use", "还有项目在用这个仓库：{projects}。先在项目设置里移除", "projects", strings.Join(names, "、"))
 		}
 		return nil, gitStoreErr(err, "仓库")
 	}

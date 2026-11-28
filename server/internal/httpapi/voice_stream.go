@@ -64,7 +64,7 @@ func (s *Server) voiceStream(c *gin.Context) {
 	}
 	lang := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("language")))
 	if !voice.KnownLanguage(lang) {
-		writeError(c.Writer, invalid([]FieldError{{"language", "不支持这个语言"}}, "不支持这个语言："+lang))
+		writeError(c.Writer, invalidf([]FieldError{{Path: "language", Message: "不支持这个语言"}}, "不支持这个语言：{language}", "language", lang))
 		return
 	}
 	if lang == "" {

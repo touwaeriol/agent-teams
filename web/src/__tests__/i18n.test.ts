@@ -8,7 +8,8 @@ import zh from "@/i18n/locales/zh-CN.json";
 import en from "@/i18n/locales/en.json";
 import ko from "@/i18n/locales/ko.json";
 import ja from "@/i18n/locales/ja.json";
-import { applyChoice, currentLocale, detectLocale, resolveLocale, setLocale, syncAccountLocale } from "@/i18n";
+import { applyChoice, currentLocale, detectLocale, resolveLocale, serverText, setLocale, syncAccountLocale } from "@/i18n";
+import { toApiError } from "@/api/client";
 import { sessionText } from "@/components/app/session/session";
 
 const LOCALES: Record<string, Record<string, string>> = { en, ko, ja };
@@ -91,5 +92,32 @@ describe("choosing the language", () => {
     expect(sessionText("The lead opened two threads")).toBe("The employee opened two sessions");
     await setLocale("ja");
     expect(sessionText("リーダーがスレッドを開く")).toBe("スタッフがセッションを開く");
+  });
+});
+
+describe("server messages", () => {
+  afterEach(() => setLocale("zh-CN"));
+
+  it("shows the server's key + params in the interface language", async () => {
+    await setLocale("en");
+    const e = toApiError(409, { detail: "已经有叫 alpha 的项目了", code: "project_exists", message: { key: "已经有叫 {name} 的项目了", params: { name: "alpha" } } });
+    expect(e.message).toBe("A project named alpha already exists");
+    expect(e.code).toBe("project_exists");
+  });
+
+  it("a one-field error is said once; other field problems follow the summary", async () => {
+    await setLocale("en");
+    const one = { key: "没有这个岗位：{role}", params: { role: "dev" } };
+    expect(toApiError(422, { detail: "没有这个岗位：dev", message: one, fields: [{ path: "role", message: "没有这个岗位：dev", text: one }] }).message).toBe("No such role: dev");
+    const two = toApiError(422, { detail: "参数不正确", message: { key: "参数不正确" }, fields: [{ path: "name", message: "名称不能为空" }] });
+    expect(two.message).toBe("Invalid parameters: Name can't be empty");
+    expect(two.fields[0].message).toBe("Name can't be empty");
+  });
+
+  it("an unknown key (newer server, upstream text) shows as rendered text, never compiled", async () => {
+    await setLocale("en");
+    expect(serverText({ key: "上游说 {why} @x | y", params: { why: "boom" } })).toBe("上游说 boom @x | y");
+    expect(serverText(null, "原文")).toBe("原文");
+    expect(toApiError(502, { detail: "git: exit 128" }).message).toBe("git: exit 128");
   });
 });

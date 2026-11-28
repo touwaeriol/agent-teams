@@ -317,10 +317,10 @@ func (s *Server) adminSaveSettings(ctx context.Context, in *adminSettingsInput) 
 	b := in.Body
 	b.NodeURL = strings.TrimRight(strings.TrimSpace(b.NodeURL), "/")
 	if b.NodeURL != "" && !config.IsOrigin(b.NodeURL) {
-		return nil, invalid([]FieldError{{"node_url", "要填 https://域名 这样的地址，不带路径"}}, "节点注册地址要填 https://域名 这样的地址，不带路径")
+		return nil, invalid([]FieldError{{Path: "node_url", Message: "要填 https://域名 这样的地址，不带路径"}}, "节点注册地址要填 https://域名 这样的地址，不带路径")
 	}
 	if _, err := s.office.Get(b.OfficeDefault); err != nil {
-		return nil, invalid([]FieldError{{"office_default", "没有这个布局"}}, "没有这个布局："+b.OfficeDefault)
+		return nil, invalidf([]FieldError{{Path: "office_default", Message: "没有这个布局"}}, "没有这个布局：{name}", "name", b.OfficeDefault)
 	}
 	err = s.store.Tx(ctx, func(tx *store.Store) error {
 		return saveSettings(ctx, tx, b)
