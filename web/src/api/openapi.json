@@ -5544,10 +5544,13 @@
             ],
             "type": "string"
           },
-          "workflow": {
-            "description": "'' = my default workflow, none = no workflow, else a workflow id",
-            "maxLength": 64,
-            "type": "string"
+          "workflows": {
+            "description": "[] = my default workflow, [none] = no workflow, else workflow ids (at most 10)",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "type": "array"
           }
         },
         "type": "object"
@@ -5718,9 +5721,15 @@
             ],
             "type": "string"
           },
-          "workflow": {
-            "description": "The workflow (流程图) its thread leads follow: '' = my default workflow, none = no workflow, else a workflow id",
-            "type": "string"
+          "workflows": {
+            "description": "The workflows (流程图) its thread leads follow, any number (the lead picks the one that fits each task): [] = my default workflow, [none] = no workflow, else workflow ids",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
@@ -5742,7 +5751,7 @@
           "thread_codex_model",
           "thread_effort",
           "auto_resume",
-          "workflow",
+          "workflows",
           "kind",
           "waiting",
           "threads_active",

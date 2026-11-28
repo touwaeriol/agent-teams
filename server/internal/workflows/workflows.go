@@ -24,8 +24,8 @@ const (
 	MaxInstrRunes   = 2000
 	MaxLabelRunes   = 20
 	MaxCoord        = 100000
-	ProjectNone     = "none" // at_projects.workflow: no flow for this project
-	ProjectDefault  = ""     // at_projects.workflow: the user's default flow
+	ProjectNone     = "none" // at_projects.workflows: [none] = no flow for this project
+	MaxPerProject   = 10     // flows one project may pick
 	leadRole        = "lead"
 	approvalKind    = "approval"
 	nextEdge        = "next"

@@ -4385,8 +4385,8 @@ export interface components {
             thread_model?: string;
             /** @enum {string} */
             work_mode?: "worktree" | "clone";
-            /** @description '' = my default workflow, none = no workflow, else a workflow id */
-            workflow?: string;
+            /** @description [] = my default workflow, [none] = no workflow, else workflow ids (at most 10) */
+            workflows?: string[];
         };
         ProjectUsage: {
             by_day: components["schemas"]["DayUsage"][] | null;
@@ -4447,8 +4447,8 @@ export interface components {
             waiting: number;
             /** @enum {string} */
             work_mode: "worktree" | "clone";
-            /** @description The workflow (流程图) its thread leads follow: '' = my default workflow, none = no workflow, else a workflow id */
-            workflow: string;
+            /** @description The workflows (流程图) its thread leads follow, any number (the lead picks the one that fits each task): [] = my default workflow, [none] = no workflow, else workflow ids */
+            workflows: string[] | null;
         };
         PutLayoutInputBody: {
             /** @description Layout document (office-layout.schema.json) */

@@ -4,9 +4,10 @@
 -- flow is a reference for thread leads: it is written into their system prompt and the lead
 -- splits tasks by it; the platform neither expands nor blocks tasks.
 --   steps   [{"id", "name", "role", "kind": work|review|decision|approval, "instructions", "x", "y"}]
---   edges   [{"from", "to", "kind": next|reject, "label"}]
+--   edges   [{"from", "to", "kind": next|branch|reject, "label"}]
 --   is_default  the flow of the user's projects that pick none (at most one per user)
--- at_projects.workflow: '' = the user's default flow, 'none' = no flow, else a workflow id.
+-- at_projects.workflows: the flows its leads follow, any number (the lead picks the one that
+-- fits each task): {} = the user's default flow, {none} = no flow, else workflow ids in order.
 CREATE TABLE IF NOT EXISTS at_workflows (
   id          TEXT PRIMARY KEY,                    -- wf_…
   user_id     TEXT NOT NULL REFERENCES at_users(id) ON DELETE CASCADE,
@@ -21,8 +22,8 @@ CREATE TABLE IF NOT EXISTS at_workflows (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS at_workflows_default ON at_workflows (user_id) WHERE is_default;
 
-ALTER TABLE at_projects ADD COLUMN IF NOT EXISTS workflow TEXT NOT NULL DEFAULT '';
+ALTER TABLE at_projects ADD COLUMN IF NOT EXISTS workflows TEXT[] NOT NULL DEFAULT '{}';
 
 -- +goose Down
-ALTER TABLE at_projects DROP COLUMN IF EXISTS workflow;
+ALTER TABLE at_projects DROP COLUMN IF EXISTS workflows;
 DROP TABLE IF EXISTS at_workflows;

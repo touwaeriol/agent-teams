@@ -143,18 +143,26 @@ func TestLibrary(t *testing.T) {
 	if _, err := Get(ctx, pool, "u2", a.ID); err != ErrNotFound {
 		t.Fatalf("u2 get: %v", err)
 	}
-	if w, ok, _ := ForProject(ctx, pool, "u1", ""); !ok || w.ID != b.ID {
-		t.Fatalf("default pick %+v %v", w, ok)
+	if got, _ := ForProject(ctx, pool, "u1", nil); len(got) != 1 || got[0].ID != b.ID {
+		t.Fatalf("default pick %+v", got)
 	}
-	if _, ok, _ := ForProject(ctx, pool, "u1", ProjectNone); ok {
+	if got, _ := ForProject(ctx, pool, "u1", []string{ProjectNone}); len(got) != 0 {
 		t.Fatal("none must give no flow")
 	}
-	if w, ok, _ := ForProject(ctx, pool, "u1", a.ID); !ok || w.ID != a.ID {
-		t.Fatalf("id pick %+v %v", w, ok)
+	if got, _ := ForProject(ctx, pool, "u1", []string{a.ID}); len(got) != 1 || got[0].ID != a.ID {
+		t.Fatalf("id pick %+v", got)
 	}
-	section, err := LeadSection(ctx, pool, "u1", a.ID)
-	if err != nil || !strings.Contains(section, "岗位 开发（dev）") || !strings.Contains(section, "岗位 qa，已不在团队里") {
+	if got, _ := ForProject(ctx, pool, "u1", []string{b.ID, "wf_gone", a.ID}); len(got) != 2 || got[0].ID != b.ID || got[1].ID != a.ID {
+		t.Fatalf("several picks keep their order and skip gone ones %+v", got)
+	}
+	section, err := LeadSection(ctx, pool, "u1", []string{a.ID})
+	if err != nil || !strings.Contains(section, "## 工作流程：开发流程") || !strings.Contains(section, "岗位 开发（dev）") || !strings.Contains(section, "岗位 qa，已不在团队里") {
 		t.Fatalf("lead section %v:\n%s", err, section)
+	}
+	both, err := LeadSection(ctx, pool, "u1", []string{a.ID, b.ID})
+	if err != nil || !strings.Contains(both, "## 工作流程（2 个）") || !strings.Contains(both, "挑最合适的一个流程") ||
+		!strings.Contains(both, "### 流程：开发流程") || !strings.Contains(both, "### 流程：小改动") || strings.Count(both, "```mermaid") != 2 {
+		t.Fatalf("two flows %v:\n%s", err, both)
 	}
 	renamed := first
 	renamed.Name = "开发流程 v2"
@@ -164,7 +172,7 @@ func TestLibrary(t *testing.T) {
 	if _, err := Update(ctx, pool, "u2", a.ID, renamed); err != ErrNotFound {
 		t.Fatalf("u2 update: %v", err)
 	}
-	if _, err := store.Exec(ctx, pool, `UPDATE at_projects SET workflow = $1 WHERE id = 'p1'`, a.ID); err != nil {
+	if _, err := store.Exec(ctx, pool, `UPDATE at_projects SET workflows = ARRAY[$1, $2] WHERE id = 'p1'`, a.ID, b.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := Delete(ctx, pool, "u2", a.ID); err != ErrNotFound {
@@ -173,9 +181,9 @@ func TestLibrary(t *testing.T) {
 	if err := Delete(ctx, pool, "u1", a.ID); err != nil {
 		t.Fatal(err)
 	}
-	var pick string
-	if err := store.QueryRow(ctx, pool, `SELECT workflow FROM at_projects WHERE id = 'p1'`).Scan(&pick); err != nil || pick != "" {
-		t.Fatalf("project pick after delete %q %v", pick, err)
+	var picks store.TextArray
+	if err := store.QueryRow(ctx, pool, `SELECT workflows FROM at_projects WHERE id = 'p1'`).Scan(&picks); err != nil || len(picks) != 1 || picks[0] != b.ID {
+		t.Fatalf("project picks after delete %v %v", picks, err)
 	}
 }
 

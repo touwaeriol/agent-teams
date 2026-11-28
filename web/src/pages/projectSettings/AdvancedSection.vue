@@ -7,6 +7,7 @@ import { RouterLink } from "vue-router";
 import { useRoles, useWorkflows } from "@/api/queries";
 import type { ProjectView } from "@/api/views";
 import { usesAsk } from "@/lib/roles";
+import { NO_FLOW, pickFlows } from "@/pages/settings/workflows/flow";
 import ApprovalRows from "./ApprovalRows.vue";
 import Heading from "./Heading.vue";
 import Row from "./Row.vue";
@@ -18,15 +19,13 @@ const update = useUpdate(() => props.project.id);
 const roles = useRoles();
 const ask = computed(() => usesAsk(roles.data.value?.roles ?? []));
 const flows = useWorkflows();
-const flowOptions = computed(() => {
-  const list = flows.data.value?.workflows ?? [];
-  const def = list.find((f) => f.is_default);
-  return [
-    { value: "", label: def ? `默认流程（${def.name}）` : "默认流程（还没有）" },
-    { value: "none", label: "不用流程" },
-    ...list.map((f) => ({ value: f.id, label: f.name })),
-  ];
+const flowList = computed(() => flows.data.value?.workflows ?? []);
+const flowOptions = computed(() => [{ value: NO_FLOW, label: "不用流程" }, ...flowList.value.map((f) => ({ value: f.id, label: f.name }))]);
+const flowHint = computed(() => {
+  const def = flowList.value.find((f) => f.is_default);
+  return def ? `没选时用默认流程（${def.name}）` : "没选时不用流程";
 });
+const picked = computed(() => (props.project.workflows ?? []).filter((id) => id === NO_FLOW || flowList.value.some((f) => f.id === id)));
 const POLICY: { value: ProjectView["merge_policy"]; label: string }[] = [
   { value: "pr", label: "提交 PR 即完成" },
   { value: "auto", label: "检查通过后自动合并" },
@@ -42,12 +41,17 @@ const MERGE = [
 <template>
   <div class="flex flex-col">
     <Heading>高级</Heading>
-    <Row title="工作流程" desc="讨论串的组长拆任务、指派岗位时参考的流程图；改了以后，新开的组长会话按新流程。">
+    <Row title="工作流程" desc="讨论串的组长拆任务时参考的流程图，可以选多个，组长按每个任务挑合适的流程。改了以后，新开的组长会话按新流程。">
       <el-select
-        :model-value="project.workflow"
+        :model-value="picked"
+        multiple
+        collapse-tags
+        collapse-tags-tooltip
+        :max-collapse-tags="2"
+        :placeholder="flowHint"
         aria-label="工作流程"
-        class="at-select-36 at-raised !w-52"
-        @update:model-value="(v: string) => update.mutate({ workflow: v })"
+        class="at-select-36 at-raised !w-64"
+        @update:model-value="(v: string[]) => update.mutate({ workflows: pickFlows(v, picked) })"
       >
         <el-option v-for="f in flowOptions" :key="f.value" :value="f.value" :label="f.label" />
       </el-select>

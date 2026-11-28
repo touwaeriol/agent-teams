@@ -226,7 +226,7 @@ func (o *Orchestrator) systemAppend(ctx context.Context, q core.DB, e core.Emplo
 		parts = append(parts, "## 团队（成员是项目共用的，谁正在哪个讨论串忙用 list_team 查看）\n"+roster)
 	}
 	if e.Tier == "lead" {
-		flow, err := workflows.LeadSection(ctx, q, p.UserID, p.Workflow)
+		flow, err := workflows.LeadSection(ctx, q, p.UserID, p.Workflows)
 		if err != nil {
 			return "", err
 		}

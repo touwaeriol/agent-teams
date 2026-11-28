@@ -34,8 +34,9 @@ type Project struct {
 	ThreadCodexModel string
 	ThreadEffort     string
 	AutoResume       bool
-	// Workflow is the flow its leads follow: '' = the user's default, none, or a workflow id.
-	Workflow string
+	// Workflows are the flows its leads follow: empty = the user's default, [none] = none, else
+	// workflow ids.
+	Workflows []string `gorm:"serializer:pgtext"`
 	// Kind is project (default) or session (多仓库会话: one thread, its employee talks to the user
 	// directly; see migrations/00420_project_kind.sql).
 	Kind          string
@@ -112,7 +113,7 @@ const projectCols = `p.id, p.user_id, p.name, p.description, p.context,
 	COALESCE((SELECT json_agg(json_build_object('repo', r.repo, 'git_connection_id', r.git_connection_id, 'git_repo_id', r.git_repo_id, 'base_branch', r.base_branch)
 	  ORDER BY r.position, r.created_at) FROM at_project_repos r WHERE r.project_id = p.id), '[]'::json) AS repos,
 	p.created_at, p.updated_at, p.pinned, p.archived, p.work_mode, p.auto_approve, p.merge_policy,
-	p.delivery, p.office_layout, p.icon, p.coordinator_model, p.thread_model, p.thread_codex_model, p.thread_effort, p.auto_resume, p.workflow, p.kind,
+	p.delivery, p.office_layout, p.icon, p.coordinator_model, p.thread_model, p.thread_codex_model, p.thread_effort, p.auto_resume, p.workflows, p.kind,
 	(SELECT count(*) FROM at_questions q WHERE q.project_id = p.id AND q.status = 'open' AND q.audience = 'user')
 	  + (SELECT count(*) FROM at_threads t WHERE t.project_id = p.id AND t.status = 'review'
 	    AND (p.merge_policy = 'manual' OR t.merge_error IS NOT NULL)) AS waiting,

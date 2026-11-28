@@ -12,15 +12,38 @@ var kindText = map[string]string{
 	approvalKind: "等用户确认",
 }
 
-const renderGuide = `这是用户给这个项目配的工作流程（流程图），拆任务、指派岗位时按它来：每个步骤建成交给对应岗位的任务，用 depends_on 体现先后；一个步骤“然后”指向几个步骤时，这几个步骤并行（各自只依赖前一步，不要串起来），一个步骤有几条“然后”指进来时，要等它们全部完成（depends_on 写全）；一个步骤连出几条“条件分支”时只走其中一条：按线上的条件判断走哪条，没走的分支上的步骤不建任务，汇合处只依赖实际走过的那条；审查、决策步骤不通过时，按“不通过退回”的连线给被退回的步骤开返工任务，再重新走后面的步骤；“等用户确认”的步骤用 ask_user 请用户确认后再继续；岗位是组长（lead）的步骤由你自己做。流程是参考：遇到流程没覆盖的情况可以调整或加任务，但要在回复里说明原因。`
+const renderGuide = `拆任务、指派岗位时按流程图来：每个步骤建成交给对应岗位的任务，用 depends_on 体现先后；一个步骤“然后”指向几个步骤时，这几个步骤并行（各自只依赖前一步，不要串起来），一个步骤有几条“然后”指进来时，要等它们全部完成（depends_on 写全）；一个步骤连出几条“条件分支”时只走其中一条：按线上的条件判断走哪条，没走的分支上的步骤不建任务，汇合处只依赖实际走过的那条；审查、决策步骤不通过时，按“不通过退回”的连线给被退回的步骤开返工任务，再重新走后面的步骤；“等用户确认”的步骤用 ask_user 请用户确认后再继续；岗位是组长（lead）的步骤由你自己做。流程是参考：遇到流程没覆盖的情况可以调整或加任务，但要在回复里说明原因。`
+
+const multiGuide = `这个项目配了 %d 个工作流程，适用于不同的事。拆每个任务前，先按任务的性质挑最合适的一个流程（必要时组合几个），在回复里说明这次按哪个流程走，然后照它拆任务。每个流程内部的规则：`
+
+// RenderAll is the lead's system prompt section for the project's flows: one flow as Render, several
+// under one heading with a note to pick the flow that fits each task.
+func RenderAll(flows []Flow, titles map[string]string) string {
+	if len(flows) == 1 {
+		return Render(flows[0], titles)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "## 工作流程（%d 个）\n"+multiGuide+"%s\n", len(flows), len(flows), renderGuide)
+	for _, w := range flows {
+		b.WriteString("\n### 流程：" + w.Name + "\n")
+		writeFlow(&b, w, titles)
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
 
 // Render is the flow as the lead's system prompt section; titles maps member role keys to
 // their titles (a key missing there is a role no longer in the team).
 func Render(w Flow, titles map[string]string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## 工作流程：%s\n%s\n", w.Name, renderGuide)
+	writeFlow(&b, w, titles)
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func writeFlow(b *strings.Builder, w Flow, titles map[string]string) {
 	if w.Description != "" {
-		b.WriteString("\n流程说明（用户编写）：\n" + w.Description + "\n")
+		b.WriteString("流程说明（用户编写）：\n" + w.Description + "\n")
 	}
 	byID := map[string]FlowStep{}
 	for _, s := range w.Steps {
@@ -30,7 +53,7 @@ func Render(w Flow, titles map[string]string) string {
 	b.WriteString(Mermaid(w, titles))
 	b.WriteString("\n\n每一步的详细说明（按先后排列）：\n")
 	for i, s := range Ordered(w) {
-		fmt.Fprintf(&b, "%d. %s（%s，%s）\n", i+1, s.Name, roleText(s, titles), kindText[s.Kind])
+		fmt.Fprintf(b, "%d. %s（%s，%s）\n", i+1, s.Name, roleText(s, titles), kindText[s.Kind])
 		if s.Instructions != "" {
 			b.WriteString("   说明：" + indent(s.Instructions) + "\n")
 		}
@@ -38,7 +61,6 @@ func Render(w Flow, titles map[string]string) string {
 			b.WriteString("   " + out + "\n")
 		}
 	}
-	return strings.TrimRight(b.String(), "\n")
 }
 
 // Mermaid is the flow as a Mermaid flowchart (left to right), the same chart the user drew.

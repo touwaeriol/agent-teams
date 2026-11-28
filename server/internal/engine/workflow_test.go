@@ -11,7 +11,8 @@ import (
 
 // TestWorkflowInLeadPrompt: a saved flow (the user's first, so the default) is written into the
 // next thread lead's prompt with its parallel branches; a step naming a role outside the team is
-// refused; a project that picks none leaves the flow out; an unknown pick is refused.
+// refused; a project may pick several flows (the lead gets both and picks per task); none leaves
+// the flow out; an unknown pick or none with others is refused.
 func TestWorkflowInLeadPrompt(t *testing.T) {
 	tm := startTeam(t)
 	flow := map[string]any{"name": "开发流程", "steps": []map[string]any{
@@ -38,11 +39,27 @@ func TestWorkflowInLeadPrompt(t *testing.T) {
 		}
 	}
 
-	tm.b.must(422, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"workflow": "wf_nope"}, nil)
-	var view struct{ Workflow string }
-	tm.b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"workflow": "none"}, &view)
-	if view.Workflow != "none" {
-		t.Fatalf("project workflow %q", view.Workflow)
+	small := map[string]any{"name": "小改动", "steps": []map[string]any{{"id": "a", "name": "直接改", "role": "dev"}}, "edges": []any{}}
+	var second struct {
+		ID string `json:"id"`
+	}
+	tm.b.must(201, "POST", "/api/workflows", small, &second)
+	tm.b.must(422, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"workflows": []string{"wf_nope"}}, nil)
+	tm.b.must(422, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"workflows": []string{"none", second.ID}}, nil)
+	var view struct{ Workflows []string }
+	tm.b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"workflows": []string{created.ID, second.ID, created.ID}}, &view)
+	if strings.Join(view.Workflows, ",") != created.ID+","+second.ID {
+		t.Fatalf("project workflows %v", view.Workflows)
+	}
+	sys = openLeadPrompt(t, tm, "Flow both")
+	for _, want := range []string{"## 工作流程（2 个）", "### 流程：开发流程", "### 流程：小改动"} {
+		if !strings.Contains(sys, want) {
+			t.Fatalf("lead prompt misses %q:\n%s", want, sys)
+		}
+	}
+	tm.b.must(200, "PATCH", "/api/projects/"+tm.projectID, map[string]any{"workflows": []string{"none"}}, &view)
+	if len(view.Workflows) != 1 || view.Workflows[0] != "none" {
+		t.Fatalf("project workflows %v", view.Workflows)
 	}
 	if sys := openLeadPrompt(t, tm, "Flow two"); strings.Contains(sys, "## 工作流程") {
 		t.Fatal("a project with no flow still got one")

@@ -3,6 +3,8 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"slices"
 
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -111,7 +113,8 @@ func uniqueName(err error, name string) error {
 	return err
 }
 
-// Delete removes a flow; projects that picked it fall back to the user's default.
+// Delete removes a flow and takes it out of every project that picked it (a project left with
+// none falls back to the user's default).
 func Delete(ctx context.Context, db store.DB, userID, id string) error {
 	tag, err := store.Exec(ctx, db, `DELETE FROM at_workflows WHERE user_id = $1 AND id = $2`, userID, id)
 	if err != nil {
@@ -120,52 +123,68 @@ func Delete(ctx context.Context, db store.DB, userID, id string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	_, err = store.Exec(ctx, db, `UPDATE at_projects SET workflow = '' WHERE user_id = $1 AND workflow = $2`, userID, id)
+	_, err = store.Exec(ctx, db, `UPDATE at_projects SET workflows = array_remove(workflows, $2)
+		WHERE user_id = $1 AND $2 = ANY(workflows)`, userID, id)
 	return err
 }
 
-// ForProject is the flow a project's leads follow: the picked one, else the user's default;
-// ok is false for none (the project chose none, or the user has no default).
-func ForProject(ctx context.Context, db store.DB, userID, pick string) (Flow, bool, error) {
-	if pick == ProjectNone {
-		return Flow{}, false, nil
+// ForProject is the flows a project's leads follow, in the project's order: the picked ones,
+// else the user's default (none for [none], or when the user has no default). Picked ids that no
+// longer exist are skipped.
+func ForProject(ctx context.Context, db store.DB, userID string, picks []string) ([]Flow, error) {
+	if slices.Contains(picks, ProjectNone) {
+		return nil, nil
 	}
-	where, arg := `is_default`, any(nil)
-	if pick != ProjectDefault {
-		where, arg = `id = $2`, pick
+	if len(picks) == 0 {
+		w, err := scan(store.QueryRow(ctx, db, `SELECT `+cols+` FROM at_workflows WHERE user_id = $1 AND is_default`, userID))
+		if store.IsNoRows(err) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return []Flow{w}, nil
 	}
-	args := []any{userID}
-	if arg != nil {
-		args = append(args, arg)
+	out := []Flow{}
+	for _, id := range picks {
+		w, err := Get(ctx, db, userID, id)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
 	}
-	w, err := scan(store.QueryRow(ctx, db, `SELECT `+cols+` FROM at_workflows WHERE user_id = $1 AND `+where, args...))
-	if store.IsNoRows(err) {
-		return Flow{}, false, nil
-	}
-	return w, err == nil, err
+	return out, nil
 }
 
 // LeadSection is the flow section of a thread lead's system prompt ("" without a flow).
-func LeadSection(ctx context.Context, db store.DB, userID, pick string) (string, error) {
-	w, ok, err := ForProject(ctx, db, userID, pick)
-	if err != nil || !ok {
+func LeadSection(ctx context.Context, db store.DB, userID string, picks []string) (string, error) {
+	flows, err := ForProject(ctx, db, userID, picks)
+	if err != nil || len(flows) == 0 {
 		return "", err
 	}
-	rows, err := store.Query(ctx, db, `SELECT role, title FROM at_roles WHERE user_id = $1 AND tier = 'member'`, userID)
+	titles, err := memberTitles(ctx, db, userID)
 	if err != nil {
 		return "", err
+	}
+	return RenderAll(flows, titles), nil
+}
+
+func memberTitles(ctx context.Context, db store.DB, userID string) (map[string]string, error) {
+	rows, err := store.Query(ctx, db, `SELECT role, title FROM at_roles WHERE user_id = $1 AND tier = 'member' AND project_id IS NULL`, userID)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 	titles := map[string]string{}
 	for rows.Next() {
 		var role, title string
 		if err := rows.Scan(&role, &title); err != nil {
-			return "", err
+			return nil, err
 		}
 		titles[role] = title
 	}
-	if err := rows.Err(); err != nil {
-		return "", err
-	}
-	return Render(w, titles), nil
+	return titles, rows.Err()
 }

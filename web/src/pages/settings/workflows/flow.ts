@@ -160,3 +160,16 @@ export function unlabeledBranches(d: FlowDraft): number {
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
 }
+
+/** The project pick meaning "no flow at all" (alone in at_projects.workflows). */
+export const NO_FLOW = "none";
+
+/**
+ * A project's flow picks after the multi-select changed from prev to next: choosing 不用流程 clears
+ * the flows, choosing a flow drops 不用流程; at most 10.
+ */
+export function pickFlows(next: string[], prev: string[]): string[] {
+  const added = next.filter((v) => !prev.includes(v));
+  if (added.includes(NO_FLOW)) return [NO_FLOW];
+  return next.filter((v) => v !== NO_FLOW).slice(0, 10);
+}

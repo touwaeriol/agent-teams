@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -135,17 +136,45 @@ func workflowError(err error) error {
 
 // workflowChange validates a project's flow pick: ” (the default), none, or one of the
 // user's flows.
-func (s *Server) workflowChange(ctx context.Context, userID string, pick *string) ([]store.Change, error) {
-	if pick == nil {
+func (s *Server) workflowChange(ctx context.Context, userID string, picks *[]string) ([]store.Change, error) {
+	if picks == nil {
 		return nil, nil
 	}
-	if *pick != workflows.ProjectDefault && *pick != workflows.ProjectNone {
-		if _, err := workflows.Get(ctx, s.store.Pool, userID, *pick); err != nil {
+	ids := uniqueStrings(*picks)
+	if slices.Contains(ids, workflows.ProjectNone) && len(ids) > 1 {
+		return nil, invalid([]FieldError{{"workflows", "选了“不用流程”就不能再选别的流程"}}, "选了“不用流程”就不能再选别的流程")
+	}
+	if len(ids) > workflows.MaxPerProject {
+		return nil, invalid([]FieldError{{"workflows", "一个项目最多选 10 个流程"}}, "一个项目最多选 10 个流程")
+	}
+	for _, id := range ids {
+		if id == workflows.ProjectNone {
+			continue
+		}
+		if _, err := workflows.Get(ctx, s.store.Pool, userID, id); err != nil {
 			if errors.Is(err, workflows.ErrNotFound) {
-				return nil, invalid([]FieldError{{"workflow", "没有这个流程"}}, "没有这个流程")
+				return nil, invalid([]FieldError{{"workflows", "没有这个流程"}}, "没有这个流程："+id)
 			}
 			return nil, err
 		}
 	}
-	return []store.Change{{Col: "workflow", Val: *pick}}, nil
+	return []store.Change{{Col: "workflows", Val: store.TextArray(ids)}}, nil
+}
+
+// uniqueStrings keeps the first of each value, in order (never nil).
+func uniqueStrings(in []string) []string {
+	out := []string{}
+	for _, v := range in {
+		if !slices.Contains(out, v) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }

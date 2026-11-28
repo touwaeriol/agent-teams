@@ -2252,7 +2252,7 @@ INSERT INTO at_user_fs (user_id, volume, meta_role, s3_access_key, secrets, capa
 }
 
 // TestWorkflowsMigration: 00540 adds at_workflows (names unique per user, at most one default
-// per user) and at_projects.workflow (” for existing projects); Down drops both.
+// per user) and at_projects.workflows ({} for existing projects); Down drops both.
 func TestWorkflowsMigration(t *testing.T) {
 	db := open(t, testdb.URL(t))
 	ctx := context.Background()
@@ -2271,9 +2271,9 @@ INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'P');`); err != 
 	if _, err := p.UpTo(ctx, 540); err != nil {
 		t.Fatal(err)
 	}
-	var pick string
-	if err := db.QueryRow(`SELECT workflow FROM at_projects WHERE id = 'p1'`).Scan(&pick); err != nil || pick != "" {
-		t.Fatalf("existing project pick %q %v", pick, err)
+	var n int
+	if err := db.QueryRow(`SELECT cardinality(workflows) FROM at_projects WHERE id = 'p1'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("existing project picks %d %v", n, err)
 	}
 	if _, err := db.Exec(`INSERT INTO at_workflows (id, user_id, name, is_default) VALUES
 		('wf1', 'u1', 'a', TRUE), ('wf2', 'u1', 'b', FALSE), ('wf3', 'u2', 'a', TRUE)`); err != nil {
@@ -2291,7 +2291,7 @@ INSERT INTO at_projects (id, user_id, name) VALUES ('p1', 'u1', 'P');`); err != 
 	if _, err := db.Exec(`SELECT 1 FROM at_workflows`); err == nil {
 		t.Fatal("at_workflows survived down")
 	}
-	if _, err := db.Exec(`SELECT workflow FROM at_projects`); err == nil {
-		t.Fatal("at_projects.workflow survived down")
+	if _, err := db.Exec(`SELECT workflows FROM at_projects`); err == nil {
+		t.Fatal("at_projects.workflows survived down")
 	}
 }

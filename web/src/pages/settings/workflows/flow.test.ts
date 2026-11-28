@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { reactive } from "vue";
 import type { RoleView } from "@/api/views";
-import { addEdge, draftOf, freeName, layout, looseSteps, newStepId, presets, removeStep, roleChoices, roleLabel, unlabeledBranches } from "./flow";
+import { addEdge, draftOf, freeName, layout, looseSteps, newStepId, NO_FLOW, pickFlows, presets, removeStep, roleChoices, roleLabel, unlabeledBranches } from "./flow";
 
 const role = (tier: string, key: string, title: string) => ({ tier, role: key, title }) as unknown as RoleView;
 const team = [role("coordinator", "coordinator", "统筹"), role("lead", "lead", "组长"), role("member", "dev", "开发"), role("member", "qa", "测试")];
@@ -69,5 +69,13 @@ describe("workflow page logic", () => {
     const d = draftOf(saved);
     d.steps![0]!.name = "B";
     expect(saved.steps[0]!.name).toBe("A");
+  });
+
+  it("lets a project pick several flows, or none alone", () => {
+    expect(pickFlows(["a", "b"], ["a"])).toEqual(["a", "b"]);
+    expect(pickFlows(["a", NO_FLOW], ["a"])).toEqual([NO_FLOW]);
+    expect(pickFlows([NO_FLOW, "b"], [NO_FLOW])).toEqual(["b"]);
+    expect(pickFlows([], ["a"])).toEqual([]);
+    expect(pickFlows(Array.from({ length: 12 }, (_, i) => `f${i}`), [])).toHaveLength(10);
   });
 });
