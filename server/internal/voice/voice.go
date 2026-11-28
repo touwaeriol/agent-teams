@@ -19,13 +19,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // DefaultModel is OpenAI's streaming speech-to-text model for realtime transcription sessions.
@@ -109,7 +110,7 @@ func CheckBaseURL(raw string) error {
 	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("要填 http(s) 开头的完整地址，例如 https://api.openai.com/v1")
+		return msg.Err("要填 http(s) 开头的完整地址，例如 https://api.openai.com/v1")
 	}
 	return nil
 }

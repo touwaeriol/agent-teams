@@ -3,9 +3,9 @@ package credvault
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -37,12 +37,12 @@ func (c Credential) Check(kind string) (KeyInfo, error) {
 	switch kind {
 	case AuthPassword:
 		if c.Password == "" || c.PrivateKey != "" || c.Passphrase != "" {
-			return KeyInfo{}, fmt.Errorf("%w：密码认证只填密码", ErrInvalidCredential)
+			return KeyInfo{}, msg.Wrap(ErrInvalidCredential, "密码认证只填密码")
 		}
 		return KeyInfo{}, nil
 	case AuthPrivateKey:
 		if c.PrivateKey == "" || c.Password != "" {
-			return KeyInfo{}, fmt.Errorf("%w：私钥认证要填私钥", ErrInvalidCredential)
+			return KeyInfo{}, msg.Wrap(ErrInvalidCredential, "私钥认证要填私钥")
 		}
 		signer, err := c.Signer()
 		if err != nil {
@@ -54,7 +54,7 @@ func (c Credential) Check(kind string) (KeyInfo, error) {
 			Fingerprint: ssh.FingerprintSHA256(pub),
 		}, nil
 	default:
-		return KeyInfo{}, fmt.Errorf("%w：未知认证方式 %q", ErrInvalidCredential, kind)
+		return KeyInfo{}, msg.Wrap(ErrInvalidCredential, "未知认证方式 “{kind}”", "kind", kind)
 	}
 }
 
@@ -72,9 +72,9 @@ func (c Credential) Signer() (ssh.Signer, error) {
 	var missing *ssh.PassphraseMissingError
 	switch {
 	case errors.As(err, &missing):
-		return nil, fmt.Errorf("%w：私钥有口令，请一并填写", ErrInvalidCredential)
+		return nil, msg.Wrap(ErrInvalidCredential, "私钥有口令，请一并填写")
 	case err != nil:
-		return nil, fmt.Errorf("%w：私钥无法解析（%v）", ErrInvalidCredential, err)
+		return nil, msg.Wrap(ErrInvalidCredential, "私钥无法解析（{reason}）", "reason", err.Error())
 	}
 	return s, nil
 }

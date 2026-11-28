@@ -153,16 +153,17 @@ type testGitRepoInput struct {
 
 // GitTestResult is the answer of a repository test connection (always 200).
 type GitTestResult struct {
-	OK            bool   `json:"ok"`
-	Access        string `json:"access,omitempty" enum:",read,write"`
-	DefaultBranch string `json:"default_branch,omitempty"`
-	Branches      int    `json:"branches"`
-	Error         string `json:"error,omitempty" enum:"auth_failed,repo_not_found,host_key_mismatch,host_key_invalid,address_blocked,resolve_failed,connect_failed,timeout,credential_unreadable,failed"`
-	Message       string `json:"message,omitempty"`
-	HostKeyFP     string `json:"host_key_fp,omitempty"`
-	HostKeyType   string `json:"host_key_type,omitempty"`
-	HostKeyPinned bool   `json:"host_key_pinned"`
-	LatencyMS     int64  `json:"latency_ms"`
+	OK            bool      `json:"ok"`
+	Access        string    `json:"access,omitempty" enum:",read,write"`
+	DefaultBranch string    `json:"default_branch,omitempty"`
+	Branches      int       `json:"branches"`
+	Error         string    `json:"error,omitempty" enum:"auth_failed,repo_not_found,host_key_mismatch,host_key_invalid,address_blocked,resolve_failed,connect_failed,timeout,credential_unreadable,failed"`
+	Message       string    `json:"message,omitempty"`
+	Text          *msg.Text `json:"text,omitempty" doc:"Translatable form of message"`
+	HostKeyFP     string    `json:"host_key_fp,omitempty"`
+	HostKeyType   string    `json:"host_key_type,omitempty"`
+	HostKeyPinned bool      `json:"host_key_pinned"`
+	LatencyMS     int64     `json:"latency_ms"`
 }
 
 type gitTestOutput struct{ Body GitTestResult }
@@ -205,7 +206,7 @@ func gitStoreErr(err error, notFound string) error {
 	case errors.Is(err, store.ErrInUse):
 		return failMsg(http.StatusConflict, "in_use", gitNouns[notFound].inUse)
 	case errors.Is(err, store.ErrHostMismatch):
-		return fail(http.StatusUnprocessableEntity, "host_mismatch", store.ErrHostMismatch.Error())
+		return failErr(http.StatusUnprocessableEntity, "host_mismatch", store.ErrHostMismatch)
 	case errors.Is(err, store.ErrCredentialRequired):
 		return fail(http.StatusUnprocessableEntity, "credential_required", "改了用户名，必须同时重新填写令牌或私钥")
 	case errors.Is(err, store.ErrConflict) && strings.Contains(err.Error(), "slug"):
@@ -643,7 +644,7 @@ func (s *Server) testGitRepo(ctx context.Context, in *gitIDInput) (*gitTestOutpu
 func (s *Server) runSavedGitTest(ctx context.Context, userID string, r store.GitRepo) (GitTestResult, error) {
 	remote, err := s.GitRemote(ctx, userID, r)
 	if err != nil {
-		res := GitTestResult{Error: "credential_unreadable", Message: err.Error()}
+		res := gitFailed("credential_unreadable", msg.Of(err))
 		_ = s.store.RecordGitRepoCheck(ctx, r.ID, store.GitRepoCheck{Error: res.Message})
 		return res, nil
 	}
@@ -703,7 +704,7 @@ func (s *Server) testGitRepoDraft(ctx context.Context, in *testGitRepoInput) (*g
 		}
 		if remote, err = OpenGitRemote(ctx, s.store, s.vault, remote.Policy, p.User.ID, store.GitRepo{URL: parsed.URL,
 			Transport: parsed.Transport, Host: parsed.Host, CredentialID: b.CredentialID}); err != nil {
-			return &gitTestOutput{Body: GitTestResult{Error: "credential_unreadable", Message: err.Error()}}, nil
+			return &gitTestOutput{Body: gitFailed("credential_unreadable", msg.Of(err))}, nil
 		}
 	case b.Credential != nil:
 		c := b.Credential
@@ -736,10 +737,10 @@ func (s *Server) runGitTest(ctx context.Context, r gitremote.Remote) (GitTestRes
 	if r.Transport == "ssh" {
 		host, port, err := r.HostPort()
 		if err != nil {
-			return GitTestResult{Error: "failed", Message: err.Error()}, nil
+			return gitFailed("failed", msg.Of(err)), nil
 		}
 		if r.Kind == "" {
-			return GitTestResult{Error: "auth_failed", Message: "SSH 地址需要 SSH 私钥"}, nil
+			return gitFailed("auth_failed", msg.T("SSH 地址需要 SSH 私钥")), nil
 		}
 		dial, err := r.Policy.Dial(ctx, sshdial.Target{Host: host, Port: port, Username: r.Username, AuthKind: credvault.AuthPrivateKey,
 			Cred: r.Cred, HostKey: r.HostKey}, gitTestTimeout)
@@ -751,7 +752,7 @@ func (s *Server) runGitTest(ctx context.Context, r gitremote.Remote) (GitTestRes
 			_ = dial.Client.Close()
 		}
 		if err != nil {
-			res.Error, res.Message = sshTestError(err, host)
+			res.setFailure(sshTestError(err, host))
 			res.LatencyMS = time.Since(start).Milliseconds()
 			return res, seen
 		}
@@ -762,7 +763,7 @@ func (s *Server) runGitTest(ctx context.Context, r gitremote.Remote) (GitTestRes
 	refs, err := s.gitRunner().LsRemote(ctx, r)
 	res.LatencyMS = time.Since(start).Milliseconds()
 	if err != nil {
-		res.Error, res.Message = gitTestError(err)
+		res.setFailure(gitTestError(err))
 		return res, seen
 	}
 	res.OK, res.DefaultBranch, res.Branches, res.Access = true, refs.Head, len(refs.Branches), "read"
@@ -774,44 +775,54 @@ func (s *Server) runGitTest(ctx context.Context, r gitremote.Remote) (GitTestRes
 
 func (s *Server) gitRunner() gitremote.Git { return s.git }
 
-func sshTestError(err error, host string) (string, string) {
-	switch {
-	case errors.Is(err, sshdial.ErrHostKeyMismatch):
-		return "host_key_mismatch", "主机密钥和已固定的不一样，没有发送凭据。确认服务器没被冒充后重置主机密钥再测试"
-	case errors.Is(err, sshdial.ErrAuth):
-		return "auth_failed", "认证失败：私钥不对，或部署密钥还没添加到仓库"
-	case errors.Is(err, sshdial.ErrBlockedAddress):
-		return "address_blocked", err.Error()
-	case errors.Is(err, sshdial.ErrResolve), errors.Is(err, sshdial.ErrInvalidHost):
-		return "resolve_failed", "主机名解析不到地址：" + host
-	case errors.Is(err, sshdial.ErrTimeout):
-		return "timeout", "连接超时"
-	case errors.Is(err, sshdial.ErrConnect):
-		return "connect_failed", "连不上 " + host + "，请检查地址和端口"
-	case errors.Is(err, credvault.ErrInvalidCredential):
-		return "credential_unreadable", err.Error()
-	}
-	return "failed", "SSH 握手失败：" + err.Error()
+func gitFailed(code string, m msg.Text) GitTestResult {
+	var r GitTestResult
+	r.setFailure(code, m)
+	return r
 }
 
-func gitTestError(err error) (string, string) {
+func (r *GitTestResult) setFailure(code string, m msg.Text) {
+	r.Error, r.Message, r.Text = code, m.String(), &m
+}
+
+func sshTestError(err error, host string) (string, msg.Text) {
+	switch {
+	case errors.Is(err, sshdial.ErrHostKeyMismatch):
+		return "host_key_mismatch", msg.T("主机密钥和已固定的不一样，没有发送凭据。确认服务器没被冒充后重置主机密钥再测试")
+	case errors.Is(err, sshdial.ErrAuth):
+		return "auth_failed", msg.T("认证失败：私钥不对，或部署密钥还没添加到仓库")
+	case errors.Is(err, sshdial.ErrBlockedAddress):
+		return "address_blocked", msg.Of(err)
+	case errors.Is(err, sshdial.ErrResolve), errors.Is(err, sshdial.ErrInvalidHost):
+		return "resolve_failed", msg.T("主机名解析不到地址：{host}", "host", host)
+	case errors.Is(err, sshdial.ErrTimeout):
+		return "timeout", msg.T("连接超时")
+	case errors.Is(err, sshdial.ErrConnect):
+		return "connect_failed", msg.T("连不上 {host}，请检查地址和端口", "host", host)
+	case errors.Is(err, credvault.ErrInvalidCredential):
+		return "credential_unreadable", msg.Of(err)
+	}
+	return "failed", msg.T("SSH 握手失败：{reason}", "reason", err.Error())
+}
+
+func gitTestError(err error) (string, msg.Text) {
 	switch {
 	case errors.Is(err, gitremote.ErrAuth):
-		return "auth_failed", "认证失败：令牌或私钥不对、已过期，或没有这个仓库的权限"
+		return "auth_failed", msg.T("认证失败：令牌或私钥不对、已过期，或没有这个仓库的权限")
 	case errors.Is(err, gitremote.ErrNotFound):
-		return "repo_not_found", "仓库不存在，或凭据看不到它"
+		return "repo_not_found", msg.T("仓库不存在，或凭据看不到它")
 	case errors.Is(err, gitremote.ErrHostKey):
-		return "host_key_mismatch", "主机密钥和已固定的不一样"
+		return "host_key_mismatch", msg.T("主机密钥和已固定的不一样")
 	case errors.Is(err, sshdial.ErrBlockedAddress):
-		return "address_blocked", err.Error()
+		return "address_blocked", msg.Of(err)
 	case errors.Is(err, sshdial.ErrResolve), errors.Is(err, sshdial.ErrInvalidHost):
-		return "resolve_failed", "主机名解析不到地址"
+		return "resolve_failed", msg.T("主机名解析不到地址")
 	case errors.Is(err, gitremote.ErrConnect):
-		return "connect_failed", "连不上仓库所在的主机"
+		return "connect_failed", msg.T("连不上仓库所在的主机")
 	case errors.Is(err, context.DeadlineExceeded):
-		return "timeout", "连接超时"
+		return "timeout", msg.T("连接超时")
 	}
-	return "failed", err.Error()
+	return "failed", msg.Of(err)
 }
 
 func (s *Server) gitRepoBranches(ctx context.Context, in *gitBranchesInput) (*gitBranchesOutput, error) {
@@ -825,14 +836,14 @@ func (s *Server) gitRepoBranches(ctx context.Context, in *gitBranchesInput) (*gi
 	}
 	remote, err := s.GitRemote(ctx, p.User.ID, r)
 	if err != nil {
-		return nil, fail(http.StatusConflict, "credential_unreadable", err.Error())
+		return nil, failErr(http.StatusConflict, "credential_unreadable", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, gitTestTimeout)
 	defer cancel()
 	refs, err := s.gitRunner().LsRemote(ctx, remote)
 	if err != nil {
-		_, msg := gitTestError(err)
-		return nil, fail(http.StatusBadGateway, "git_failed", msg)
+		_, why := gitTestError(err)
+		return nil, failMsg(http.StatusBadGateway, "git_failed", why)
 	}
 	out := make([]string, 0, len(refs.Branches))
 	q := strings.ToLower(in.Q)

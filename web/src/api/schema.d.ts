@@ -3619,6 +3619,8 @@ export interface components {
             latency_ms: number;
             message?: string;
             ok: boolean;
+            /** @description Translatable form of message */
+            text?: components["schemas"]["Text"];
         };
         GrantableRoleView: {
             grantable: boolean;
@@ -4890,6 +4892,8 @@ export interface components {
             message?: string;
             /** @description The host key matched (or was pinned now) and the credential logged in */
             ok: boolean;
+            /** @description Translatable form of message */
+            text?: components["schemas"]["Text"];
         };
         ServerView: {
             /** @enum {string} */
@@ -5118,6 +5122,10 @@ export interface components {
         Text: {
             /** @description Message key: the Simplified Chinese text with {name} placeholders */
             key: string;
+            /** @description Params that are messages themselves (translate them too; params holds their Chinese) */
+            nested?: {
+                [key: string]: components["schemas"]["Text"];
+            };
             /** @description Values for the placeholders */
             params?: {
                 [key: string]: string;
@@ -5663,6 +5671,8 @@ export interface components {
         Warning: {
             message: string;
             role: string;
+            /** @description Translatable form of message */
+            text?: components["schemas"]["Text"];
         };
         WorkSessionView: {
             project: components["schemas"]["ProjectView"];

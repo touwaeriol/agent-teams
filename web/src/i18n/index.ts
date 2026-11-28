@@ -87,6 +87,8 @@ export const $t = i18n.global.t;
 export interface ServerText {
   key: string;
   params?: Record<string, string> | null;
+  /** Params that are messages themselves; params holds their Chinese as a fallback. */
+  nested?: Record<string, ServerText> | null;
 }
 
 /**
@@ -96,7 +98,8 @@ export interface ServerText {
  */
 export function serverText(m: ServerText | null | undefined, fallback = ""): string {
   if (!m?.key) return fallback;
-  const params = m.params ?? {};
+  const params: Record<string, string> = { ...(m.params ?? {}) };
+  for (const [k, inner] of Object.entries(m.nested ?? {})) params[k] = serverText(inner, params[k] ?? "");
   if (i18n.global.te(m.key, "zh-CN")) return $t(m.key as keyof Messages, params);
   return Object.entries(params).reduce((s, [k, v]) => s.split(`{${k}}`).join(v), m.key);
 }

@@ -20,9 +20,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strconv"
+
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 const (
@@ -33,10 +34,10 @@ const (
 
 var (
 	// ErrNoKey means AGENT_TEAMS_SECRET_KEYS is not configured.
-	ErrNoKey = errors.New("服务没有配置 AGENT_TEAMS_SECRET_KEYS，不能保存远程服务器凭证")
+	ErrNoKey = msg.Err("服务没有配置 AGENT_TEAMS_SECRET_KEYS，不能保存远程服务器凭证")
 	// ErrOpen means the value does not open: no configured key wrapped it, or it was sealed for
 	// another context (row moved, host/port/username/auth kind changed, tampered).
-	ErrOpen = errors.New("无法解开已保存的凭证：主密钥变过，或凭证不属于这台服务器的当前配置")
+	ErrOpen = msg.Err("无法解开已保存的凭证：主密钥变过，或凭证不属于这台服务器的当前配置")
 )
 
 // Sealed is one envelope-encrypted value as stored (at_remote_servers' cred_* columns, or the

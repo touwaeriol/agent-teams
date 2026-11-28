@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 团队岗位: role templates (coordinator → lead → members) edited as one draft and saved together,
 // presets, a YAML view, then the skill and plugin libraries. Each role names its model by hand.
-import { $t } from "@/i18n";
+import { $t, serverText } from "@/i18n";
 import { computed, ref, watch } from "vue";
 import { roles as roleActions } from "@/api/actions";
 import { useAction } from "@/api/mutations";
@@ -90,7 +90,7 @@ const PILL = "rounded-full px-2.5 py-1";
         <span :class="PILL" :style="{ background: LEVEL.member.bg, color: LEVEL.member.fg }">{{ $t("成员 · 每项目按岗位编制") }}</span>
         <span class="basis-full text-xs text-muted-foreground">{{ $t("成员是项目的固定编制：岗位人数就是每个项目配几个，所有讨论串共用、轮流领任务队列里的活；人手不够就加人数。") }}</span>
       </section>
-      <Callout v-for="w in warnings" :key="`${w.role}-${w.message}`" tone="warn">{{ w.role ? `${w.role}：` : "" }}{{ w.message }}</Callout>
+      <Callout v-for="w in warnings" :key="`${w.role}-${w.message}`" tone="warn">{{ w.role ? `${w.role}：` : "" }}{{ serverText(w.text, w.message) }}</Callout>
       <Callout v-if="dirty && problems.length > 0" tone="warn">{{ problems.join("；") }}</Callout>
       <StaffPanel v-if="!yaml" :roles="draft" :saved="saved" @add="addStaff" />
       <ConfirmAction

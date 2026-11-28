@@ -72,7 +72,7 @@ func Create(ctx context.Context, db store.DB, userID string, files []File) (Skil
 	err = db.Gorm(ctx).Table("at_skills").Create(map[string]any{"id": s.ID, "user_id": ownerArg(userID), "name": s.Name,
 		"description": s.Description, "files": raw, "size": s.Size}).Error
 	if store.IsUnique(err) {
-		return Skill{}, problem("已经有一个叫 %s 的技能，先删除它再上传", s.Name)
+		return Skill{}, problem("已经有一个叫 {name} 的技能，先删除它再上传", "name", s.Name)
 	}
 	return s, err
 }
@@ -81,7 +81,7 @@ func Create(ctx context.Context, db store.DB, userID string, files []File) (Skil
 // names of admin built-ins.
 func checkName(ctx context.Context, db store.DB, userID, name string) error {
 	if _, ok := builtin(name); ok {
-		return problem("%s 是内置技能的名字，请在 SKILL.md 里换一个 name", name)
+		return problem("{name} 是内置技能的名字，请在 SKILL.md 里换一个 name", "name", name)
 	}
 	if userID == "" {
 		return nil
@@ -89,7 +89,7 @@ func checkName(ctx context.Context, db store.DB, userID, name string) error {
 	var n int64
 	err := db.Gorm(ctx).Table("at_skills").Where("user_id IS NULL AND name = ?", name).Count(&n).Error
 	if err == nil && n > 0 {
-		return problem("%s 是内置技能的名字，请在 SKILL.md 里换一个 name", name)
+		return problem("{name} 是内置技能的名字，请在 SKILL.md 里换一个 name", "name", name)
 	}
 	return err
 }

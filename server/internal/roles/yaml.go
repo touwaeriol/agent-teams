@@ -2,11 +2,11 @@ package roles
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
@@ -89,13 +89,13 @@ type Parsed struct {
 func FromYAML(text string, nodeIDs map[string]string) (Parsed, error) {
 	var probe map[string]any
 	if err := yaml.Unmarshal([]byte(text), &probe); err != nil {
-		return Parsed{}, fmt.Errorf("YAML 格式错误：%w", err)
+		return Parsed{}, msg.Wrap(err, "YAML 格式错误：{reason}", "reason", err.Error())
 	}
 	if probe == nil {
-		return Parsed{}, errors.New("团队配置是空的")
+		return Parsed{}, msg.Err("团队配置是空的")
 	}
 	if _, old := probe["employees"]; old {
-		return Parsed{}, errors.New("旧平台的 leader/employees 格式已不再支持，请改用 coordinator/lead/members")
+		return Parsed{}, msg.Err("旧平台的 leader/employees 格式已不再支持，请改用 coordinator/lead/members")
 	}
 	return fromNew(text, nodeIDs)
 }
@@ -105,7 +105,7 @@ func fromNew(text string, nodeIDs map[string]string) (Parsed, error) {
 	dec := yaml.NewDecoder(bytes.NewReader([]byte(text)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&team); err != nil {
-		return Parsed{}, fmt.Errorf("YAML 格式错误：%w", err)
+		return Parsed{}, msg.Wrap(err, "YAML 格式错误：{reason}", "reason", err.Error())
 	}
 	var p Parsed
 	if team.Coordinator != nil {

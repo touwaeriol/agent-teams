@@ -17,7 +17,7 @@ import (
 // so a zip bomb stops at the limit.
 func FromZip(data []byte) ([]File, error) {
 	if len(data) > MaxZipBytes {
-		return nil, problem("压缩包不能超过 %d MB", MaxZipBytes>>20)
+		return nil, problem("压缩包不能超过 {mb} MB", "mb", MaxZipBytes>>20)
 	}
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil && !errors.Is(err, zip.ErrInsecurePath) {
@@ -34,10 +34,10 @@ func FromZip(data []byte) ([]File, error) {
 			return nil, err
 		}
 		if len(files) >= MaxFiles {
-			return nil, problem("插件最多 %d 个文件", MaxFiles)
+			return nil, problem("插件最多 {n} 个文件", "n", MaxFiles)
 		}
 		if total += n; total > MaxBytes {
-			return nil, problem("插件文件合计不能超过 %d KB", MaxBytes>>10)
+			return nil, problem("插件文件合计不能超过 {kb} KB", "kb", MaxBytes>>10)
 		}
 		files = append(files, f)
 	}
@@ -59,13 +59,13 @@ func skipEntry(zf *zip.File) bool {
 func readEntry(zf *zip.File) (File, int, error) {
 	switch {
 	case zf.Mode()&fs.ModeSymlink != 0:
-		return File{}, 0, problem("压缩包里不能有符号链接：%s", zf.Name)
+		return File{}, 0, problem("压缩包里不能有符号链接：{name}", "name", zf.Name)
 	case !zf.Mode().IsRegular():
-		return File{}, 0, problem("压缩包里只能有普通文件：%s", zf.Name)
+		return File{}, 0, problem("压缩包里只能有普通文件：{name}", "name", zf.Name)
 	case !ValidPath(zf.Name):
-		return File{}, 0, problem("文件路径不合法：%q（只能是相对路径，不能含 . 或 .. 段）", zf.Name)
+		return File{}, 0, problem("文件路径不合法：“{name}”（只能是相对路径，不能含 . 或 .. 段）", "name", zf.Name)
 	case zf.UncompressedSize64 > MaxFileBytes:
-		return File{}, 0, problem("%s 超过 %d KB", zf.Name, MaxFileBytes>>10)
+		return File{}, 0, problem("{name} 超过 {kb} KB", "name", zf.Name, "kb", MaxFileBytes>>10)
 	}
 	raw, err := readLimited(zf)
 	if err != nil {
@@ -81,15 +81,15 @@ func readEntry(zf *zip.File) (File, int, error) {
 func readLimited(zf *zip.File) ([]byte, error) {
 	rc, err := zf.Open()
 	if err != nil {
-		return nil, problem("无法读取 %s", zf.Name)
+		return nil, problem("无法读取 {name}", "name", zf.Name)
 	}
 	defer rc.Close()
 	raw, err := io.ReadAll(io.LimitReader(rc, MaxFileBytes+1))
 	if err != nil {
-		return nil, problem("无法读取 %s", zf.Name)
+		return nil, problem("无法读取 {name}", "name", zf.Name)
 	}
 	if len(raw) > MaxFileBytes {
-		return nil, problem("%s 超过 %d KB", zf.Name, MaxFileBytes>>10)
+		return nil, problem("{name} 超过 {kb} KB", "name", zf.Name, "kb", MaxFileBytes>>10)
 	}
 	return raw, nil
 }

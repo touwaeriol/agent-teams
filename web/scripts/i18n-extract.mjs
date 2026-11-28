@@ -37,7 +37,7 @@ for (const f of files) {
 // Server messages: Chinese string literals inside calls of the error / message helpers, in
 // server/internal/httpapi and in any Go file that imports internal/msg. A small Go tokenizer
 // (comments, raw strings, runes) tracks which call or composite literal each string sits in.
-const GO_HELPERS = new Set(["fail", "failf", "failMsg", "invalid", "invalidf", "invalidField", "storeErr", "storeErrMsg", "msg.T", "msg.Err", "FieldError"]);
+const GO_HELPERS = new Set(["fail", "failf", "failMsg", "invalid", "invalidf", "invalidField", "storeErr", "storeErrMsg", "FieldError", "problem", "prob", "msg.T", "msg.Err", "msg.Wrap", "msg.K"]);
 const HAN = /[\u4e00-\u9fff]/;
 const serverRoot = path.resolve(import.meta.dirname, "../../server/internal");
 

@@ -128,7 +128,7 @@ func (s *Server) upload(ctx context.Context, admin bool, zipB64 string) (*plugin
 
 func pluginError(err error) error {
 	if plugins.IsProblem(err) {
-		return fail(http.StatusUnprocessableEntity, "validation", err.Error())
+		return failErr(http.StatusUnprocessableEntity, "validation", err)
 	}
 	if errors.Is(err, plugins.ErrNotFound) {
 		return fail(http.StatusNotFound, "not_found", "没有这个插件")

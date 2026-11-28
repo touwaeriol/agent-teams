@@ -12,6 +12,8 @@ import (
 	"net/netip"
 	"regexp"
 	"strings"
+
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // SettingKey is the at_settings key with the private networks an administrator lets servers
@@ -134,19 +136,19 @@ func (p Policy) Blocked(a netip.Addr) string {
 	}
 	switch {
 	case a.IsLoopback():
-		return "回环地址"
+		return msg.K("回环地址")
 	case a.IsUnspecified():
-		return "未指定地址"
+		return msg.K("未指定地址")
 	case a.IsLinkLocalUnicast(), a.IsLinkLocalMulticast():
-		return "链路本地地址（含云元数据 169.254.169.254）"
+		return msg.K("链路本地地址（含云元数据 169.254.169.254）")
 	case contains(metadata, a):
-		return "云元数据地址"
+		return msg.K("云元数据地址")
 	case cgnat.Contains(a):
-		return "运营商级 NAT / Tailscale 地址（100.64.0.0/10）"
+		return msg.K("运营商级 NAT / Tailscale 地址（100.64.0.0/10）")
 	case a.IsMulticast(), a.IsInterfaceLocalMulticast():
-		return "组播地址"
+		return msg.K("组播地址")
 	case contains(local, a):
-		return "主节点所在的内网"
+		return msg.K("主节点所在的内网")
 	}
 	return ""
 }
@@ -155,7 +157,7 @@ func (p Policy) Blocked(a netip.Addr) string {
 // name must not mix public and internal addresses). The returned addresses are what to dial.
 func (p Policy) Resolve(ctx context.Context, host string) ([]netip.Addr, error) {
 	if !ValidHost(host) {
-		return nil, fmt.Errorf("%w：%q", ErrInvalidHost, host)
+		return nil, msg.Wrap(ErrInvalidHost, "主机不合法：“{host}”", "host", host)
 	}
 	var addrs []netip.Addr
 	if a, err := netip.ParseAddr(host); err == nil {
@@ -167,12 +169,13 @@ func (p Policy) Resolve(ctx context.Context, host string) ([]netip.Addr, error) 
 		}
 		addrs, err = r.LookupNetIP(ctx, "ip", host)
 		if err != nil || len(addrs) == 0 {
-			return nil, fmt.Errorf("%w：%s", ErrResolve, host)
+			return nil, msg.Wrap(ErrResolve, "主机名解析不到地址：{host}", "host", host)
 		}
 	}
 	for _, a := range addrs {
 		if why := p.Blocked(a); why != "" {
-			return nil, fmt.Errorf("%w：%s 解析到 %s（%s）；需要的话请管理员在 %s 里放行", ErrBlockedAddress, host, a.Unmap(), why, SettingKey)
+			return nil, msg.Wrap(ErrBlockedAddress, "{host} 解析到 {addr}（{why}）；需要的话请管理员在 {setting} 里放行",
+				"host", host, "addr", a.Unmap(), "why", msg.T(why), "setting", SettingKey)
 		}
 	}
 	return addrs, nil

@@ -3,18 +3,18 @@ package auth
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/fernet/fernet-go"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // ErrNoSecret means AGENT_TEAMS_SECRET_KEY is not configured.
-var ErrNoSecret = errors.New("服务没有配置 AGENT_TEAMS_SECRET_KEY，不能保存 Git 凭证")
+var ErrNoSecret = msg.Err("服务没有配置 AGENT_TEAMS_SECRET_KEY，不能保存 Git 凭证")
 
 // ErrUnseal means a stored value cannot be decrypted with any configured key.
-var ErrUnseal = errors.New("无法解密已保存的凭证：AGENT_TEAMS_SECRET_KEY 变过？")
+var ErrUnseal = msg.Err("无法解密已保存的凭证：AGENT_TEAMS_SECRET_KEY 变过？")
 
 // SecretBox is v1's SecretBox: Fernet keyed by urlsafe_b64(sha256(secret)).
 // With several secrets (AGENT_TEAMS_SECRET_KEYS=new,old) the first seals and

@@ -1,7 +1,7 @@
 // Standalone Git repositories (docs/v2/git-repos.md): what the 添加仓库 dialog infers from a pasted
 // URL, labels, credential expiry and test results, as plain functions (tested in gitRepos.test.ts).
 // Credentials are write-only: the page never has a token or private key after saving.
-import { $t } from "@/i18n";
+import { $t, serverText } from "@/i18n";
 import type { GitCredentialView, GitRepoView, GitTestResult } from "@/api/views";
 
 export type Transport = "https" | "ssh";
@@ -84,7 +84,7 @@ export function credentialsFor(list: GitCredentialView[], host: string | undefin
 
 /** One line for a test result. */
 export function testSummary(r: GitTestResult): string {
-  if (!r.ok) return r.message || $t("连接失败");
+  if (!r.ok) return serverText(r.text, r.message ?? "") || $t("连接失败");
   const access = r.access === "write" ? $t("可读写") : $t("只读（员工推送会失败，请给凭据写权限）");
   return $t("连接成功 · {access} · 默认分支 {n} · {branches} 个分支", { access, n: r.default_branch || "main", branches: r.branches });
 }

@@ -2,7 +2,7 @@
 // connection results and the access log, as plain functions (tested in servers.test.ts).
 // A 服务器 is a remote machine employees reach over SSH through the console; a 节点 is a machine
 // that runs agents. The credential is write-only: the page never has it after saving.
-import { $t } from "@/i18n";
+import { $t, serverText } from "@/i18n";
 import type { GrantableRoleView, ServerTestResult, ServerView, SshAuditView } from "@/api/views";
 
 export type AuthKind = "password" | "private_key";
@@ -130,7 +130,7 @@ export function testView(r: ServerTestResult): TestView {
   return {
     tone: mismatch || error === "host_key_invalid" ? "danger" : "warn",
     title: ERROR_TITLE[error] ?? $t("测试失败"),
-    detail: r.message ?? "",
+    detail: serverText(r.text, r.message ?? ""),
     hostKey,
     expected: mismatch ? r.expected_host_key_fp : undefined,
     canReset: mismatch || error === "host_key_invalid",

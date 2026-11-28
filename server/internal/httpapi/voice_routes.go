@@ -144,7 +144,7 @@ func (s *Server) adminSaveVoice(ctx context.Context, in *voiceAdminSaveInput) (*
 	}
 	b := in.Body
 	if err := voice.CheckBaseURL(b.BaseURL); err != nil {
-		return nil, invalid([]FieldError{{Path: "base_url", Message: err.Error()}}, err.Error())
+		return nil, invalidField("base_url", msg.Of(err))
 	}
 	v, err := s.voiceSettings(ctx)
 	if err != nil {
@@ -199,7 +199,7 @@ func (s *Server) adminTestVoice(ctx context.Context, in *voiceTestInput) (*voice
 		return nil, err
 	}
 	if err := voice.CheckBaseURL(in.Body.BaseURL); err != nil {
-		return nil, invalid([]FieldError{{Path: "base_url", Message: err.Error()}}, err.Error())
+		return nil, invalidField("base_url", msg.Of(err))
 	}
 	v, err := s.voiceSettings(ctx)
 	if err != nil {

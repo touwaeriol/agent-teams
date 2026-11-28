@@ -483,7 +483,7 @@ func (s *Server) recheckNode(ctx context.Context, in *nodeIDInput) (*recheckOutp
 	}
 	stale, err := s.nodes.RecheckRuntimes(ctx, in.ID)
 	if errors.Is(err, platform.ErrRuntimeStatusUnsupported) {
-		return nil, fail(http.StatusConflict, "unsupported_daemon", err.Error())
+		return nil, failErr(http.StatusConflict, "unsupported_daemon", err)
 	}
 	if err != nil {
 		return nil, nodeCommandErr(err)
@@ -506,7 +506,7 @@ func nodeCommandErr(err error) error {
 		return fail(http.StatusConflict, "node_offline", "节点不在线")
 	}
 	if errors.Is(err, platform.ErrUpgradeUnsupported) {
-		return fail(http.StatusConflict, "upgrade_unsupported", err.Error())
+		return failErr(http.StatusConflict, "upgrade_unsupported", err)
 	}
 	return err
 }

@@ -94,9 +94,9 @@ func (s *Server) createSession(ctx context.Context, in *createSessionInput) (*se
 	row, err := s.createSessionProject(ctx, p.User.ID, start.Title, repos, start.Attachments)
 	switch {
 	case errors.Is(err, store.ErrAttachmentExpired):
-		return nil, fail(http.StatusGone, "attachment_expired", err.Error())
+		return nil, failErr(http.StatusGone, "attachment_expired", err)
 	case errors.Is(err, store.ErrAttachmentUnknown):
-		return nil, invalid([]FieldError{{Path: "attachments", Message: err.Error()}}, err.Error())
+		return nil, invalidField("attachments", msg.Of(err))
 	case err != nil:
 		return nil, err
 	}

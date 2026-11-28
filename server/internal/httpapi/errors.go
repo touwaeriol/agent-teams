@@ -73,6 +73,11 @@ func invalidf(fields []FieldError, key string, kv ...any) error {
 	return &APIError{Status: http.StatusUnprocessableEntity, Code: "validation", Detail: m.String(), Message: &m, Fields: fields}
 }
 
+func (e *APIError) withFields(fields []FieldError) error {
+	e.Fields = fields
+	return e
+}
+
 func invalid(fields []FieldError, detail string) error {
 	m := msg.T(detail)
 	return &APIError{Status: http.StatusUnprocessableEntity, Code: "validation", Detail: detail, Message: &m, Fields: fields}

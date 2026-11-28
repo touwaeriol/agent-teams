@@ -1,6 +1,7 @@
 package roles
 
 import (
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/store"
 )
 
@@ -64,11 +65,11 @@ func normalizeContext(r *store.Role) {
 
 func contextChecks(r *store.Role) []check {
 	return []check{
-		{"context_limit", r.ContextLimit != nil && *r.ContextLimit < MinContextLimit, "上下文上限至少 100000 token"},
-		{"compact_between_pct", badPct(r.CompactBetweenPct), "领任务时压缩的比例在 1 到 100 之间"},
-		{"compact_in_task_pct", badPct(r.CompactInTaskPct), "任务中自动压缩的比例在 1 到 100 之间"},
-		{"clear_after_tasks", r.ClearAfterTasks != nil && *r.ClearAfterTasks < 0, "连续任务数不能是负数（0 = 不按次数清空）"},
-		{"compact_focus", len([]rune(r.CompactFocus)) > MaxFocus, "压缩重点最多 2000 字"},
+		{"context_limit", r.ContextLimit != nil && *r.ContextLimit < MinContextLimit, msg.T("上下文上限至少 100000 token")},
+		{"compact_between_pct", badPct(r.CompactBetweenPct), msg.T("领任务时压缩的比例在 1 到 100 之间")},
+		{"compact_in_task_pct", badPct(r.CompactInTaskPct), msg.T("任务中自动压缩的比例在 1 到 100 之间")},
+		{"clear_after_tasks", r.ClearAfterTasks != nil && *r.ClearAfterTasks < 0, msg.T("连续任务数不能是负数（0 = 不按次数清空）")},
+		{"compact_focus", len([]rune(r.CompactFocus)) > MaxFocus, msg.T("压缩重点最多 2000 字")},
 	}
 }
 

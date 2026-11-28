@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/touwaeriol/agent-teams/server/internal/composer"
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/office"
 	"github.com/touwaeriol/agent-teams/server/internal/plugins"
 	"github.com/touwaeriol/agent-teams/server/internal/runtimes"
@@ -36,15 +37,25 @@ var (
 
 // Problem is one validation error; Path is like "roles[2].count".
 type Problem struct {
-	Path    string `json:"path"`
-	Message string `json:"message"`
+	Path    string    `json:"path"`
+	Message string    `json:"message"`
+	Text    *msg.Text `json:"text,omitempty" doc:"Translatable form of message"`
+}
+
+// prob is a Problem whose message is translatable: prob(path, "人数在 1 到 {n} 之间", "n", MaxCount).
+func prob(path, key string, kv ...any) Problem {
+	m := msg.T(key, kv...)
+	return Problem{Path: path, Message: m.String(), Text: &m}
 }
 
 // Warning is shown on the Team page for a saved role that cannot run as configured.
 type Warning struct {
-	Role    string `json:"role"`
-	Message string `json:"message"`
+	Role    string    `json:"role"`
+	Message string    `json:"message"`
+	Text    *msg.Text `json:"text,omitempty" doc:"Translatable form of message"`
 }
+
+func warn(role string, m msg.Text) Warning { return Warning{Role: role, Message: m.String(), Text: &m} }
 
 // Context is what validation needs besides the roles themselves.
 type Context struct {
@@ -141,7 +152,7 @@ func Validate(roles []store.Role, c Context) []Problem {
 	for i := range roles {
 		path := fmt.Sprintf("roles[%d]", i)
 		if seen[roles[i].Role] {
-			out = append(out, Problem{path + ".role", "岗位键重复：" + roles[i].Role})
+			out = append(out, prob(path+".role", "岗位键重复：{role}", "role", roles[i].Role))
 		}
 		seen[roles[i].Role] = true
 		out = append(out, validateOne(path, &roles[i], c)...)
@@ -156,10 +167,10 @@ func tierCounts(roles []store.Role) []Problem {
 	}
 	var out []Problem
 	if count[Coordinator] != 1 {
-		out = append(out, Problem{"roles", "需要恰好一个统筹（coordinator）岗位"})
+		out = append(out, prob("roles", "需要恰好一个统筹（coordinator）岗位"))
 	}
 	if count[Lead] != 1 {
-		out = append(out, Problem{"roles", "需要恰好一个组长（lead）岗位"})
+		out = append(out, prob("roles", "需要恰好一个组长（lead）岗位"))
 	}
 	return out
 }
@@ -167,31 +178,32 @@ func tierCounts(roles []store.Role) []Problem {
 type check struct {
 	field string
 	bad   bool
-	msg   string
+	text  msg.Text
 }
 
 func validateOne(path string, r *store.Role, c Context) []Problem {
 	leaders := runtimes.LeaderTitles()
 	checks := []check{
-		{"tier", !slices.Contains([]string{Coordinator, Lead, Member}, r.Tier), "tier 只能是 coordinator、lead 或 member"},
-		{"role", !keyPattern.MatchString(r.Role), "岗位键只能用小写字母开头的小写字母、数字和 -，最多 24 个字符"},
-		{"runtime", !all(r.RuntimeList(), runtimes.Valid), "runtime 只能是 " + strings.Join(runtimes.IDs(), " 或 ")},
-		{"runtime", r.Tier == Coordinator && !all(r.RuntimeList(), canLead), "统筹只能用 " + leaders},
-		{"runtime", r.Tier == Lead && !all(r.RuntimeList(), canLead), "组长只能用 " + leaders},
-		{"count", r.Count < 1 || r.Count > MaxCount, fmt.Sprintf("人数在 1 到 %d 之间", MaxCount)},
-		{"gate", !slices.Contains(gates, r.Gate), "gate 只能是空、review 或 decision"},
-		{"sandbox", !slices.Contains(sandboxes, r.Sandbox), "sandbox 只能是 read-only、workspace-write 或 danger-full-access"},
-		{"max_turns", r.MaxTurns != nil && *r.MaxTurns < 1, "max_turns 至少为 1"},
-		{"permission_mode", !slices.Contains(permModes, r.PermissionMode), "权限模式只能是 bypass 或 ask"},
-		{"look.color", !colorPattern.MatchString(r.Look.Color), "颜色格式是 #RRGGBB"},
-		{"look.outfit", !slices.Contains(c.Looks.Outfits, r.Look.Outfit), "当前办公室布局里没有这种服装：" + r.Look.Outfit},
-		{"look.accessory", !slices.Contains(c.Looks.Accessories, r.Look.Accessory), "当前办公室布局里没有这种配饰：" + r.Look.Accessory},
+		{"tier", !slices.Contains([]string{Coordinator, Lead, Member}, r.Tier), msg.T("tier 只能是 coordinator、lead 或 member")},
+		{"role", !keyPattern.MatchString(r.Role), msg.T("岗位键只能用小写字母开头的小写字母、数字和 -，最多 24 个字符")},
+		{"runtime", !all(r.RuntimeList(), runtimes.Valid), msg.T("runtime 只能是 {runtimes}", "runtimes", strings.Join(runtimes.IDs(), " / "))},
+		{"runtime", r.Tier == Coordinator && !all(r.RuntimeList(), canLead), msg.T("统筹只能用 {runtimes}", "runtimes", leaders)},
+		{"runtime", r.Tier == Lead && !all(r.RuntimeList(), canLead), msg.T("组长只能用 {runtimes}", "runtimes", leaders)},
+		{"count", r.Count < 1 || r.Count > MaxCount, msg.T("人数在 1 到 {n} 之间", "n", MaxCount)},
+		{"gate", !slices.Contains(gates, r.Gate), msg.T("gate 只能是空、review 或 decision")},
+		{"sandbox", !slices.Contains(sandboxes, r.Sandbox), msg.T("sandbox 只能是 read-only、workspace-write 或 danger-full-access")},
+		{"max_turns", r.MaxTurns != nil && *r.MaxTurns < 1, msg.T("max_turns 至少为 1")},
+		{"permission_mode", !slices.Contains(permModes, r.PermissionMode), msg.T("权限模式只能是 bypass 或 ask")},
+		{"look.color", !colorPattern.MatchString(r.Look.Color), msg.T("颜色格式是 #RRGGBB")},
+		{"look.outfit", !slices.Contains(c.Looks.Outfits, r.Look.Outfit), msg.T("当前办公室布局里没有这种服装：{outfit}", "outfit", r.Look.Outfit)},
+		{"look.accessory", !slices.Contains(c.Looks.Accessories, r.Look.Accessory), msg.T("当前办公室布局里没有这种配饰：{accessory}", "accessory", r.Look.Accessory)},
 	}
 	checks = append(checks, contextChecks(r)...)
 	var out []Problem
 	for _, ch := range checks {
 		if ch.bad {
-			out = append(out, Problem{path + "." + ch.field, ch.msg})
+			t := ch.text
+			out = append(out, Problem{Path: path + "." + ch.field, Message: t.String(), Text: &t})
 		}
 	}
 	out = append(out, skillProblems(path, r, c.Skills)...)
@@ -208,7 +220,7 @@ func modelProblems(path string, r *store.Role) []Problem {
 	if r.Model == "" || composer.ValidModel(r.Model) {
 		return nil
 	}
-	return []Problem{{path + ".model", composer.ModelFormatProblem}}
+	return []Problem{{Path: path + ".model", Message: composer.ModelFormatProblem}}
 }
 
 func all(list []string, ok func(string) bool) bool {
@@ -236,10 +248,10 @@ func promptRuntime(list []string) string {
 func commandProblems(path string, r *store.Role) []Problem {
 	var out []Problem
 	for _, p := range composer.HiddenProblems(path+".hidden_commands", r.HiddenCommands) {
-		out = append(out, Problem(p))
+		out = append(out, Problem{Path: p.Path, Message: p.Message})
 	}
 	for _, p := range composer.ValidateCommands(path+".commands", r.Commands, composer.For(promptRuntime(r.RuntimeList()), r.Tier)) {
-		out = append(out, Problem(p))
+		out = append(out, Problem{Path: p.Path, Message: p.Message})
 	}
 	return out
 }
@@ -252,13 +264,13 @@ func skillProblems(path string, r *store.Role, known map[string]bool) []Problem 
 	case len(r.Skills) == 0:
 		return nil
 	case r.Tier == Coordinator:
-		return []Problem{{path + ".skills", "统筹只能用平台工具，不能加载技能"}}
+		return []Problem{prob(path+".skills", "统筹只能用平台工具，不能加载技能")}
 	case len(r.Skills) > MaxSkills:
-		return []Problem{{path + ".skills", fmt.Sprintf("一个岗位最多 %d 个技能", MaxSkills)}}
+		return []Problem{prob(path+".skills", "一个岗位最多 {n} 个技能", "n", MaxSkills)}
 	}
 	for _, name := range r.Skills {
 		if known != nil && !known[name] {
-			return []Problem{{path + ".skills", "没有这个技能：" + name}}
+			return []Problem{prob(path+".skills", "没有这个技能：{name}", "name", name)}
 		}
 	}
 	return nil
@@ -269,10 +281,10 @@ func pluginProblems(path string, r *store.Role, choices map[string]map[int]bool)
 		return nil
 	}
 	if r.Tier == Coordinator {
-		return []Problem{{path + ".plugins", "统筹只能用平台工具，不能加载插件"}}
+		return []Problem{prob(path+".plugins", "统筹只能用平台工具，不能加载插件")}
 	}
-	if msg := plugins.CheckRefs(r.Plugins, choices); msg != "" {
-		return []Problem{{path + ".plugins", msg}}
+	if m := plugins.CheckRefs(r.Plugins, choices); m != nil {
+		return []Problem{{Path: path + ".plugins", Message: m.String(), Text: m}}
 	}
 	return nil
 }
@@ -280,11 +292,11 @@ func pluginProblems(path string, r *store.Role, choices map[string]map[int]bool)
 func nodeProblems(path string, r *store.Role, nodes map[string]store.Node) []Problem {
 	for _, id := range r.NodeIDs {
 		if _, ok := nodes[id]; !ok {
-			return []Problem{{path + ".node_ids", "候选节点不存在或不属于你：" + id}}
+			return []Problem{prob(path+".node_ids", "候选节点不存在或不属于你：{id}", "id", id)}
 		}
 	}
 	if rt, ok := unplaceable(r.RuntimeList(), r.NodeIDs, nodes); ok && !anyPlaceable(r.RuntimeList(), r.NodeIDs, nodes) {
-		return []Problem{{path + ".node_ids", rt.Title + " 岗位不能派到 sandbox 或 none 隔离级别的节点（需要 agent_user 或 isolated）"}}
+		return []Problem{prob(path+".node_ids", "{runtime} 岗位不能派到 sandbox 或 none 隔离级别的节点（需要 agent_user 或 isolated）", "runtime", rt.Title)}
 	}
 	return nil
 }
@@ -308,13 +320,6 @@ func anyPlaceable(list, nodeIDs []string, nodes map[string]store.Node) bool {
 		}
 	}
 	return false
-}
-
-func otherRuntimesNote(list []string) string {
-	if len(list) > 1 {
-		return "，这个岗位只会用其他 agent"
-	}
-	return ""
 }
 
 // Isolated reports whether a node may run runtimes that need isolation (Codex, architecture.md §10.3).
@@ -356,10 +361,14 @@ func roleWarnings(r store.Role, nodes map[string]store.Node) []Warning {
 		}
 	}
 	if len(live) < len(r.NodeIDs) {
-		out = append(out, Warning{r.Role, "候选节点已删除"})
+		out = append(out, warn(r.Role, msg.T("候选节点已删除")))
 	}
 	if rt, ok := unplaceable(r.RuntimeList(), live, nodes); ok {
-		out = append(out, Warning{r.Role, rt.Title + " 没有 agent_user 或 isolated 节点" + otherRuntimesNote(r.RuntimeList())})
+		key := "{runtime} 没有 agent_user 或 isolated 节点"
+		if len(r.RuntimeList()) > 1 {
+			key = "{runtime} 没有 agent_user 或 isolated 节点，这个岗位只会用其他 agent"
+		}
+		out = append(out, warn(r.Role, msg.T(key, "runtime", rt.Title)))
 	}
 	return out
 }

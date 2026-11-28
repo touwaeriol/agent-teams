@@ -18,6 +18,15 @@ func TestText(t *testing.T) {
 	if got := Of(err); got.Key != "仓库 {repo} 不存在" || got.Params["repo"] != "o/r" {
 		t.Fatalf("Of = %+v", got)
 	}
+	nested := T("{host} 解析到 {why}", "host", "h", "why", T("回环地址"))
+	if nested.String() != "h 解析到 回环地址" || nested.Nested["why"].Key != "回环地址" {
+		t.Fatalf("nested = %+v", nested)
+	}
+	base := Err("连接超时")
+	w := fmt.Errorf("x: %w", Wrap(base, "连接 {addr} 超时", "addr", "h:22"))
+	if !errors.Is(w, base) || Of(w).String() != "连接 h:22 超时" {
+		t.Fatalf("wrap = %v %+v", errors.Is(w, base), Of(w))
+	}
 	if got := Of(errors.New("boom")); got.Key != "boom" || got.Params != nil {
 		t.Fatalf("plain = %+v", got)
 	}

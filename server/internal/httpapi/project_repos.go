@@ -186,14 +186,14 @@ func (s *Server) checkStandaloneRepo(ctx context.Context, userID, id, want strin
 	}
 	remote, err := s.GitRemote(ctx, userID, g)
 	if err != nil {
-		return store.ProjectRepo{}, fail(http.StatusConflict, "credential_unreadable", err.Error())
+		return store.ProjectRepo{}, failErr(http.StatusConflict, "credential_unreadable", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, gitTestTimeout)
 	defer cancel()
 	refs, err := s.gitRunner().LsRemote(ctx, remote)
 	if err != nil {
-		_, msg := gitTestError(err)
-		return store.ProjectRepo{}, failf(http.StatusBadGateway, "git_failed", "读取仓库 {repo} 的分支失败：{reason}", "repo", g.Slug, "reason", msg)
+		_, why := gitTestError(err)
+		return store.ProjectRepo{}, failf(http.StatusBadGateway, "git_failed", "读取仓库 {repo} 的分支失败：{reason}", "repo", g.Slug, "reason", why)
 	}
 	base, err := standaloneBase(g.Slug, want, refs)
 	if err != nil {

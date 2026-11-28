@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 )
 
 // The console reads and writes a volume (the project's 共享文件 page, importing old shared files)
@@ -41,9 +43,9 @@ type Files interface {
 
 var (
 	// ErrNoFile is a path with nothing at it.
-	ErrNoFile = errors.New("没有这个文件或目录")
+	ErrNoFile = msg.Err("没有这个文件或目录")
 	// ErrBadPath is a path that is not a clean relative path.
-	ErrBadPath = errors.New("路径不合法")
+	ErrBadPath = msg.Err("路径不合法")
 )
 
 // MaxPathBytes bounds a path inside a volume.

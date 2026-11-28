@@ -79,7 +79,7 @@ func githubErr(err error) error {
 	case errors.As(err, &ge):
 		return fail(http.StatusUnprocessableEntity, "github", ge.Message)
 	case errors.Is(err, github.ErrNoApp), errors.Is(err, auth.ErrUnseal), errors.Is(err, auth.ErrNoSecret):
-		return fail(http.StatusConflict, "github_config", err.Error())
+		return failErr(http.StatusConflict, "github_config", err)
 	}
 	return err
 }

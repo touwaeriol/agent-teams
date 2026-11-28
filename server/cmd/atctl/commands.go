@@ -118,8 +118,8 @@ func resetPassword(ctx context.Context, db *store.Store, args []string) error {
 	password, temporary := auth.RandomPassword(), true
 	if len(args) > 1 {
 		password, temporary = args[1], false
-		if reason := auth.CheckPassword(password); reason != "" {
-			return errors.New(reason)
+		if err := auth.CheckPassword(password); err != nil {
+			return err
 		}
 	}
 	hash, err := auth.HashPassword(password)

@@ -2980,6 +2980,10 @@
           },
           "ok": {
             "type": "boolean"
+          },
+          "text": {
+            "$ref": "#/components/schemas/Text",
+            "description": "Translatable form of message"
           }
         },
         "required": [
@@ -7159,6 +7163,10 @@
           "ok": {
             "description": "The host key matched (or was pinned now) and the credential logged in",
             "type": "boolean"
+          },
+          "text": {
+            "$ref": "#/components/schemas/Text",
+            "description": "Translatable form of message"
           }
         },
         "required": [
@@ -8010,6 +8018,13 @@
           "key": {
             "description": "Message key: the Simplified Chinese text with {name} placeholders",
             "type": "string"
+          },
+          "nested": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Text"
+            },
+            "description": "Params that are messages themselves (translate them too; params holds their Chinese)",
+            "type": "object"
           },
           "params": {
             "additionalProperties": {
@@ -9631,6 +9646,10 @@
           },
           "role": {
             "type": "string"
+          },
+          "text": {
+            "$ref": "#/components/schemas/Text",
+            "description": "Translatable form of message"
           }
         },
         "required": [

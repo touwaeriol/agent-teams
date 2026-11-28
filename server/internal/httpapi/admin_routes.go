@@ -126,8 +126,8 @@ func (s *Server) adminCreateUser(ctx context.Context, in *adminCreateUserInput) 
 	}
 	b := in.Body
 	email := auth.NormalizeEmail(b.Email)
-	if reason := auth.CheckEmail(email); reason != "" {
-		return nil, fail(http.StatusUnprocessableEntity, "invalid_email", reason)
+	if err := auth.CheckEmail(email); err != nil {
+		return nil, failErr(http.StatusUnprocessableEntity, "invalid_email", err)
 	}
 	role := b.Role
 	if role == "" {
@@ -136,8 +136,8 @@ func (s *Server) adminCreateUser(ctx context.Context, in *adminCreateUserInput) 
 	password, generated := b.Password, b.Password == ""
 	if generated {
 		password = auth.RandomPassword()
-	} else if reason := auth.CheckPassword(password); reason != "" {
-		return nil, fail(http.StatusUnprocessableEntity, "weak_password", reason)
+	} else if err := auth.CheckPassword(password); err != nil {
+		return nil, failErr(http.StatusUnprocessableEntity, "weak_password", err)
 	}
 	mustChange := b.MustChangePassword == nil || *b.MustChangePassword
 	hash, err := auth.HashPassword(password)
@@ -251,7 +251,7 @@ func (s *Server) adminDeleteUser(ctx context.Context, in *userIDInput) (*struct{
 	// The folder first: when it is being switched on the deletion is refused before anything else
 	// happened to the account.
 	if err := s.hooks.UserDeleting(ctx, in.ID); err != nil {
-		return nil, fail(http.StatusConflict, "folder_busy", err.Error())
+		return nil, failErr(http.StatusConflict, "folder_busy", err)
 	}
 	s.cutOff(ctx, in.ID)
 	// Grouping rules first: if deleting the row then fails, a retry finishes the job and no

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/touwaeriol/agent-teams/server/internal/msg"
 	"github.com/touwaeriol/agent-teams/server/internal/skills"
 )
 
@@ -80,11 +81,14 @@ type Package struct {
 }
 
 // Problem is a validation error shown to the user.
-type Problem struct{ msg string }
+type Problem struct{ text msg.Text }
 
-func (p Problem) Error() string { return p.msg }
+func (p Problem) Error() string { return p.text.String() }
 
-func problem(format string, a ...any) error { return Problem{fmt.Sprintf(format, a...)} }
+// Msg is the translatable message (msg.Of).
+func (p Problem) Msg() msg.Text { return p.text }
+
+func problem(key string, kv ...any) error { return Problem{msg.T(key, kv...)} }
 
 // IsProblem reports whether err is a validation error.
 func IsProblem(err error) bool {
@@ -117,7 +121,7 @@ func Parse(files []File) (Package, error) {
 
 func checkFiles(files []File) (int, error) {
 	if len(files) == 0 || len(files) > MaxFiles {
-		return 0, problem("插件需要 1 到 %d 个文件", MaxFiles)
+		return 0, problem("插件需要 1 到 {n} 个文件", "n", MaxFiles)
 	}
 	total := 0
 	seen := map[string]bool{}
@@ -127,15 +131,15 @@ func checkFiles(files []File) (int, error) {
 			return 0, err
 		}
 		if seen[f.Path] {
-			return 0, problem("文件重复：%s", f.Path)
+			return 0, problem("文件重复：{path}", "path", f.Path)
 		}
 		seen[f.Path] = true
 		if total += n; total > MaxBytes {
-			return 0, problem("插件文件合计不能超过 %d KB", MaxBytes>>10)
+			return 0, problem("插件文件合计不能超过 {kb} KB", "kb", MaxBytes>>10)
 		}
 	}
 	if p := dirConflict(seen); p != "" {
-		return 0, problem("%s 既是文件又是目录", p)
+		return 0, problem("{path} 既是文件又是目录", "path", p)
 	}
 	return total, nil
 }
@@ -156,14 +160,14 @@ func dirConflict(paths map[string]bool) string {
 // checkFile validates one file and returns its decoded size.
 func checkFile(f File) (int, error) {
 	if !ValidPath(f.Path) {
-		return 0, problem("文件路径不合法：%q（只能是相对路径，不能含 . 或 .. 段）", f.Path)
+		return 0, problem("文件路径不合法：“{path}”（只能是相对路径，不能含 . 或 .. 段）", "path", f.Path)
 	}
 	n, err := decodedSize(f)
 	if err != nil {
 		return 0, err
 	}
 	if n > MaxFileBytes {
-		return 0, problem("%s 超过 %d KB", f.Path, MaxFileBytes>>10)
+		return 0, problem("{path} 超过 {kb} KB", "path", f.Path, "kb", MaxFileBytes>>10)
 	}
 	return n, nil
 }
@@ -185,17 +189,17 @@ func decodedSize(f File) (int, error) {
 	switch f.Encoding {
 	case "", "utf8":
 		if !utf8.ValidString(f.Content) {
-			return 0, problem("%s 不是 UTF-8 文本，二进制文件需要 base64", f.Path)
+			return 0, problem("{path} 不是 UTF-8 文本，二进制文件需要 base64", "path", f.Path)
 		}
 		return len(f.Content), nil
 	case "base64":
 		raw, err := base64.StdEncoding.DecodeString(f.Content)
 		if err != nil {
-			return 0, problem("%s 的 base64 内容无效", f.Path)
+			return 0, problem("{path} 的 base64 内容无效", "path", f.Path)
 		}
 		return len(raw), nil
 	}
-	return 0, problem("%s 的编码只能是 utf8 或 base64", f.Path)
+	return 0, problem("{path} 的编码只能是 utf8 或 base64", "path", f.Path)
 }
 
 // textOf returns a file's text; binary files have none.
@@ -226,7 +230,7 @@ func (m manifest) str(key string) (string, error) {
 	}
 	var s string
 	if err := json.Unmarshal(v, &s); err != nil {
-		return "", problem("plugin.json 的 %s 必须是字符串", key)
+		return "", problem("plugin.json 的 {key} 必须是字符串", "key", key)
 	}
 	return strings.TrimSpace(s), nil
 }
@@ -238,7 +242,7 @@ func readManifest(byPath map[string]File) (Package, manifest, error) {
 	f, ok := byPath[ManifestPath]
 	text, isText := textOf(f)
 	if !ok || !isText {
-		return Package{}, manifest{}, problem("插件根目录需要 %s", ManifestPath)
+		return Package{}, manifest{}, problem("插件根目录需要 {name}", "name", ManifestPath)
 	}
 	m := manifest{}
 	if err := json.Unmarshal([]byte(text), &m.raw); err != nil || m.raw == nil {
@@ -246,7 +250,7 @@ func readManifest(byPath map[string]File) (Package, manifest, error) {
 	}
 	for _, key := range unsupported {
 		if _, ok := m.raw[key]; ok {
-			return Package{}, m, problem("暂不支持 plugin.json 里的 %s 字段：请把文件放在默认目录（skills/、commands/、agents/）", key)
+			return Package{}, m, problem("暂不支持 plugin.json 里的 {key} 字段：请把文件放在默认目录（skills/、commands/、agents/）", "key", key)
 		}
 	}
 	return manifestFields(m)
@@ -258,10 +262,10 @@ func manifestFields(m manifest) (Package, manifest, error) {
 		return Package{}, m, err
 	}
 	if !namePattern.MatchString(name) {
-		return Package{}, m, problem("plugin.json 需要 name（小写字母、数字和 -，最多 64 个字符），现在是 %q", name)
+		return Package{}, m, problem("plugin.json 需要 name（小写字母、数字和 -，最多 64 个字符），现在是 “{name}”", "name", name)
 	}
 	if name == Reserved {
-		return Package{}, m, problem("%s 是平台保留的名字", Reserved)
+		return Package{}, m, problem("{reserved} 是平台保留的名字", "reserved", Reserved)
 	}
 	version, err := m.str("version")
 	if err != nil || len(version) > 64 {
@@ -323,11 +327,11 @@ func classify(c *Contents, f File) error {
 
 func addSkill(c *Contents, dir string, f File) error {
 	if !itemPattern.MatchString(dir) {
-		return problem("技能目录名不合法：skills/%s", dir)
+		return problem("技能目录名不合法：skills/{dir}", "dir", dir)
 	}
 	text, _ := textOf(f)
 	if name := skills.FrontMatter(text)["name"]; name != "" && name != dir {
-		return problem("skills/%s/SKILL.md 的 name 是 %q，需要和目录名一致", dir, name)
+		return problem("skills/{dir}/SKILL.md 的 name 是 “{name}”，需要和目录名一致", "dir", dir, "name", name)
 	}
 	c.Skills = append(c.Skills, dir)
 	return nil
@@ -335,11 +339,11 @@ func addSkill(c *Contents, dir string, f File) error {
 
 func addCommand(c *Contents, parts []string) error {
 	if len(parts) != 2 {
-		return problem("命令文件只能直接放在 commands/ 下：%s", strings.Join(parts, "/"))
+		return problem("命令文件只能直接放在 commands/ 下：{path}", "path", strings.Join(parts, "/"))
 	}
 	name := strings.TrimSuffix(parts[1], ".md")
 	if !itemPattern.MatchString(name) {
-		return problem("命令文件名不合法：commands/%s", parts[1])
+		return problem("命令文件名不合法：commands/{file}", "file", parts[1])
 	}
 	c.Commands = append(c.Commands, name)
 	return nil
@@ -347,7 +351,7 @@ func addCommand(c *Contents, parts []string) error {
 
 func addAgent(c *Contents, parts []string, f File) error {
 	if len(parts) != 2 {
-		return problem("子代理文件只能直接放在 agents/ 下：%s", strings.Join(parts, "/"))
+		return problem("子代理文件只能直接放在 agents/ 下：{path}", "path", strings.Join(parts, "/"))
 	}
 	text, _ := textOf(f)
 	name := skills.FrontMatter(text)["name"]
@@ -355,7 +359,7 @@ func addAgent(c *Contents, parts []string, f File) error {
 		name = strings.TrimSuffix(parts[1], ".md")
 	}
 	if !itemPattern.MatchString(name) {
-		return problem("子代理名字不合法：%s", name)
+		return problem("子代理名字不合法：{name}", "name", name)
 	}
 	c.Agents = append(c.Agents, name)
 	return nil
@@ -371,7 +375,7 @@ func hasHooks(byPath map[string]File, m manifest) (bool, error) {
 	var p string
 	if json.Unmarshal(raw, &p) == nil {
 		if _, ok := byPath[cleanRef(p)]; !ok {
-			return false, problem("plugin.json 的 hooks 指向的文件不存在：%s", p)
+			return false, problem("plugin.json 的 hooks 指向的文件不存在：{path}", "path", p)
 		}
 		return true, nil
 	}
@@ -416,7 +420,7 @@ func manifestMCP(raw json.RawMessage, byPath map[string]File) ([]byte, error) {
 	}
 	f, ok := byPath[cleanRef(p)]
 	if !ok {
-		return nil, problem("plugin.json 的 mcpServers 指向的文件不存在：%s", p)
+		return nil, problem("plugin.json 的 mcpServers 指向的文件不存在：{path}", "path", p)
 	}
 	text, _ := textOf(f)
 	return []byte(text), nil
@@ -444,17 +448,17 @@ func addServers(c *Contents, src []byte) error {
 
 func addServer(c *Contents, name string, raw json.RawMessage) error {
 	if !serverPattern.MatchString(name) {
-		return problem("MCP 服务器名不合法：%q", name)
+		return problem("MCP 服务器名不合法：“{name}”", "name", name)
 	}
 	if _, dup := c.MCPServers[name]; dup {
-		return problem("MCP 服务器重复：%s", name)
+		return problem("MCP 服务器重复：{name}", "name", name)
 	}
 	if len(c.MCPServers) >= MaxMCPServers {
-		return problem("一个插件最多 %d 个 MCP 服务器", MaxMCPServers)
+		return problem("一个插件最多 {n} 个 MCP 服务器", "n", MaxMCPServers)
 	}
 	var s MCPServer
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return problem("MCP 服务器 %s 的配置无效", name)
+		return problem("MCP 服务器 {name} 的配置无效", "name", name)
 	}
 	s, err := normalizeServer(name, s)
 	if err != nil {
@@ -474,16 +478,16 @@ func normalizeServer(name string, s MCPServer) (MCPServer, error) {
 	switch s.Type {
 	case "stdio":
 		if strings.TrimSpace(s.Command) == "" {
-			return s, problem("MCP 服务器 %s 需要 command", name)
+			return s, problem("MCP 服务器 {name} 需要 command", "name", name)
 		}
 		s.URL, s.Headers = "", nil
 	case "http", "sse":
 		if !strings.HasPrefix(s.URL, "https://") && !strings.HasPrefix(s.URL, "http://") {
-			return s, problem("MCP 服务器 %s 需要 http(s) 地址", name)
+			return s, problem("MCP 服务器 {name} 需要 http(s) 地址", "name", name)
 		}
 		s.Command, s.Args, s.Env = "", nil, nil
 	default:
-		return s, problem("MCP 服务器 %s 的类型只能是 stdio、http 或 sse", name)
+		return s, problem("MCP 服务器 {name} 的类型只能是 stdio、http 或 sse", "name", name)
 	}
 	return s, nil
 }
